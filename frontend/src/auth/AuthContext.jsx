@@ -129,9 +129,13 @@ function AuthProvider({ children }) {
     setLoading(true);
     try {
       const data = await loginRequest({ tenantCode, username, password });
+      const nextAccessToken = data.data.access_token;
+      const nextRefreshToken = data.data.refresh_token;
+      const nextRole = getRoleFromToken(nextAccessToken);
+
       applyTokens({
-        accessToken: data.data.access_token,
-        refreshToken: data.data.refresh_token
+        accessToken: nextAccessToken,
+        refreshToken: nextRefreshToken
       });
 
       const caps = data.data.user?.capabilities || null;
@@ -148,7 +152,7 @@ function AuthProvider({ children }) {
       const disp = data.data?.user?.displayName || null;
       setDisplayName(disp);
 
-      if (getRoleFromToken(data.data.access_token) === "BP" && !mustChange) {
+      if (nextRole === "BP" && !mustChange) {
         try {
           const mine = await getMyBusinessPartner();
           const id = mine?.data?.id || null;
@@ -163,7 +167,7 @@ function AuthProvider({ children }) {
         setStoredPartnerId(null);
       }
 
-      if (getRoleFromToken(data.data.access_token) === "FRANCHISE") {
+      if (nextRole === "FRANCHISE") {
         if (!mustChange) {
           try {
             const mine = await getMyFranchise();
@@ -191,6 +195,11 @@ function AuthProvider({ children }) {
             setStoredBranding(null);
           });
       }
+
+      return {
+        mustChangePassword: mustChange,
+        role: nextRole
+      };
     } finally {
       setLoading(false);
     }
@@ -202,6 +211,13 @@ function AuthProvider({ children }) {
       refreshToken: refreshSession,
       logout,
       onForbidden: (code) => {
+        if (code === "MUST_CHANGE_PASSWORD") {
+          setMustChangePassword(true);
+          setStoredMustChangePassword(true);
+          navigate("/change-password", { replace: true });
+          return;
+        }
+
         if (code === "SUBSCRIPTION_EXPIRED") {
           setSubscriptionBlocked(true);
           setStoredSubscriptionBlocked(true);

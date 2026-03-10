@@ -31,8 +31,8 @@ function LoginPage() {
     }
 
     try {
-      await login({ username, password });
-      navigate("/", { replace: true });
+      const result = await login({ username, password });
+      navigate(result?.mustChangePassword ? "/change-password" : "/", { replace: true });
     } catch (e) {
       const status = e?.response?.status;
       const errorCode = e?.response?.data?.error_code;

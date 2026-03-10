@@ -145,11 +145,11 @@ function setupApiInterceptors({ getAccessToken, refreshToken, logout, onForbidde
         logout();
       }
 
+      const errorCode = error.response?.data?.error_code;
       if (status === 403 && typeof onForbidden === "function") {
-        onForbidden();
+        onForbidden(errorCode);
       }
 
-      const errorCode = error.response?.data?.error_code;
       if ((status === 402 || errorCode === "SUBSCRIPTION_EXPIRED") && typeof onForbidden === "function") {
         // Reuse forbidden handler for routing, but keep code check separate.
         onForbidden("SUBSCRIPTION_EXPIRED");

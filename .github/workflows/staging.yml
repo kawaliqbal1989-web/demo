@@ -1,0 +1,70 @@
+name: Staging Deploy
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  staging:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: abacusweb_staging
+          MYSQL_USER: abacus
+          MYSQL_PASSWORD: abacus
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ppassword" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install backend dependencies
+        run: |
+          npm ci
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend && npm ci
+
+      - name: Run backend tests
+        run: |
+          npm test
+
+      - name: Build frontend
+        run: |
+          cd frontend && npm run build
+
+      - name: Build backend image
+        run: |
+          docker build -t abacus-backend:staging .
+
+      - name: Build frontend image
+        run: |
+          docker build -t abacus-frontend:staging -f frontend/Dockerfile --build-arg VITE_API_BASE_URL=${{ vars.API_BASE_URL }} frontend
+
+      - name: Run Prisma migrations
+        env:
+          DATABASE_URL: "mysql://abacus:abacus@127.0.0.1:3307/abacusweb_staging"
+        run: |
+          npx prisma migrate deploy
+
+      - name: Push images to registry
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login ${{ vars.REGISTRY_URL }} -u ${{ secrets.REGISTRY_USERNAME }} --password-stdin
+          docker tag abacus-backend:staging ${{ vars.REGISTRY_URL }}/abacus-backend:staging
+          docker tag abacus-frontend:staging ${{ vars.REGISTRY_URL }}/abacus-frontend:staging
+          docker push ${{ vars.REGISTRY_URL }}/abacus-backend:staging
+          docker push ${{ vars.REGISTRY_URL }}/abacus-frontend:staging

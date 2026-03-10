@@ -1,0 +1,47 @@
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    container_name: abacus_mysql_staging
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: abacusweb_staging
+      MYSQL_USER: ${MYSQL_USER:-abacus}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+    volumes:
+      - abacus_mysql_staging_data:/var/lib/mysql
+    networks:
+      - abacus_net
+    # No host port binding — access DB only through the Docker network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: abacus_backend_staging
+    depends_on:
+      - db
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=staging
+      - PORT=4000
+      - DATABASE_URL=mysql://${MYSQL_USER:-abacus}:${MYSQL_PASSWORD}@db:3306/abacusweb_staging
+      - DATABASE_URL_STAGING=mysql://${MYSQL_USER:-abacus}:${MYSQL_PASSWORD}@db:3306/abacusweb_staging
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?Set JWT_ACCESS_SECRET in .env}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET in .env}
+      - JWT_ISSUER=abacusweb-backend
+      - JWT_AUDIENCE=abacusweb-api
+      - AUTH_RATE_LIMIT_WINDOW_MS=900000
+      - AUTH_RATE_LIMIT_MAX=200
+    ports:
+      - "4001:4000"
+    networks:
+      - abacus_net
+
+volumes:
+  abacus_mysql_staging_data:
+
+networks:
+  abacus_net:
+    driver: bridge

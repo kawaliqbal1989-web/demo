@@ -1,0 +1,23 @@
+-- Idempotent migration: add extended teacher profile fields
+-- Run against the target DB (example: abacusweb_staging)
+
+ALTER TABLE `TeacherProfile`
+  ADD COLUMN IF NOT EXISTS `joiningDate` DATETIME(3) NULL,
+  ADD COLUMN IF NOT EXISTS `qualification` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `experienceYears` INT NULL,
+  ADD COLUMN IF NOT EXISTS `specialization` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `phoneAlternate` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `whatsappNumber` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `address` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `city` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `state` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `pincode` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `emergencyContactName` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `emergencyContactPhone` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `emergencyContactRelation` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `photoUrl` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `notes` TEXT NULL,
+  ADD COLUMN IF NOT EXISTS `preferredLanguage` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `employmentType` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `salaryType` VARCHAR(191) NULL,
+  ADD COLUMN IF NOT EXISTS `isProbation` BOOLEAN NULL;

@@ -1,0 +1,10 @@
+const ROLES = {
+  SUPERADMIN: "SUPERADMIN",
+  BP: "BP",
+  FRANCHISE: "FRANCHISE",
+  CENTER: "CENTER",
+  TEACHER: "TEACHER",
+  STUDENT: "STUDENT"
+};
+
+export { ROLES };

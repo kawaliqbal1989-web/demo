@@ -10,7 +10,7 @@ function mapPrismaError(error) {
   if (name.includes("PrismaClientInitializationError") || name.includes("PrismaClientRustPanicError")) {
     return {
       statusCode: 503,
-      errorCode: "DATABASE_UNAVAILABLE",
+      errorCode: "DATABASE_UNAVAILABLE1",
       message: "Database unavailable"
     };
   }
@@ -18,7 +18,7 @@ function mapPrismaError(error) {
   if (code.startsWith("P10") || /Can\s*not\s*reach\s*database|ECONNREFUSED|Connection\s*refused/i.test(message)) {
     return {
       statusCode: 503,
-      errorCode: "DATABASE_UNAVAILABLE",
+      errorCode: "DATABASE_UNAVAILABLE2",
       message: "Database unavailable"
     };
   }

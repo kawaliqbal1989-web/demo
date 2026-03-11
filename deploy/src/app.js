@@ -105,7 +105,7 @@ app.get("/health/db", async (_req, res) => {
     await prisma.tenant.findFirst({ select: { id: true } });
     return res.apiSuccess("Database healthy", { status: "ok" });
   } catch (error) {
-    return res.apiError(503, "Database unavailable", "DATABASE_UNAVAILABLE");
+    return res.apiError(503, "Database unavailable", "DATABASE_UNAVAILABLE3");
   }
 });
 

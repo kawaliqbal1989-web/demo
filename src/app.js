@@ -12,7 +12,7 @@ import { prisma } from "./lib/prisma.js";
 import { verifyAccessToken } from "./utils/token.js";
 
 
-console.log(env,"checkingenvvvvv")
+console.log("atartttt",env,"checkingenvvvvv")
 
 const app = express();
 
@@ -30,7 +30,7 @@ console.log(productionCorsAllowedOrigins,"ssseee")
 app.use(helmet());
 app.use(
   cors({
-    origin:env.productionCorsAllowedOrigins,
+    origin:productionCorsAllowedOrigins,
     // origin: (origin, callback) => {
     //   if (!origin) {
     //     return callback(null, true);

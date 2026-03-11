@@ -1,10 +1,21 @@
-import { useContext, useMemo, useState } from "react";
+import { Suspense, lazy, useContext, useEffect, useMemo, useState } from "react";
 import { MetricCard } from "../../components/MetricCard";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { ErrorState } from "../../components/ErrorState";
+import { PageHeader } from "../../components/PageHeader";
+import { InsightPanel } from "../../components/InsightCard";
+import { NetworkPulseCard, CenterRanking } from "../../components/LeadershipIntel";
+import { AutomationPanel } from "../../components/NotificationWidgets";
+import { getInsights } from "../../services/insightsService";
+import { getSuperadminNetworkPulse } from "../../services/leadershipIntelService";
 import { useAuth } from "../../hooks/useAuth";
 import { createBusinessPartner } from "../../services/businessPartnersService";
 import { recordDashboardAction } from "../../services/superadminService";
 import { SuperadminDashboardProvider, SuperadminDashboardContext } from "./dashboard/SuperadminDashboardContext";
+import { CommandCenterAi } from "../../components/AiNarrativeSurfaces";
+import { ReleaseWaveSummary } from "../../components/ReleaseManagement";
+
+const DashboardCharts = lazy(() => import("./dashboard/DashboardCharts"));
 
 function formatNumber(value) {
   const num = Number(value);
@@ -34,16 +45,6 @@ function getApiErrorMessage(error) {
     return `(${status}) ${message || "Request failed"}`;
   }
   return message || "Request failed";
-}
-
-function SkeletonCard() {
-  return (
-    <div className="card dash-skeleton" aria-hidden="true">
-      <div className="dash-skeleton__line" style={{ width: "55%" }} />
-      <div className="dash-skeleton__line" style={{ width: "35%", height: 24 }} />
-      <div className="dash-skeleton__line" style={{ width: "70%" }} />
-    </div>
-  );
 }
 
 function CreateBusinessPartnerModal({ open, onClose, onCreated }) {
@@ -190,6 +191,24 @@ function SuperadminDashboardInner() {
   const { capabilities } = useAuth();
   const { data, history, loading, error, lastUpdatedAt, fetchKpis } = useContext(SuperadminDashboardContext);
   const [createOpen, setCreateOpen] = useState(false);
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [networkPulse, setNetworkPulse] = useState(null);
+  const [networkPulseLoading, setNetworkPulseLoading] = useState(true);
+
+  useEffect(() => {
+    setInsightsLoading(true);
+    getInsights()
+      .then((res) => setInsights(res.data?.insights || []))
+      .catch(() => {})
+      .finally(() => setInsightsLoading(false));
+
+    setNetworkPulseLoading(true);
+    getSuperadminNetworkPulse()
+      .then((res) => setNetworkPulse(res.data || null))
+      .catch(() => {})
+      .finally(() => setNetworkPulseLoading(false));
+  }, []);
 
   const canView = capabilities ? Boolean(capabilities?.canViewDashboard) : true;
   const canCreatePartner = Boolean(capabilities?.canCreateBusinessPartner);
@@ -225,15 +244,10 @@ function SuperadminDashboardInner() {
 
   return (
     <div className="superadmin-dashboard">
-      <div className="dash-header">
-        <div>
-          <h1 style={{ margin: 0 }}>Dashboard</h1>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 6 }}>
-            {lastUpdatedAt ? `Last updated: ${lastUpdatedAt.toLocaleTimeString()}` : ""}
-          </div>
-        </div>
-
-        <div className="dash-header__actions">
+      <PageHeader
+        title="Dashboard"
+        subtitle={lastUpdatedAt ? `Last updated: ${lastUpdatedAt.toLocaleTimeString()}` : ""}
+        actions={
           <button
             type="button"
             className="button secondary"
@@ -243,8 +257,8 @@ function SuperadminDashboardInner() {
           >
             {loading ? "Refreshing..." : "Refresh"}
           </button>
-        </div>
-      </div>
+        }
+      />
 
       {error && !data ? (
         <ErrorState
@@ -255,56 +269,113 @@ function SuperadminDashboardInner() {
         />
       ) : null}
 
+      <InsightPanel
+        insights={insights}
+        loading={insightsLoading}
+        onDismiss={(id) => setInsights((prev) => prev.filter((i) => i.id !== id))}
+      />
+
+      <CommandCenterAi />
+
+      <div className="intel-grid">
+        <NetworkPulseCard data={networkPulse} loading={networkPulseLoading} roleLabel="Platform" />
+        <CenterRanking
+          topCenters={networkPulse?.topCenters}
+          bottomCenters={networkPulse?.bottomCenters}
+          loading={networkPulseLoading}
+        />
+      </div>
+
+      <AutomationPanel />
+
+      <ReleaseWaveSummary />
+
       <section aria-label="KPI Statistics" className="dash-section">
         <h2 style={{ marginTop: 0 }}>KPI Statistics</h2>
         <div className="dash-kpi-grid" role="list">
           {!metrics && loading ? (
-            Array.from({ length: 8 }).map((_, idx) => <SkeletonCard key={idx} />)
+            <SkeletonLoader variant="card" count={8} />
           ) : (
             <>
               <MetricCard
                 label="Active Business Partners"
                 value={formatNumber(metrics?.activeBusinessPartners)}
                 sublabel={getDelta("activeBusinessPartners")}
+                icon="🏢"
+                accent="var(--role-superadmin)"
               />
               <MetricCard
                 label="Active Students"
                 value={formatNumber(metrics?.activeStudents)}
                 sublabel={getDelta("activeStudents")}
+                icon="👥"
               />
               <MetricCard
                 label="Active Center Users"
                 value={formatNumber(metrics?.activeCenterUsers)}
                 sublabel={getDelta("activeCenterUsers")}
+                icon="🏫"
               />
               <MetricCard
                 label="Active Franchise Users"
                 value={formatNumber(metrics?.activeFranchiseUsers)}
                 sublabel={getDelta("activeFranchiseUsers")}
+                icon="🏢"
               />
               <MetricCard
                 label="Active Competitions"
                 value={formatNumber(metrics?.activeCompetitions)}
                 sublabel={getDelta("activeCompetitions")}
+                icon="🏆"
               />
               <MetricCard
                 label="Pending Competition Approvals"
                 value={formatNumber(metrics?.pendingCompetitionApprovals)}
                 sublabel={getDelta("pendingCompetitionApprovals")}
+                icon="⏳"
+                accent="#d97706"
               />
               <MetricCard
                 label="Open Abuse Flags"
                 value={formatNumber(metrics?.openAbuseFlags)}
                 sublabel={getDelta("openAbuseFlags")}
+                icon="⚠️"
+                accent="#dc2626"
               />
               <MetricCard
                 label="Gross Revenue (MTD)"
                 value={formatCurrencyInr(metrics?.grossRevenueMtd)}
                 sublabel={getDelta("grossRevenueMtd")}
+                icon="💰"
+                accent="#16a34a"
               />
             </>
           )}
         </div>
+      </section>
+
+      <section aria-label="Analytics" className="dash-section">
+        <div style={{ display: "grid", gap: 6, marginBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>Analytics</h2>
+          <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: 13 }}>
+            Trend analysis for key metrics and system health is now part of the dashboard.
+          </p>
+        </div>
+
+        {loading && !data ? (
+          <SkeletonLoader variant="detail" />
+        ) : error && !data ? (
+          <ErrorState
+            title="Analytics unavailable"
+            message={getApiErrorMessage(error)}
+            onRetry={() => fetchKpis({ reason: "retry" })}
+            retryLabel="Retry"
+          />
+        ) : (
+          <Suspense fallback={<SkeletonLoader variant="card" count={2} />}>
+            <DashboardCharts data={data} history={history} />
+          </Suspense>
+        )}
       </section>
 
       <section aria-label="Quick Actions" className="dash-section">

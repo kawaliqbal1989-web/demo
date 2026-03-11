@@ -22,10 +22,10 @@ import { SuperadminPracticeFeaturesPage } from "../modules/superadmin/Superadmin
 import { SuperadminCoursesPage } from "../modules/superadmin/SuperadminCoursesPage";
 import { SuperadminCourseLevelsPage } from "../modules/superadmin/SuperadminCourseLevelsPage";
 import { SuperadminCourseLevelEnginePage } from "../modules/superadmin/SuperadminCourseLevelEnginePage";
+import { ReleaseManagement } from "../components/ReleaseManagement";
 import { SuperadminCourseLevelQuestionBankPage } from "../modules/superadmin/SuperadminCourseLevelQuestionBankPage";
 import { SuperadminCourseLevelWorksheetsPage } from "../modules/superadmin/SuperadminCourseLevelWorksheetsPage";
 import { SuperadminDashboard } from "../modules/superadmin/SuperadminDashboard";
-import { AnalyticsDashboard } from "../modules/superadmin/AnalyticsDashboard";
 import { ReportsPage } from "../modules/superadmin/ReportsPage";
 import { AbuseFlagsPage } from "../modules/superadmin/AbuseFlagsPage";
 import { SuperadminExamCyclesPage } from "../modules/superadmin/SuperadminExamCyclesPage";
@@ -158,7 +158,7 @@ function AppRouter() {
 
           <Route element={<RoleRoute allowedRoles={[ROLES.SUPERADMIN]} />}>
             <Route path="/superadmin/dashboard" element={<SuperadminDashboard />} />
-            <Route path="/superadmin/analytics" element={<AnalyticsDashboard />} />
+            <Route path="/superadmin/analytics" element={<Navigate to="/superadmin/dashboard" replace />} />
             <Route path="/superadmin/reports" element={<ReportsPage />} />
             <Route path="/superadmin/overview" element={<Navigate to="/superadmin/dashboard" replace />} />
             <Route path="/superadmin/business-partners" element={<SuperadminBusinessPartnersPage />} />
@@ -189,6 +189,7 @@ function AppRouter() {
             <Route path="/superadmin/competition" element={<SuperadminCompetitionPage />} />
             <Route path="/superadmin/competition/:competitionId/pending" element={<SuperadminCompetitionPendingPage />} />
             <Route path="/superadmin/competition/:competitionId/results" element={<SuperadminCompetitionResultsPage />} />
+            <Route path="/superadmin/release" element={<ReleaseManagement />} />
           </Route>
 
           <Route element={<RoleRoute allowedRoles={[ROLES.CENTER]} />}>

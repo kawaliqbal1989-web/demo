@@ -48,6 +48,18 @@ const TEXT_ELEMENTS = new Set(["title", "subtitle", "studentName", "completionTe
 
 function clamp(val, min, max) { return Math.max(min, Math.min(max, val)); }
 
+function withAlpha(color, alpha) {
+  if (typeof color !== "string" || !color.startsWith("#")) {
+    return color;
+  }
+
+  const normalized = color.length === 4
+    ? `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`
+    : color;
+
+  return `${normalized}${alpha}`;
+}
+
 function CertificateVisualEditor({ layout, onChange, template }) {
   const canvasRef = useRef(null);
   const [elements, setElements] = useState(() => {
@@ -215,7 +227,7 @@ function CertificateVisualEditor({ layout, onChange, template }) {
             border: isSel ? `2px dashed ${color}` : "1px dashed transparent",
             borderRadius: 3,
             padding: "1px 4px",
-            background: isSel ? "rgba(255,255,255,0.8)" : "transparent",
+            background: isSel ? withAlpha(color, "1A") : "transparent",
             zIndex: isSel ? 20 : 5
           }}
         >
@@ -357,24 +369,24 @@ function CertificateVisualEditor({ layout, onChange, template }) {
               <label style={{ display: "grid", gap: 2 }}>
                 <span style={{ color: "var(--color-text-muted)" }}>X (mm)</span>
                 <input type="number" step="1" value={Math.round(sel.x)} onChange={(e) => updateElement(selected, { x: Number(e.target.value) })}
-                  style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%" }} />
+                  style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%", background: "var(--color-bg-card)", color: "var(--color-text-primary)" }} />
               </label>
               <label style={{ display: "grid", gap: 2 }}>
                 <span style={{ color: "var(--color-text-muted)" }}>Y (mm)</span>
                 <input type="number" step="1" value={Math.round(sel.y)} onChange={(e) => updateElement(selected, { y: Number(e.target.value) })}
-                  style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%" }} />
+                  style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%", background: "var(--color-bg-card)", color: "var(--color-text-primary)" }} />
               </label>
               {IMAGE_ELEMENTS.has(selected) && selected !== "background" ? (
                 <>
                   <label style={{ display: "grid", gap: 2 }}>
                     <span style={{ color: "var(--color-text-muted)" }}>Width (mm)</span>
                     <input type="number" step="1" value={Math.round(sel.w)} onChange={(e) => updateElement(selected, { w: Number(e.target.value) })}
-                      style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%" }} />
+                      style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%", background: "var(--color-bg-card)", color: "var(--color-text-primary)" }} />
                   </label>
                   <label style={{ display: "grid", gap: 2 }}>
                     <span style={{ color: "var(--color-text-muted)" }}>Height (mm)</span>
                     <input type="number" step="1" value={Math.round(sel.h)} onChange={(e) => updateElement(selected, { h: Number(e.target.value) })}
-                      style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%" }} />
+                      style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%", background: "var(--color-bg-card)", color: "var(--color-text-primary)" }} />
                   </label>
                 </>
               ) : null}
@@ -383,7 +395,7 @@ function CertificateVisualEditor({ layout, onChange, template }) {
                   <span style={{ color: "var(--color-text-muted)" }}>Font Size (pt)</span>
                   <input type="number" step="1" min="6" max="60" value={sel.fontSize || 14}
                     onChange={(e) => updateElement(selected, { fontSize: Number(e.target.value) })}
-                    style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%" }} />
+                    style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%", background: "var(--color-bg-card)", color: "var(--color-text-primary)" }} />
                 </label>
               ) : null}
               <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>

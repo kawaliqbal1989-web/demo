@@ -7,48 +7,57 @@ function getDb(dbClient) {
 function isMissingNotificationSchemaError(error) {
   // Only treat Prisma "table/column does not exist" errors as missing-schema.
   // P2021 = table does not exist, P2022 = column does not exist.
+  // Also treat PrismaClientValidationError (unknown field) as missing-schema.
   const code = String(error?.code || "").trim().toUpperCase();
-  return code === "P2021" || code === "P2022";
+  if (code === "P2021" || code === "P2022") return true;
+  if (error?.constructor?.name === "PrismaClientValidationError") return true;
+  if (String(error?.message || "").includes("Unknown field")) return true;
+  return false;
 }
 
 async function createNotification(payload, dbClient) {
   const db = getDb(dbClient);
 
   try {
-    const created = await db.notification.create({
+    return await db.notification.create({
       data: {
         tenantId: payload.tenantId,
         recipientUserId: payload.recipientUserId,
         type: payload.type,
+        priority: payload.priority || "NORMAL",
+        category: payload.category || "SYSTEM",
         title: payload.title,
         message: payload.message,
         entityType: payload.entityType || null,
-        entityId: payload.entityId || null
+        entityId: payload.entityId || null,
+        actionUrl: payload.actionUrl || null,
+        expiresAt: payload.expiresAt || null
       },
       select: {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        isRead: true,
-        createdAt: true
+        id: true, type: true, priority: true, category: true,
+        title: true, message: true, isRead: true, actionUrl: true, createdAt: true
       }
     });
-
-    return created;
   } catch (error) {
-    if (!isMissingNotificationSchemaError(error)) {
-      throw error;
+    if (!isMissingNotificationSchemaError(error)) throw error;
+    // Fallback: create with base fields only
+    try {
+      return await db.notification.create({
+        data: {
+          tenantId: payload.tenantId,
+          recipientUserId: payload.recipientUserId,
+          type: payload.type,
+          title: payload.title,
+          message: payload.message,
+          entityType: payload.entityType || null,
+          entityId: payload.entityId || null
+        },
+        select: { id: true, type: true, title: true, message: true, isRead: true, createdAt: true }
+      });
+    } catch (err2) {
+      if (!isMissingNotificationSchemaError(err2)) throw err2;
+      return { id: "", type: payload.type, title: payload.title, message: payload.message, isRead: false, createdAt: new Date().toISOString() };
     }
-
-    return {
-      id: "",
-      type: payload.type,
-      title: payload.title,
-      message: payload.message,
-      isRead: false,
-      createdAt: new Date().toISOString()
-    };
   }
 }
 
@@ -60,24 +69,40 @@ async function createBulkNotification(payloads, dbClient) {
   const db = getDb(dbClient);
 
   try {
-    const result = await db.notification.createMany({
-      data: payloads.map((payload) => ({
-        tenantId: payload.tenantId,
-        recipientUserId: payload.recipientUserId,
-        type: payload.type,
-        title: payload.title,
-        message: payload.message,
-        entityType: payload.entityType || null,
-        entityId: payload.entityId || null
+    return await db.notification.createMany({
+      data: payloads.map((p) => ({
+        tenantId: p.tenantId,
+        recipientUserId: p.recipientUserId,
+        type: p.type,
+        priority: p.priority || "NORMAL",
+        category: p.category || "SYSTEM",
+        title: p.title,
+        message: p.message,
+        entityType: p.entityType || null,
+        entityId: p.entityId || null,
+        actionUrl: p.actionUrl || null,
+        expiresAt: p.expiresAt || null
       }))
     });
-
-    return result;
   } catch (error) {
-    if (!isMissingNotificationSchemaError(error)) {
-      throw error;
+    if (!isMissingNotificationSchemaError(error)) throw error;
+    // Fallback: create with base fields only
+    try {
+      return await db.notification.createMany({
+        data: payloads.map((p) => ({
+          tenantId: p.tenantId,
+          recipientUserId: p.recipientUserId,
+          type: p.type,
+          title: p.title,
+          message: p.message,
+          entityType: p.entityType || null,
+          entityId: p.entityId || null
+        }))
+      });
+    } catch (err2) {
+      if (!isMissingNotificationSchemaError(err2)) throw err2;
+      return { count: 0 };
     }
-    return { count: 0 };
   }
 }
 
@@ -191,62 +216,53 @@ async function getUserNotifications(userId, tenantId, filters = {}, dbClient) {
   const page = hasOffset ? Math.floor(offsetRaw / limit) + 1 : Math.max(1, Number(filters.page) || 1);
   const skip = hasOffset ? Math.floor(offsetRaw) : (page - 1) * limit;
 
-  const where = {
-    recipientUserId: userId,
-    tenantId
+  const baseWhere = { recipientUserId: userId, tenantId };
+  if (String(filters.unread) === "true") baseWhere.isRead = false;
+
+  // New fields may not exist before migration — build where cautiously
+  const where = { ...baseWhere };
+  if (filters.category) where.category = filters.category;
+  if (filters.priority) where.priority = filters.priority;
+
+  const extendedSelect = {
+    id: true, type: true, priority: true, category: true,
+    title: true, message: true, isRead: true, createdAt: true,
+    entityType: true, entityId: true, actionUrl: true, expiresAt: true
   };
 
-  if (String(filters.unread) === "true") {
-    where.isRead = false;
-  }
+  const baseSelect = {
+    id: true, type: true, title: true, message: true,
+    isRead: true, createdAt: true, entityType: true, entityId: true
+  };
 
   let total = 0;
   let items = [];
   let unreadCount = 0;
 
-  try {
-    [total, items, unreadCount] = await Promise.all([
-      db.notification.count({ where }),
+  async function doFetch(select, filterWhere) {
+    return Promise.all([
+      db.notification.count({ where: filterWhere }),
       db.notification.findMany({
-        where,
-        orderBy: {
-          createdAt: "desc"
-        },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          type: true,
-          title: true,
-          message: true,
-          isRead: true,
-          createdAt: true,
-          entityType: true,
-          entityId: true
-        }
+        where: filterWhere, orderBy: { createdAt: "desc" },
+        skip, take: limit, select
       }),
-      db.notification.count({
-        where: {
-          recipientUserId: userId,
-          tenantId,
-          isRead: false
-        }
-      })
+      db.notification.count({ where: { recipientUserId: userId, tenantId, isRead: false } })
     ]);
+  }
+
+  try {
+    [total, items, unreadCount] = await doFetch(extendedSelect, where);
   } catch (error) {
-    if (!isMissingNotificationSchemaError(error)) {
-      throw error;
+    if (!isMissingNotificationSchemaError(error)) throw error;
+    // Fallback: drop new fields from select and where
+    try {
+      [total, items, unreadCount] = await doFetch(baseSelect, baseWhere);
+    } catch (err2) {
+      if (!isMissingNotificationSchemaError(err2)) throw err2;
     }
   }
 
-  return {
-    page,
-    limit,
-    offset: skip,
-    total,
-    unreadCount,
-    items
-  };
+  return { page, limit, offset: skip, total, unreadCount, items };
 }
 
 async function findUsersByRoles(tenantId, roles, hierarchyNodeId = null, dbClient) {

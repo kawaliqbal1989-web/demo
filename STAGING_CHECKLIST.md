@@ -2,24 +2,70 @@
 
 Use this checklist to validate the staging deployment before promoting to production.
 
-- **Basic health**: Navigate to `http://<staging-host>:<port>/health` and confirm service returns status ok.
+## Quick Automated Verification
 
-- **Auth test**: Login with seeded account (e.g., `superadmin@abacusweb.local` / `Pass@123`) and verify access token + refresh token flows work.
+```bash
+# Run automated smoke tests against staging
+npm run verify:deploy -- --base http://<staging-host>:4001
 
-- **Role restriction test**: Verify an endpoint restricted to `SUPERADMIN` rejects a `CENTER` or `BP` user and allows `SUPERADMIN`.
+# Preview migration plan (no execution)
+npm run migrate:plan
 
-- **Promotion test**: Trigger promotion engine (or relevant endpoint) for a student and verify promotion records/audit logs are created.
+# Run migrations for a specific wave only
+node scripts/run-migrations.mjs --wave wave1
+```
 
-- **Worksheet generation test**: Request worksheet generation, verify generated worksheet contents, question count and difficulty match expected.
+## Manual Verification
 
-- **Competition flow test**: Create a competition, enroll a student, submit a result, and verify leaderboard updates.
+### Infrastructure
+- [ ] **Health endpoint**: `GET /health` returns `{"status":"ok"}`
+- [ ] **DB health**: `GET /health/db` returns `{"status":"ok"}`
+- [ ] **Readiness probe**: `GET /ready` returns `{"ready":true}`
+- [ ] **API health**: `GET /api/health` returns `{"status":"ok","db":"ok"}`
 
-- **Abuse flag trigger test**: Simulate rapid submissions / perfect streak to ensure an abuse flag is created and notifications are sent.
+### Authentication & Authorization
+- [ ] **Auth test**: Login with seeded superadmin (`superadmin@abacusweb.local` / `Pass@123`), verify access + refresh token flow
+- [ ] **Role restriction**: SUPERADMIN-only endpoint rejects CENTER/BP/TEACHER users
+- [ ] **Token refresh**: Expired access token triggers refresh flow correctly
 
-- **Notification test**: Ensure user receives notification entries in `Notification` table and (if integrated) push delivery works.
+### Wave 1: Foundation & Shell
+- [ ] **Design System**: Dashboard pages render with updated MetricCards, PageHeaders, Breadcrumbs
+- [ ] **Insights**: `GET /api/insights` returns insight list (or empty array if no data)
+- [ ] **Command Palette**: Ctrl+K opens command palette with role-specific actions
 
-- **Leaderboard test**: Create sample submissions and confirm leaderboard endpoint orders students correctly.
+### Wave 2: Student & Teacher Intelligence
+- [ ] **Student Coach**: Student dashboard shows Daily Mission, Weekly Plan, Streaks
+- [ ] **AI Learning Lab**: Student AI Playground loads with coach tab
+- [ ] **Teacher Cockpit**: Teacher dashboard shows At-Risk Queue, Batch Heatmap
+- [ ] **Promotions**: Trigger promotion engine, verify progression history
 
-- **Migrations check**: Confirm `prisma_migrations` table has all migrations applied.
+### Wave 3: Leadership & Notifications
+- [ ] **Center Health**: Center dashboard shows HealthScoreRing, TeacherWorkload, FeePulse
+- [ ] **Network Pulse**: Franchise/BP/Superadmin dashboards show NetworkPulseCard
+- [ ] **Notifications**: Priority notifications, notification preferences, automation panel
+- [ ] **Notification automation**: Superadmin can trigger automation rules
 
-- **Secrets check**: Ensure `JWT_*_STAGING` are set and not equal to production secrets.
+### Wave 4: Workflow & AI Surfaces
+- [ ] **DataTable V3**: Selectable rows, bulk actions, saved views, column visibility
+- [ ] **Bulk Operations**: Center can bulk update student status
+- [ ] **AI Narratives**: Each role dashboard shows AI narrative panel (or deterministic fallback)
+- [ ] **Rate Limiting**: AI narratives respect 10/hour per user limit (429 after exceeded)
+- [ ] **Approval Queue**: Exam/competition approval queue with SLA tracking
+
+### Release Management
+- [ ] **Wave Status**: `GET /api/superadmin/release/waves` returns 4 waves
+- [ ] **Feature Flags**: All waves show as enabled (or per `FEATURE_FLAGS` env var)
+- [ ] **Deploy Info**: `GET /api/superadmin/release/deploy-info` returns version and stats
+- [ ] **Release UI**: Superadmin sidebar shows "Release Management" page
+
+### Data Integrity
+- [ ] **Migrations**: `prisma_migrations` table has all migrations applied
+- [ ] **Secrets**: `JWT_*` secrets are staging-specific, NOT production values
+- [ ] **Worksheet generation**: Generate worksheet, verify question count and difficulty match
+- [ ] **Competition flow**: Create → enroll → submit result → verify leaderboard
+- [ ] **Abuse flags**: Rapid submissions trigger abuse flag and notification
+
+### Performance
+- [ ] **Health latency**: `/health` responds under 500ms consistently
+- [ ] **Dashboard load**: Dashboard pages render within 2s on staging hardware
+- [ ] **AI narrative**: Gemini narrative returns within 10s (or falls back to deterministic)

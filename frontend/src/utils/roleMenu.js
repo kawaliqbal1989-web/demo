@@ -4,7 +4,6 @@ const roleMenus = {
   [ROLES.SUPERADMIN]: [
     { section: "Overview" },
     { label: "🏠 Dashboard", to: "/superadmin/dashboard" },
-    { label: "📈 Analytics", to: "/superadmin/analytics" },
     { label: "📊 Reports", to: "/superadmin/reports" },
     { section: "Hierarchy" },
     { label: "🤝 Business Partners", to: "/superadmin/business-partners" },
@@ -27,7 +26,8 @@ const roleMenus = {
     { label: "👥 Users", to: "/superadmin/users" },
     { label: "🚩 Abuse Flags", to: "/superadmin/abuse-flags" },
     { label: "📝 Audit Logs", to: "/superadmin/audit-logs" },
-    { label: "🔔 Notifications", to: "/notifications" }
+    { label: "� Release Management", to: "/superadmin/release" },
+    { label: "�🔔 Notifications", to: "/notifications" }
   ],
   [ROLES.CENTER]: [
     { section: "Home" },

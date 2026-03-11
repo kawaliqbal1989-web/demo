@@ -4,6 +4,27 @@ import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getStudent, getStudentPerformanceSummary, getStudentPromotionStatus, confirmStudentPromotion, assignStudentCourse } from "../../services/studentsService";
 import { listCenterAvailableCourses } from "../../services/centerService";
+import { baseURL } from "../../services/apiClient";
+
+const photoFrameStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 10,
+  background: "linear-gradient(180deg, var(--color-bg-subtle), var(--color-bg-muted))",
+  border: "1px solid var(--color-border-strong)",
+  borderRadius: 16,
+  boxShadow: "0 8px 24px rgba(0,0,0,0.12)"
+};
+
+const studentPhotoStyle = {
+  width: 128,
+  height: 128,
+  objectFit: "contain",
+  borderRadius: 12,
+  border: "1px solid var(--color-border)",
+  background: "var(--color-bg-card)"
+};
 
 function CenterStudentViewPage() {
   const { studentId } = useParams();
@@ -18,6 +39,17 @@ function CenterStudentViewPage() {
   const [selectedCourseId, setSelectedCourseId] = useState("");
   const [assigningCourse, setAssigningCourse] = useState(false);
   const [courseMsg, setCourseMsg] = useState("");
+
+  const resolvePhotoUrl = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
+    const apiOrigin = String(baseURL || "").replace(/\/api\/?$/, "");
+    if (text.startsWith("/")) {
+      return `${apiOrigin}${text}`;
+    }
+    return `${apiOrigin}/${text}`;
+  };
 
   const load = async () => {
     setLoading(true);
@@ -92,6 +124,7 @@ function CenterStudentViewPage() {
 
   const student = data.student || data;
   const perfData = perf?.performance || perf;
+  const studentPhotoSrc = resolvePhotoUrl(student?.photoUrl);
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
@@ -113,11 +146,15 @@ function CenterStudentViewPage() {
       {error ? <div className="card"><p className="error">{error}</p></div> : null}
 
       <div className="card" style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-        {student?.photoUrl ? (
-          <img src={student.photoUrl} alt="Student" style={{ width: 128, height: 128, objectFit: "cover", borderRadius: 12, border: "1px solid var(--color-border)" }} />
+        {studentPhotoSrc ? (
+          <div style={photoFrameStyle}>
+            <img src={studentPhotoSrc} alt="Student" style={studentPhotoStyle} />
+          </div>
         ) : (
-          <div style={{ width: 128, height: 128, borderRadius: 12, background: "#2563eb", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 48 }}>
+          <div style={{ ...photoFrameStyle, width: 148, height: 148, padding: 0 }}>
+            <div style={{ width: 128, height: 128, borderRadius: 12, background: "var(--color-primary)", color: "#fff", display: "grid", placeItems: "center", fontWeight: 800, fontSize: 48 }}>
             {(student?.firstName || "?")[0]?.toUpperCase()}
+            </div>
           </div>
         )}
 

@@ -7,6 +7,8 @@ import {
 } from "../../services/notificationService";
 import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { PriorityBadge, CategoryBadge, NotificationPreferences } from "../../components/NotificationWidgets";
+import { useAuth } from "../../hooks/useAuth";
 
 function timeAgo(dateStr) {
   if (!dateStr) return "";
@@ -21,13 +23,35 @@ function timeAgo(dateStr) {
   return new Date(dateStr).toLocaleDateString();
 }
 
+const CATEGORY_OPTIONS = [
+  { value: "", label: "All Categories" },
+  { value: "RISK", label: "Risk & Safety" },
+  { value: "FINANCE", label: "Financial" },
+  { value: "OPERATIONS", label: "Operations" },
+  { value: "WORKFLOW", label: "Workflow" },
+  { value: "ACADEMIC", label: "Academic" },
+  { value: "SYSTEM", label: "System" }
+];
+
+const PRIORITY_OPTIONS = [
+  { value: "", label: "All Priorities" },
+  { value: "CRITICAL", label: "Critical" },
+  { value: "HIGH", label: "High" },
+  { value: "NORMAL", label: "Normal" },
+  { value: "LOW", label: "Low" }
+];
+
 function NotificationsPage() {
+  const { role } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [filterUnread, setFilterUnread] = useState(false);
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterPriority, setFilterPriority] = useState("");
+  const [tab, setTab] = useState("inbox");
   const limit = 25;
 
   const fetchPage = useCallback(
@@ -38,7 +62,9 @@ function NotificationsPage() {
         const res = await listNotifications({
           limit,
           offset: pageOffset,
-          unread: filterUnread || undefined
+          unread: filterUnread || undefined,
+          category: filterCategory || undefined,
+          priority: filterPriority || undefined
         });
         const data = res?.data?.data;
         const list = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
@@ -51,7 +77,7 @@ function NotificationsPage() {
         setLoading(false);
       }
     },
-    [filterUnread]
+    [filterUnread, filterCategory, filterPriority]
   );
 
   useEffect(() => {
@@ -84,81 +110,85 @@ function NotificationsPage() {
   };
 
   return (
-    <div style={{ display: "grid", gap: 16, maxWidth: 720 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <h2 style={{ margin: 0 }}>Notifications</h2>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
-            <input
-              type="checkbox"
-              checked={filterUnread}
-              onChange={(e) => setFilterUnread(e.target.checked)}
-            />
-            Unread only
-          </label>
-          <button
-            className="button secondary"
-            style={{ width: "auto", fontSize: 13, padding: "6px 12px" }}
-            onClick={handleMarkAllRead}
-          >
-            Mark all read
-          </button>
+    <div className="notif-page">
+      <div className="notif-page__header">
+        <h2>Notifications</h2>
+        <div className="notif-page__tabs">
+          <button className={`notif-tab ${tab === "inbox" ? "notif-tab--active" : ""}`} onClick={() => setTab("inbox")}>Inbox</button>
+          <button className={`notif-tab ${tab === "preferences" ? "notif-tab--active" : ""}`} onClick={() => setTab("preferences")}>Preferences</button>
         </div>
       </div>
 
-      {error && <div className="error">{error}</div>}
-
-      {loading && items.length === 0 && <LoadingState />}
-
-      {!loading && items.length === 0 && (
-        <div className="card" style={{ textAlign: "center", padding: 32, color: "var(--color-text-muted)" }}>
-          No notifications to show.
-        </div>
-      )}
-
-      <div style={{ display: "grid", gap: 8 }}>
-        {items.map((n) => (
-          <div
-            key={n.id}
-            className="card"
-            style={{
-              display: "grid",
-              gap: 4,
-              padding: "12px 16px",
-              borderLeft: n.isRead ? "3px solid transparent" : "3px solid #2563eb",
-              cursor: n.isRead ? "default" : "pointer",
-              opacity: n.isRead ? 0.7 : 1
-            }}
-            onClick={() => !n.isRead && handleMarkRead(n.id)}
-            role="button"
-            tabIndex={0}
-            onKeyDown={(e) => e.key === "Enter" && !n.isRead && handleMarkRead(n.id)}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-              <strong style={{ fontSize: 14 }}>{n.title || n.type}</strong>
-              <span style={{ fontSize: 12, color: "var(--color-text-muted)", whiteSpace: "nowrap" }}>{timeAgo(n.createdAt)}</span>
-            </div>
-            <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>{n.message}</div>
-            {n.entityType && (
-              <div style={{ fontSize: 11, color: "var(--color-text-faint)" }}>
-                {n.entityType}{n.entityId ? `: ${n.entityId}` : ""}
-              </div>
-            )}
+      {tab === "preferences" ? (
+        <NotificationPreferences />
+      ) : (
+        <>
+          <div className="notif-page__filters">
+            <label className="notif-filter-check">
+              <input type="checkbox" checked={filterUnread} onChange={(e) => setFilterUnread(e.target.checked)} />
+              Unread only
+            </label>
+            <select className="notif-filter-select" value={filterCategory} onChange={e => setFilterCategory(e.target.value)}>
+              {CATEGORY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <select className="notif-filter-select" value={filterPriority} onChange={e => setFilterPriority(e.target.value)}>
+              {PRIORITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <button className="button secondary notif-mark-all-btn" onClick={handleMarkAllRead}>
+              Mark all read
+            </button>
           </div>
-        ))}
-      </div>
 
-      {hasMore && items.length > 0 && (
-        <div style={{ textAlign: "center" }}>
-          <button
-            className="button secondary"
-            style={{ width: "auto" }}
-            onClick={loadMore}
-            disabled={loading}
-          >
-            {loading ? "Loading..." : "Load more"}
-          </button>
-        </div>
+          {error && <div className="error">{error}</div>}
+          {loading && items.length === 0 && <LoadingState />}
+
+          {!loading && items.length === 0 && (
+            <div className="card notif-page__empty">No notifications to show.</div>
+          )}
+
+          <div className="notif-page__list">
+            {items.map((n) => (
+              <div
+                key={n.id}
+                className={`notif-page-item card ${n.isRead ? "notif-page-item--read" : "notif-page-item--unread"} ${n.priority === "CRITICAL" ? "notif-page-item--critical" : n.priority === "HIGH" ? "notif-page-item--high" : ""}`}
+                onClick={() => !n.isRead && handleMarkRead(n.id)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => e.key === "Enter" && !n.isRead && handleMarkRead(n.id)}
+              >
+                <div className="notif-page-item__header">
+                  <strong className="notif-page-item__title">{n.title || n.type}</strong>
+                  <div className="notif-page-item__badges">
+                    <PriorityBadge priority={n.priority} />
+                    <CategoryBadge category={n.category} />
+                  </div>
+                </div>
+                <div className="notif-page-item__message">{n.message}</div>
+                <div className="notif-page-item__footer">
+                  <span className="notif-page-item__time">{timeAgo(n.createdAt)}</span>
+                  {n.entityType && (
+                    <span className="notif-page-item__entity">
+                      {n.entityType}{n.entityId ? `: ${n.entityId.slice(0, 8)}…` : ""}
+                    </span>
+                  )}
+                  {n.actionUrl && (
+                    <a href={n.actionUrl} className="notif-page-item__action" onClick={e => e.stopPropagation()}>
+                      View Details →
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {hasMore && items.length > 0 && (
+            <div style={{ textAlign: "center", marginTop: 12 }}>
+              <button className="button secondary" onClick={loadMore} disabled={loading}>
+                {loading ? "Loading..." : "Load more"}
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

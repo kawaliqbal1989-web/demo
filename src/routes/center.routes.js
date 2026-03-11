@@ -132,4 +132,23 @@ centerRouter.delete(
   unassignStudentFeature
 );
 
+/* ── Intelligence ── */
+import {
+  getCenterIntel,
+  getCenterHealth,
+  getCenterTeacherWorkload,
+  getCenterAnomalies,
+  getCenterFeePulse,
+} from "../controllers/leadership-intel.controller.js";
+import { getCenterAiNarrative } from "../controllers/ai-narrative.controller.js";
+
+centerRouter.get("/intel/dashboard", getCenterIntel);
+centerRouter.get("/intel/health", getCenterHealth);
+centerRouter.get("/intel/teacher-workload", getCenterTeacherWorkload);
+centerRouter.get("/intel/anomalies", getCenterAnomalies);
+centerRouter.get("/intel/fee-pulse", getCenterFeePulse);
+
+/* ── AI Narrative (Phase 10) ── */
+centerRouter.get("/ai/narrative", getCenterAiNarrative);
+
 export { centerRouter };

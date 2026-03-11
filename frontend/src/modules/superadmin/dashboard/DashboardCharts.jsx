@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../../../hooks/useAuth";
 import { recordDashboardAction } from "../../../services/superadminService";
 
@@ -116,8 +116,34 @@ async function exportPdf({ data, history }) {
 function DashboardCharts({ data, history }) {
   const { capabilities } = useAuth();
   const [exporting, setExporting] = useState(false);
+  const [themeVersion, setThemeVersion] = useState(0);
 
   const canExport = Boolean(capabilities?.canViewReports);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => mutation.attributeName === "data-theme")) {
+        setThemeVersion((version) => version + 1);
+      }
+    });
+
+    observer.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => observer.disconnect();
+  }, []);
+
+  const palette = useMemo(() => {
+    const styles = getComputedStyle(document.documentElement);
+    return {
+      primary: styles.getPropertyValue("--color-primary").trim() || "#2563eb",
+      textPrimary: styles.getPropertyValue("--color-text-primary").trim() || "#1f2937",
+      textLabel: styles.getPropertyValue("--color-text-label").trim() || "#374151",
+      textMuted: styles.getPropertyValue("--color-text-muted").trim() || "#6b7280",
+      textDanger: styles.getPropertyValue("--color-text-danger").trim() || "#b91c1c",
+      bgCard: styles.getPropertyValue("--color-bg-card").trim() || "#ffffff",
+      border: styles.getPropertyValue("--color-border").trim() || "#e5e7eb"
+    };
+  }, [themeVersion]);
 
   const chartData = useMemo(() => {
     const points = (history || []).slice(-20);
@@ -134,27 +160,27 @@ function DashboardCharts({ data, history }) {
         {
           label: "Active Business Partners",
           data: series("activeBusinessPartners"),
-          borderColor: "#2563eb",
-          backgroundColor: "rgba(37,99,235,0.1)",
+          borderColor: palette.primary,
+          backgroundColor: palette.primary,
           tension: 0.25
         },
         {
           label: "Active Students",
           data: series("activeStudents"),
-          borderColor: "var(--color-text-primary)",
-          backgroundColor: "rgba(17,24,39,0.1)",
+          borderColor: palette.textPrimary,
+          backgroundColor: palette.textPrimary,
           tension: 0.25
         },
         {
           label: "Open Abuse Flags",
           data: series("openAbuseFlags"),
-          borderColor: "var(--color-text-danger)",
-          backgroundColor: "rgba(185,28,28,0.1)",
+          borderColor: palette.textDanger,
+          backgroundColor: palette.textDanger,
           tension: 0.25
         }
       ]
     };
-  }, [history]);
+  }, [history, palette]);
 
   const revenueChartData = useMemo(() => {
     const points = (history || []).slice(-20);
@@ -169,22 +195,42 @@ function DashboardCharts({ data, history }) {
         {
           label: "Gross Revenue (MTD)",
           data: points.map((p) => Number(p.metrics?.grossRevenueMtd ?? 0)),
-          borderColor: "var(--color-text-label)",
-          backgroundColor: "rgba(55,65,81,0.1)",
+          borderColor: palette.textLabel,
+          backgroundColor: palette.textLabel,
           tension: 0.25
         }
       ]
     };
-  }, [history]);
+  }, [history, palette]);
 
   const chartOptions = {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { position: "bottom" }
+      legend: {
+        position: "bottom",
+        labels: {
+          color: palette.textPrimary
+        }
+      },
+      tooltip: {
+        backgroundColor: palette.bgCard,
+        titleColor: palette.textPrimary,
+        bodyColor: palette.textMuted,
+        borderColor: palette.border,
+        borderWidth: 1
+      }
     },
     scales: {
-      y: { beginAtZero: true }
+      x: {
+        ticks: { color: palette.textMuted },
+        grid: { color: palette.border }
+      },
+      y: {
+        beginAtZero: true,
+        ticks: { color: palette.textMuted },
+        grid: { color: palette.border }
+      }
     }
   };
 

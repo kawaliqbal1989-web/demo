@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { MetricCard } from "../../components/MetricCard";
+import { EmptyState } from "../../components/EmptyState";
+import { PageHeader } from "../../components/PageHeader";
+import { InsightPanel } from "../../components/InsightCard";
+import { StreakBar, DailyMission, WeeklyPlan, ReadinessGauge, MilestoneCard, PerformanceExplainer } from "../../components/StudentCoach";
+import { getInsights } from "../../services/insightsService";
+import { getCoachDashboard } from "../../services/studentCoachService";
 import {
   getStudentFees,
   getStudentMe,
@@ -12,6 +18,7 @@ import {
   listStudentEnrollments,
   listStudentWorksheets
 } from "../../services/studentPortalService";
+import { StudentAiCoach } from "../../components/AiNarrativeSurfaces";
 
 function formatExamStatus(status) {
   if (!status) return "—";
@@ -60,6 +67,10 @@ function StudentDashboardPage() {
   const [examEnrollments, setExamEnrollments] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [coach, setCoach] = useState(null);
+  const [coachLoading, setCoachLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,23 +157,45 @@ function StudentDashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setInsightsLoading(true);
+    getInsights()
+      .then((res) => setInsights(res.data?.insights || []))
+      .catch(() => {})
+      .finally(() => setInsightsLoading(false));
+  }, []);
+
+  useEffect(() => {
+    setCoachLoading(true);
+    getCoachDashboard()
+      .then((res) => setCoach(res.data?.data || null))
+      .catch(() => {})
+      .finally(() => setCoachLoading(false));
+  }, []);
+
   const kpis = useMemo(() => {
     return [
       {
         label: "Active Enrollments",
-        value: me?.activeEnrollmentsCount ?? "—"
+        value: me?.activeEnrollmentsCount ?? "—",
+        icon: "📚",
+        accent: "var(--role-student)"
       },
       {
         label: "Assigned Worksheets",
-        value: me?.assignedWorksheetsCount ?? "—"
+        value: me?.assignedWorksheetsCount ?? "—",
+        icon: "📝"
       },
       {
         label: "Total Attempts",
-        value: report?.totalAttempts ?? "—"
+        value: report?.totalAttempts ?? "—",
+        icon: "🎯"
       },
       {
         label: "Avg Score",
-        value: report?.avgScore == null ? "—" : `${report.avgScore}%`
+        value: report?.avgScore == null ? "—" : `${report.avgScore}%`,
+        icon: "📊",
+        accent: report?.avgScore >= 70 ? "#16a34a" : report?.avgScore >= 40 ? "#d97706" : undefined
       }
     ];
   }, [me, report]);
@@ -170,31 +203,28 @@ function StudentDashboardPage() {
   const latestResult = report?.recent?.length ? report.recent[0] : null;
 
   if (loading) {
-    return <LoadingState label="Loading dashboard..." />;
+    return (
+      <section className="dash-section">
+        <SkeletonLoader variant="card" count={4} />
+        <SkeletonLoader variant="detail" />
+        <SkeletonLoader variant="table" />
+      </section>
+    );
   }
 
   return (
     <section className="dash-section">
-      <div className="dash-header">
-        <div>
-          <h2 style={{ margin: 0 }}>Student Dashboard</h2>
-          <div className="dash-card__subtitle" style={{ marginTop: 6 }}>
-            Your profile and current enrollment details.
-          </div>
-        </div>
-
-        <div className="dash-header__actions">
-          <Link className="button secondary" style={{ width: "auto" }} to="/change-password">
-            Change Password
-          </Link>
-          <Link className="button secondary" style={{ width: "auto" }} to="/student/abacus-practice">
-            Abacus Practice (Auto)
-          </Link>
-          <Link className="button" style={{ width: "auto" }} to="/student/worksheets">
-            Worksheets
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="Student Dashboard"
+        subtitle="Your profile and current enrollment details."
+        actions={
+          <>
+            <Link className="button secondary" style={{ width: "auto" }} to="/change-password">Change Password</Link>
+            <Link className="button secondary" style={{ width: "auto" }} to="/student/abacus-practice">Abacus Practice</Link>
+            <Link className="button" style={{ width: "auto" }} to="/student/worksheets">Worksheets</Link>
+          </>
+        }
+      />
 
       {error ? (
         <div className="card">
@@ -204,9 +234,24 @@ function StudentDashboardPage() {
         </div>
       ) : null}
 
+      <InsightPanel
+        insights={insights}
+        loading={insightsLoading}
+        onDismiss={(id) => setInsights((prev) => prev.filter((i) => i.id !== id))}
+      />
+
+      <StudentAiCoach />
+
+      <StreakBar streaks={coach?.streaks} />
+
+      <div className="coach-grid">
+        <DailyMission missions={coach?.dailyMission} loading={coachLoading} />
+        <WeeklyPlan plan={coach?.weeklyPlan} loading={coachLoading} />
+      </div>
+
       <div className="dash-kpi-grid">
         {kpis.map((kpi) => (
-          <MetricCard key={kpi.label} label={kpi.label} value={kpi.value} />
+          <MetricCard key={kpi.label} label={kpi.label} value={kpi.value} icon={kpi.icon} accent={kpi.accent} />
         ))}
       </div>
 
@@ -396,7 +441,7 @@ function StudentDashboardPage() {
             </table>
           </div>
         ) : (
-          <div className="muted">No enrollments found.</div>
+          <EmptyState icon="📚" title="No enrollments" description="You don't have any course enrollments yet." />
         )}
       </div>
 
@@ -409,22 +454,20 @@ function StudentDashboardPage() {
             <table className="dash-table">
               <thead>
                 <tr>
-                  <th>
-                    Topic
-                  </th>
-                  <th>
-                    Accuracy
-                  </th>
-                  <th>
-                    Attempts
-                  </th>
+                  <th>Topic</th>
+                  <th>Accuracy</th>
+                  <th>Attempts</th>
                 </tr>
               </thead>
               <tbody>
                 {weakTopics.map((t) => (
                   <tr key={t.topic}>
                     <td>{t.topic}</td>
-                    <td>{t.accuracy}%</td>
+                    <td>
+                      <span className={`badge-v2 ${t.accuracy < 40 ? "badge-v2--danger" : "badge-v2--warning"}`}>
+                        {t.accuracy}%
+                      </span>
+                    </td>
                     <td>{t.attempted}</td>
                   </tr>
                 ))}
@@ -432,7 +475,7 @@ function StudentDashboardPage() {
             </table>
           </div>
         ) : (
-          <div className="muted">No weak topics yet.</div>
+          <EmptyState icon="🎉" title="No weak topics" description="Great job! Keep practicing to stay sharp." />
         )}
       </div>
 
@@ -527,6 +570,13 @@ function StudentDashboardPage() {
           </table>
         </div>
       </div>
+
+      <div className="coach-grid">
+        <ReadinessGauge readiness={coach?.readiness} loading={coachLoading} />
+        <MilestoneCard milestones={coach?.milestones} loading={coachLoading} />
+      </div>
+
+      <PerformanceExplainer data={coach?.performanceExplainer} loading={coachLoading} />
     </section>
   );
 }

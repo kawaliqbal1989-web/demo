@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { PageHeader } from "../../components/PageHeader";
+import { ReadinessGauge, PerformanceExplainer, StreakBar } from "../../components/StudentCoach";
+import { getCoachDashboard } from "../../services/studentCoachService";
 import {
   getStudentMe,
   getStudentPracticeReport,
@@ -108,6 +111,8 @@ function StudentProgressPage() {
   const [exams, setExams] = useState([]);
   const [enrollments, setEnrollments] = useState([]);
   const [perfTrends, setPerfTrends] = useState(null);
+  const [coach, setCoach] = useState(null);
+  const [coachLoading, setCoachLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -145,6 +150,14 @@ function StudentProgressPage() {
       });
 
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    setCoachLoading(true);
+    getCoachDashboard()
+      .then((res) => setCoach(res.data?.data || null))
+      .catch(() => {})
+      .finally(() => setCoachLoading(false));
   }, []);
 
   /* ---- Derived Data ---- */
@@ -197,18 +210,23 @@ function StudentProgressPage() {
     ? Math.round((worksheetStats.completed / worksheetStats.total) * 100)
     : 0;
 
-  if (loading) return <LoadingState label="Loading your progress..." />;
+  if (loading) return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <SkeletonLoader variant="card" count={3} />
+      <SkeletonLoader variant="table" />
+    </section>
+  );
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>📊 My Progress</h2>
-        <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
-          Track your learning journey — worksheets, scores, attendance, and more.
-        </div>
-      </div>
+      <PageHeader
+        title="📊 My Progress"
+        subtitle="Track your learning journey — worksheets, scores, attendance, and more."
+      />
 
       {error ? <div className="card" style={{ color: "#ef4444" }}>{error}</div> : null}
+
+      <StreakBar streaks={coach?.streaks} />
 
       {/* KPI row */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
@@ -416,6 +434,11 @@ function StudentProgressPage() {
           </div>
         </div>
       ) : null}
+
+      <div className="coach-grid">
+        <ReadinessGauge readiness={coach?.readiness} loading={coachLoading} />
+        <PerformanceExplainer data={coach?.performanceExplainer} loading={coachLoading} />
+      </div>
     </section>
   );
 }

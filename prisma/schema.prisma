@@ -66,6 +66,34 @@ enum NotificationType {
   EXAM_LAST_DAY_REMINDER
   EXAM_RESULT_PUBLISHED
   EXAM_RESULT_UNPUBLISHED
+
+  RISK_ALERT
+  FEE_OVERDUE
+  FEE_UPCOMING
+  ATTENDANCE_DROP
+  STALE_BATCH
+  WORKFLOW_REMINDER
+  HEALTH_SCORE_DROP
+  TEACHER_OVERLOAD
+  ADMISSION_MILESTONE
+  DIGEST_DAILY
+  DIGEST_WEEKLY
+}
+
+enum NotificationPriority {
+  CRITICAL
+  HIGH
+  NORMAL
+  LOW
+}
+
+enum NotificationCategory {
+  WORKFLOW
+  RISK
+  FINANCE
+  ACADEMIC
+  OPERATIONS
+  SYSTEM
 }
 
 enum ExamEnrollmentStatus {
@@ -307,6 +335,7 @@ model Tenant {
   userSequences    UserSequence[]
   abuseFlags       AbuseFlag[]
   notifications    Notification[]
+  notificationPreferences NotificationPreference[]
   financialTransactions FinancialTransaction[]
   feeInstallments  StudentFeeInstallment[]
   certificates    Certificate[]
@@ -337,6 +366,8 @@ model Tenant {
   centerPracticeAllocations CenterPracticeAllocation[]
   studentPracticeAssignments StudentPracticeAssignment[]
   certificateTemplates CertificateTemplate[]
+  insights         Insight[]
+  studentMilestones StudentMilestone[]
 }
 
 model IdempotencyKey {
@@ -386,6 +417,7 @@ model AuthUser {
   createdPartners BusinessPartner[] @relation("PartnerCreatedBy")
   resolvedAbuseFlags AbuseFlag[] @relation("AbuseResolvedBy")
   notificationsReceived Notification[] @relation("NotificationRecipient")
+  notificationPreferences NotificationPreference[] @relation("NotificationPreferences")
   superadminProfile Superadmin?
   promotedProgressions StudentLevelProgressionHistory[]
   financialTransactions FinancialTransaction[]
@@ -429,6 +461,8 @@ model AuthUser {
   practiceAssignmentsAssigned StudentPracticeAssignment[] @relation("PracticeAssignmentAssignedBy")
   practiceAssignmentsUnassigned StudentPracticeAssignment[] @relation("PracticeAssignmentUnassignedBy")
 
+  insightsReceived Insight[] @relation("InsightTarget")
+
   @@unique([tenantId, email])
   @@unique([tenantId, username])
   @@index([tenantId])
@@ -455,21 +489,42 @@ model UserSequence {
 }
 
 model Notification {
-  id              String           @id @default(cuid())
+  id              String               @id @default(cuid())
   tenantId        String
   recipientUserId String
   type            NotificationType
+  priority        NotificationPriority @default(NORMAL)
+  category        NotificationCategory @default(SYSTEM)
   title           String
   message         String
   entityType      String?
   entityId        String?
-  isRead          Boolean          @default(false)
-  createdAt       DateTime         @default(now())
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  recipientUser   AuthUser         @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  actionUrl       String?
+  expiresAt       DateTime?
+  isRead          Boolean              @default(false)
+  createdAt       DateTime             @default(now())
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recipientUser   AuthUser             @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, recipientUserId, isRead])
+  @@index([tenantId, recipientUserId, priority])
   @@index([tenantId, createdAt])
+  @@index([expiresAt])
+}
+
+model NotificationPreference {
+  id        String           @id @default(cuid())
+  tenantId  String
+  userId    String
+  type      NotificationType
+  enabled   Boolean          @default(true)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user      AuthUser         @relation("NotificationPreferences", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, type])
+  @@index([tenantId, userId])
 }
 
 model Superadmin {
@@ -836,6 +891,7 @@ model Student {
   aiPlaygroundLogs       AiPlaygroundLog[]
   worksheetReassignmentRequests WorksheetReassignmentRequest[]
   practiceAssignments StudentPracticeAssignment[]
+  milestones          StudentMilestone[]
 
   @@unique([tenantId, admissionNo])
   // Student email is unique per tenant (AuthUser email is also unique). Multiple NULLs are allowed.
@@ -2047,4 +2103,71 @@ model CertificateTemplate {
   businessPartner         BusinessPartner @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
+}
+
+// ─── Phase 4: Intelligence Platform ───────────────────────────
+
+enum InsightCategory {
+  RISK
+  PERFORMANCE
+  ATTENDANCE
+  FINANCIAL
+  PROMOTION
+  ENGAGEMENT
+  OPERATIONAL
+  COMPLIANCE
+}
+
+enum InsightSeverity {
+  INFO
+  SUCCESS
+  WARNING
+  CRITICAL
+}
+
+model Insight {
+  id              String           @id @default(cuid())
+  tenantId        String
+  targetRole      Role
+  targetUserId    String
+  category        InsightCategory
+  severity        InsightSeverity
+  title           String
+  message         String           @db.Text
+  actionLabel     String?
+  actionUrl       String?
+  entityType      String?
+  entityId        String?
+  metadata        Json?
+  isDismissed     Boolean          @default(false)
+  isActioned      Boolean          @default(false)
+  expiresAt       DateTime?
+  createdAt       DateTime         @default(now())
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  targetUser      AuthUser         @relation("InsightTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, targetUserId, isDismissed, createdAt])
+  @@index([tenantId, targetRole, category, createdAt])
+  @@index([tenantId, severity, createdAt])
+  @@index([expiresAt])
+}
+
+// ─── Phase 5: Student Premium Experience ──────────────────────────
+
+model StudentMilestone {
+  id          String   @id @default(cuid())
+  tenantId    String
+  studentId   String
+  key         String
+  title       String
+  description String?
+  icon        String?
+  earnedAt    DateTime @default(now())
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, studentId, key])
+  @@index([tenantId, studentId, earnedAt])
 }

@@ -6,10 +6,9 @@ function LoginPage() {
   const navigate = useNavigate();
   const { login, loading } = useAuth();
 
-  const [username, setUsername] = useState("SA001");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [touched, setTouched] = useState({ username: false, password: false });
 
@@ -80,7 +79,7 @@ function LoginPage() {
                     id="username"
                     name="username"
                     className="input login-input"
-                    placeholder="SA001"
+                    placeholder="Enter username"
                     autoComplete="username"
                     value={username}
                     onChange={(event) => setUsername(event.target.value.toUpperCase())}
@@ -149,20 +148,6 @@ function LoginPage() {
                 ) : null}
               </div>
 
-              <div className="login-row">
-                <label className="login-remember">
-                  <input
-                    type="checkbox"
-                    checked={remember}
-                    onChange={(e) => setRemember(e.target.checked)}
-                  />
-                  <span>Remember me</span>
-                </label>
-                <a href="#" className="login-link">
-                  Need help?
-                </a>
-              </div>
-
               <div className="login-status" aria-live="polite">
                 {error ? <p className="error">{error}</p> : null}
               </div>
@@ -173,10 +158,6 @@ function LoginPage() {
               >
                 {loading ? "Signing in..." : "Log in"}
               </button>
-
-              <a href="#" className="login-secondary" role="button">
-                Create an account
-              </a>
             </form>
           </div>
         </div>
@@ -186,23 +167,23 @@ function LoginPage() {
             <div className="login-hero-logo" aria-hidden="true">
               AW
             </div>
-            <h1 className="login-hero-title">Learn faster, stay focused</h1>
+            <h1 className="login-hero-title">Master mental math with the abacus</h1>
             <p className="login-hero-subtitle">
-              Simple, structured online courses with daily practice
+              The all-in-one platform for abacus centers, teachers, and students — structured courses, worksheets, and progress tracking.
             </p>
 
             <div className="login-badges" aria-label="Key statistics">
               <div className="login-badge">
-                <div className="login-badge-value">120+</div>
-                <div className="login-badge-label">Programs</div>
+                <div className="login-badge-value">6 Roles</div>
+                <div className="login-badge-label">One platform</div>
               </div>
               <div className="login-badge">
-                <div className="login-badge-value">4.9★</div>
-                <div className="login-badge-label">Student rating</div>
+                <div className="login-badge-value">Levels</div>
+                <div className="login-badge-label">Structured curriculum</div>
               </div>
               <div className="login-badge">
-                <div className="login-badge-value">24/7</div>
-                <div className="login-badge-label">Support</div>
+                <div className="login-badge-value">Live</div>
+                <div className="login-badge-label">Results &amp; analytics</div>
               </div>
             </div>
           </div>

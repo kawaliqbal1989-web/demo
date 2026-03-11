@@ -62,6 +62,7 @@ function AuthProvider({ children }) {
   const studentId = useMemo(() => getStudentIdFromToken(accessToken), [accessToken]);
 
   const isAuthenticated = Boolean(accessToken && refreshTokenValue && !isTokenExpired(accessToken));
+  const requiresPasswordChange = Boolean(mustChangePassword || getStoredMustChangePassword());
 
   const applyTokens = ({ accessToken: nextAccess, refreshToken: nextRefresh }) => {
     setAccessToken(nextAccess);
@@ -152,48 +153,12 @@ function AuthProvider({ children }) {
       const disp = data.data?.user?.displayName || null;
       setDisplayName(disp);
 
-      if (nextRole === "BP" && !mustChange) {
-        try {
-          const mine = await getMyBusinessPartner();
-          const id = mine?.data?.id || null;
-          setPartnerId(id);
-          setStoredPartnerId(id);
-        } catch {
-          setPartnerId(null);
-          setStoredPartnerId(null);
-        }
-      } else {
-        setPartnerId(null);
-        setStoredPartnerId(null);
-      }
-
-      if (nextRole === "FRANCHISE") {
-        if (!mustChange) {
-          try {
-            const mine = await getMyFranchise();
-            const id = mine?.data?.franchiseProfileId || null;
-            setStoredFranchiseId(id);
-          } catch {
-            setStoredFranchiseId(null);
-          }
-        } else {
-          setStoredFranchiseId(null);
-        }
-      } else {
+      setPartnerId(null);
+      setStoredPartnerId(null);
+      setBranding(null);
+      setStoredBranding(null);
+      if (nextRole !== "FRANCHISE" || mustChange) {
         setStoredFranchiseId(null);
-      }
-
-      if (!mustChange && shouldFetchBranding()) {
-        void getMyBranding()
-          .then((brandResp) => {
-            const bp = brandResp?.data?.businessPartner || null;
-            setBranding(bp);
-            setStoredBranding(bp);
-          })
-          .catch(() => {
-            setBranding(null);
-            setStoredBranding(null);
-          });
       }
 
       return {
@@ -266,7 +231,7 @@ function AuthProvider({ children }) {
   }, [navigate, logout, refreshSession]);
 
   useLayoutEffect(() => {
-    if (!apiReady || !isAuthenticated || capabilities) {
+    if (!apiReady || !isAuthenticated || capabilities || requiresPasswordChange) {
       return;
     }
 
@@ -287,43 +252,6 @@ function AuthProvider({ children }) {
 
         const disp = data.data?.user?.displayName || null;
         setDisplayName(disp);
-
-        if (getRoleFromToken(getStoredAccessToken()) === "BP" && !mustChange) {
-          void getMyBusinessPartner()
-            .then((mine) => {
-              const id = mine?.data?.id || null;
-              setPartnerId(id);
-              setStoredPartnerId(id);
-            })
-            .catch(() => {
-              setPartnerId(null);
-              setStoredPartnerId(null);
-            });
-        }
-
-        if (getRoleFromToken(getStoredAccessToken()) === "FRANCHISE" && !mustChange) {
-          void getMyFranchise()
-            .then((mine) => {
-              const id = mine?.data?.franchiseProfileId || null;
-              setStoredFranchiseId(id);
-            })
-            .catch(() => {
-              setStoredFranchiseId(null);
-            });
-        }
-
-        if (!mustChange && shouldFetchBranding()) {
-          void getMyBranding()
-            .then((brandResp) => {
-              const bp = brandResp?.data?.businessPartner || null;
-              setBranding(bp);
-              setStoredBranding(bp);
-            })
-            .catch(() => {
-              setBranding(null);
-              setStoredBranding(null);
-            });
-        }
       })
       .catch(() => {
         // Ignore; interceptor will handle token refresh or logout if needed.
@@ -332,10 +260,64 @@ function AuthProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [apiReady, isAuthenticated, capabilities, shouldFetchBranding]);
+  }, [apiReady, isAuthenticated, capabilities, requiresPasswordChange]);
 
   useLayoutEffect(() => {
-    if (!apiReady || !isAuthenticated || branding || !shouldFetchBranding()) {
+    if (!apiReady || !isAuthenticated || requiresPasswordChange) {
+      return;
+    }
+
+    if (role === "BP" && !partnerId) {
+      let cancelled = false;
+      void getMyBusinessPartner()
+        .then((mine) => {
+          if (cancelled) {
+            return;
+          }
+          const id = mine?.data?.id || null;
+          setPartnerId(id);
+          setStoredPartnerId(id);
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+          setPartnerId(null);
+          setStoredPartnerId(null);
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (role === "FRANCHISE" && !getStoredFranchiseId()) {
+      let cancelled = false;
+      void getMyFranchise()
+        .then((mine) => {
+          if (cancelled) {
+            return;
+          }
+          const id = mine?.data?.franchiseProfileId || null;
+          setStoredFranchiseId(id);
+        })
+        .catch(() => {
+          if (cancelled) {
+            return;
+          }
+          setStoredFranchiseId(null);
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    return undefined;
+  }, [apiReady, isAuthenticated, partnerId, requiresPasswordChange, role]);
+
+  useLayoutEffect(() => {
+    if (!apiReady || !isAuthenticated || requiresPasswordChange || branding || !shouldFetchBranding()) {
       return;
     }
 
@@ -360,7 +342,7 @@ function AuthProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [apiReady, isAuthenticated, branding, shouldFetchBranding]);
+  }, [apiReady, isAuthenticated, branding, requiresPasswordChange, shouldFetchBranding]);
 
   const value = {
     accessToken,

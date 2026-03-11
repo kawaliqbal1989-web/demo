@@ -3,6 +3,7 @@ import { Outlet } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { GlobalLoadingBar } from "../components/GlobalLoadingBar";
+import { Breadcrumb } from "../components/Breadcrumb";
 
 function MainLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -17,6 +18,7 @@ function MainLayout() {
         <GlobalLoadingBar />
         <Topbar onToggleSidebar={toggleSidebar} />
         <main className="content">
+          <Breadcrumb />
           <Outlet />
         </main>
       </div>

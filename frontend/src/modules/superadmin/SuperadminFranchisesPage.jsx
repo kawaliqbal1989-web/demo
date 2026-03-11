@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { PageHeader } from "../../components/PageHeader";
 import { listUsersByRole } from "../../services/usersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -59,7 +60,7 @@ function SuperadminFranchisesPage() {
   }, []);
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading franchises..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   const handleSearch = (event) => {
@@ -86,7 +87,7 @@ function SuperadminFranchisesPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <h2 style={{ margin: 0 }}>Franchise List</h2>
+      <PageHeader title="Franchise List" subtitle="Manage franchise organizations." />
       {error ? <div className="card"><p className="error">{error}</p></div> : null}
 
       <div className="card" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

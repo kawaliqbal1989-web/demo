@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { StatusBadge } from "../../components/StatusBadge";
+import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { listUsersByRole, createSuperadminUser } from "../../services/superadminService";
 
@@ -139,25 +140,25 @@ function SuperadminUsersPage() {
   const columns = isStudentView ? studentColumns : defaultColumns;
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading users..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <h2 style={{ margin: 0 }}>User Management</h2>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Browse all users by role</div>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="button" type="button" onClick={() => setShowCreate(!showCreate)} style={{ width: "auto" }}>
-            {showCreate ? "Cancel" : "+ New Superadmin"}
-          </button>
-          <button className="button secondary" type="button" onClick={() => void load({ limit, offset, role: roleFilter })} style={{ width: "auto" }}>
-            Refresh
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="User Management"
+        subtitle="Browse all users by role"
+        actions={
+          <>
+            <button className="button" type="button" onClick={() => setShowCreate(!showCreate)} style={{ width: "auto" }}>
+              {showCreate ? "Cancel" : "+ New Superadmin"}
+            </button>
+            <button className="button secondary" type="button" onClick={() => void load({ limit, offset, role: roleFilter })} style={{ width: "auto" }}>
+              Refresh
+            </button>
+          </>
+        }
+      />
 
       {error ? (
         <div className="card"><p className="error" style={{ margin: 0 }}>{error}</p></div>

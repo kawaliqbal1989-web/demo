@@ -28,6 +28,7 @@ function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [hasCriticalUnread, setHasCriticalUnread] = useState(false);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
   const unauthorizedRef = useRef(false);
@@ -55,6 +56,8 @@ function NotificationBell() {
           ? data.unreadCount
           : list.filter((n) => !n.isRead).length;
       setUnreadCount(count);
+      const hasCritical = list.some(n => !n.isRead && (n.priority === "CRITICAL" || n.priority === "HIGH"));
+      setHasCriticalUnread(hasCritical);
     } catch (error) {
       refreshInFlightRef.current = null;
       if (error?.response?.status === 401) {
@@ -151,7 +154,7 @@ function NotificationBell() {
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
         {unreadCount > 0 && (
-          <span className="notif-bell-badge">
+          <span className={`notif-bell-badge ${hasCriticalUnread ? "notif-bell-badge--critical" : ""}`}>
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
@@ -181,15 +184,25 @@ function NotificationBell() {
             {items.map((n) => (
               <div
                 key={n.id}
-                className={`notif-item ${n.isRead ? "" : "notif-item--unread"}`}
+                className={`notif-item ${n.isRead ? "" : "notif-item--unread"} ${n.priority === "CRITICAL" ? "notif-item--critical" : n.priority === "HIGH" ? "notif-item--high" : ""}`}
                 onClick={() => !n.isRead && handleMarkRead(n.id)}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => e.key === "Enter" && !n.isRead && handleMarkRead(n.id)}
               >
-                <div className="notif-item__title">{n.title || n.type}</div>
+                <div className="notif-item__top">
+                  <div className="notif-item__title">{n.title || n.type}</div>
+                  {n.priority && n.priority !== "NORMAL" && (
+                    <span className={`notif-priority-dot notif-priority-dot--${n.priority.toLowerCase()}`} />
+                  )}
+                </div>
                 <div className="notif-item__msg">{n.message}</div>
-                <div className="notif-item__time">{timeAgo(n.createdAt)}</div>
+                <div className="notif-item__meta">
+                  <span className="notif-item__time">{timeAgo(n.createdAt)}</span>
+                  {n.category && n.category !== "SYSTEM" && (
+                    <span className="notif-item__cat">{n.category.toLowerCase()}</span>
+                  )}
+                </div>
               </div>
             ))}
           </div>

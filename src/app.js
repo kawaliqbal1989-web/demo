@@ -101,11 +101,23 @@ app.get("/health", (_req, res) => {
 
 app.get("/health/db", async (_req, res) => {
   try {
-    // Lightweight query; avoids loading lots of data.
     await prisma.tenant.findFirst({ select: { id: true } });
     return res.apiSuccess("Database healthy", { status: "ok" });
   } catch (error) {
     return res.apiError(503, "Database unavailable", "DATABASE_UNAVAILABLE");
+  }
+});
+
+app.get("/ready", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.json({
+      ready: true,
+      uptime_seconds: Math.floor(process.uptime()),
+      version: process.env.npm_package_version || "0.1.0",
+    });
+  } catch {
+    return res.status(503).json({ ready: false });
   }
 });
 

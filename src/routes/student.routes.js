@@ -43,6 +43,14 @@ import {
   getAiPlaygroundHistory
 } from "../controllers/ai-playground.controller.js";
 import { getStudentLeaderboard } from "../controllers/student-leaderboard.controller.js";
+import {
+  getCoachData,
+  getDailyMission,
+  getWeeklyPlan,
+  getReadiness,
+  getPerformanceExplainer,
+} from "../controllers/student-coach.controller.js";
+import { getStudentAiNarrative } from "../controllers/ai-narrative.controller.js";
 import { auditAction } from "../middleware/audit-logger.js";
 import { authRateLimiter } from "../middleware/auth-rate-limit.js";
 
@@ -280,6 +288,36 @@ studentRouter.post(
   "/reassignment-requests/:requestId/cancel",
   auditAction("STUDENT_CANCEL_REASSIGNMENT_REQUEST", "REASSIGNMENT_REQUEST", (req) => req.params.requestId),
   cancelStudentReassignmentRequest
+);
+
+// ── Student Coach (Phase 5) ──
+studentRouter.get(
+  "/coach/dashboard",
+  auditAction("STUDENT_VIEW_COACH", "STUDENT", (req) => req.student.id),
+  getCoachData
+);
+studentRouter.get(
+  "/coach/daily-mission",
+  getDailyMission
+);
+studentRouter.get(
+  "/coach/weekly-plan",
+  getWeeklyPlan
+);
+studentRouter.get(
+  "/coach/readiness",
+  getReadiness
+);
+studentRouter.get(
+  "/coach/performance",
+  getPerformanceExplainer
+);
+
+/* ── AI Narrative (Phase 10) ── */
+studentRouter.get(
+  "/ai/narrative",
+  auditAction("STUDENT_AI_NARRATIVE", "STUDENT", (req) => req.student.id),
+  getStudentAiNarrative
 );
 
 export { studentRouter };

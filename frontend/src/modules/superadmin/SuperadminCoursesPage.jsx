@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { archiveCourse, createCourse, listCourses, updateCourse } from "../../services/coursesService";
 
@@ -54,7 +55,7 @@ function SuperadminCoursesPage() {
   }, []);
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading courses..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   const resetForm = () => {
@@ -149,12 +150,7 @@ function SuperadminCoursesPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>Courses</h2>
-        <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
-          Create and manage Abacus Online courses.
-        </p>
-      </div>
+      <PageHeader title="Courses" subtitle="Create and manage Abacus Online courses." />
 
       {error ? <div className="card"><p className="error">{error}</p></div> : null}
 

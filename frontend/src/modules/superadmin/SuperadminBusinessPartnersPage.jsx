@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { InputDialog } from "../../components/InputDialog";
@@ -10,6 +10,7 @@ import {
   setBusinessPartnerStatus
 } from "../../services/businessPartnersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { PageHeader } from "../../components/PageHeader";
 import { useAuth } from "../../hooks/useAuth";
 import { ROLES } from "../../types/auth";
 import { useNavigate } from "react-router-dom";
@@ -62,7 +63,7 @@ function SuperadminBusinessPartnersPage() {
   }, []);
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading business partners..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   const handleRefresh = () => {
@@ -105,19 +106,21 @@ function SuperadminBusinessPartnersPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <h2 style={{ margin: 0 }}>Business Partners</h2>
-        {role === ROLES.SUPERADMIN && (
-          <button
-            className="button"
-            type="button"
-            onClick={() => navigate("/superadmin/business-partners/new")}
-            style={{ width: "auto" }}
-          >
-            Create Business Partner
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Business Partners"
+        actions={
+          role === ROLES.SUPERADMIN ? (
+            <button
+              className="button"
+              type="button"
+              onClick={() => navigate("/superadmin/business-partners/new")}
+              style={{ width: "auto" }}
+            >
+              Create Business Partner
+            </button>
+          ) : null
+        }
+      />
 
       <div className="card" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <form onSubmit={handleSearch} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

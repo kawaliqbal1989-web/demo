@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { PageHeader } from "../../components/PageHeader";
 import { listUsersByRole } from "../../services/usersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -59,7 +60,7 @@ function SuperadminCentersPage() {
   }, []);
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading centers..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   const handleSearch = (event) => {
@@ -93,12 +94,7 @@ function SuperadminCentersPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>Center / School List</h2>
-        <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
-          Review centers under your franchise.
-        </p>
-      </div>
+      <PageHeader title="Center / School List" subtitle="Review centers under your franchise." />
       {error ? <div className="card"><p className="error">{error}</p></div> : null}
 
       <div className="card" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>

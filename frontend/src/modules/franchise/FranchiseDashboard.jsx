@@ -1,26 +1,32 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { MetricCard } from "../../components/MetricCard";
+import { PageHeader } from "../../components/PageHeader";
+import { InsightPanel } from "../../components/InsightCard";
+import { NetworkPulseCard, CenterRanking } from "../../components/LeadershipIntel";
+import { getInsights } from "../../services/insightsService";
+import { getFranchiseNetworkPulse } from "../../services/leadershipIntelService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { useAuth } from "../../hooks/useAuth";
 import { getFranchiseDashboard, getMyFranchise } from "../../services/franchiseService";
+import { NetworkAdvisor } from "../../components/AiNarrativeSurfaces";
 
 const ALERT_STYLES = {
   critical: {
-    background: "rgba(190, 24, 24, 0.08)",
-    border: "1px solid rgba(190, 24, 24, 0.2)",
-    color: "#991b1b"
+    background: "var(--color-bg-danger-light)",
+    border: "1px solid var(--color-border-danger)",
+    color: "var(--color-text-danger)"
   },
   warning: {
-    background: "rgba(217, 119, 6, 0.08)",
-    border: "1px solid rgba(217, 119, 6, 0.2)",
-    color: "#9a3412"
+    background: "var(--color-bg-warning)",
+    border: "1px solid var(--color-border-warning)",
+    color: "var(--color-text-warning)"
   },
   info: {
-    background: "rgba(8, 145, 178, 0.08)",
-    border: "1px solid rgba(8, 145, 178, 0.2)",
-    color: "#155e75"
+    background: "var(--color-bg-info-light)",
+    border: "1px solid var(--color-primary)",
+    color: "var(--color-text-info)"
   }
 };
 
@@ -82,7 +88,7 @@ function RankingList({ title, items, valueLabel, valueFormatter, subtitle }) {
                 alignItems: "center",
                 gap: 12,
                 paddingBottom: 10,
-                borderBottom: "1px solid rgba(15, 23, 42, 0.08)"
+                borderBottom: "1px solid var(--color-border-divider)"
               }}
             >
               <div style={{ minWidth: 0 }}>
@@ -115,6 +121,10 @@ function FranchiseDashboard() {
   const [kpis, setKpis] = useState(null);
   const [dashboard, setDashboard] = useState(null);
   const [profile, setProfile] = useState(null);
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [networkPulse, setNetworkPulse] = useState(null);
+  const [networkPulseLoading, setNetworkPulseLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -142,8 +152,28 @@ function FranchiseDashboard() {
     };
   }, []);
 
+  useEffect(() => {
+    setInsightsLoading(true);
+    getInsights()
+      .then((res) => setInsights(res.data?.insights || []))
+      .catch(() => {})
+      .finally(() => setInsightsLoading(false));
+
+    setNetworkPulseLoading(true);
+    getFranchiseNetworkPulse()
+      .then((res) => setNetworkPulse(res.data || null))
+      .catch(() => {})
+      .finally(() => setNetworkPulseLoading(false));
+  }, []);
+
   if (loading && !kpis && !profile && !dashboard) {
-    return <LoadingState label="Loading dashboard..." />;
+    return (
+      <section style={{ display: "grid", gap: 16 }}>
+        <SkeletonLoader variant="card" count={4} />
+        <SkeletonLoader variant="detail" />
+        <SkeletonLoader variant="table" />
+      </section>
+    );
   }
 
   const overview = dashboard?.overview || {};
@@ -156,19 +186,33 @@ function FranchiseDashboard() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <div className="card">
-        <h2 className="dashboard-title">Franchise Dashboard</h2>
-        <div className="subtext">Manage your centers and operations.</div>
-        {branding?.displayName || branding?.name ? (
-          <div className="dash-brand-name">{branding?.displayName || branding?.name}</div>
-        ) : null}
+      <PageHeader
+        title="Franchise Dashboard"
+        subtitle={branding?.displayName || branding?.name || "Manage your centers and operations."}
+      >
         {dashboard?.meta?.generatedAt ? (
-          <div style={{ marginTop: 8, fontSize: 12, color: "var(--color-text-muted)" }}>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: -4 }}>
             Window: last {dashboard.meta.windowDays} days · Updated {new Date(dashboard.meta.generatedAt).toLocaleString()}
           </div>
         ) : null}
-        {error ? <div style={{ color: "var(--color-text-danger)", marginTop: 8 }}>{error}</div> : null}
-      </div>
+        {error ? <div style={{ color: "var(--color-text-danger)" }}>{error}</div> : null}
+      </PageHeader>
+
+      <InsightPanel
+        insights={insights}
+        loading={insightsLoading}
+        onDismiss={(id) => setInsights((prev) => prev.filter((i) => i.id !== id))}
+      />
+
+      <NetworkAdvisor role="FRANCHISE" />
+
+      <NetworkPulseCard data={networkPulse} loading={networkPulseLoading} roleLabel="Franchise" />
+
+      <CenterRanking
+        topCenters={networkPulse?.topCenters}
+        bottomCenters={networkPulse?.bottomCenters}
+        loading={networkPulseLoading}
+      />
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 700 }}>Welcome, {username || profile?.name || "Franchise"}</div>
@@ -201,12 +245,14 @@ function FranchiseDashboard() {
           label="Active Centers"
           value={`${overview.activeCentersCount ?? kpis?.centersCount ?? 0}/${overview.centersCount ?? kpis?.centersCount ?? 0}`}
           sublabel={`${overview.inactiveCentersCount ?? 0} need attention or are inactive`}
+          icon="🏫"
+          accent="var(--role-franchise)"
         />
-        <MetricCard label="Active Students" value={overview.activeStudentsCount ?? kpis?.studentsCount ?? 0} />
-        <MetricCard label="Teachers" value={overview.teachersCount ?? kpis?.teachersCount ?? 0} />
-        <MetricCard label="Attendance 30d" value={formatPercent(operations.attendanceRate30d ?? kpis?.attendanceRate30d)} />
-        <MetricCard label="Collections 30d" value={formatCurrency(finance.collections30d ?? kpis?.collections30d)} />
-        <MetricCard label="Pending Settlements" value={finance.pendingSettlementsCount ?? 0} />
+        <MetricCard label="Active Students" value={overview.activeStudentsCount ?? kpis?.studentsCount ?? 0} icon="👥" />
+        <MetricCard label="Teachers" value={overview.teachersCount ?? kpis?.teachersCount ?? 0} icon="🏅" />
+        <MetricCard label="Attendance 30d" value={formatPercent(operations.attendanceRate30d ?? kpis?.attendanceRate30d)} icon="📊" />
+        <MetricCard label="Collections 30d" value={formatCurrency(finance.collections30d ?? kpis?.collections30d)} icon="💰" accent="#16a34a" />
+        <MetricCard label="Pending Settlements" value={finance.pendingSettlementsCount ?? 0} icon="⏳" accent="#d97706" />
       </div>
 
       <div style={{ display: "grid", gap: 10 }}>

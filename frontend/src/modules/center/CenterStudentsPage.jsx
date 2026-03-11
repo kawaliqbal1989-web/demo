@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
-import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { DataTable, PaginationBar, SavedViewBar, useSavedViews } from "../../components/DataTable";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { InputDialog } from "../../components/InputDialog";
+import { PageHeader } from "../../components/PageHeader";
+import { BulkOperationsToolbar } from "../../components/WorkflowWidgets";
 import {
   assignStudentCourse,
   assignStudentLevel,
@@ -46,6 +48,7 @@ function pickTeacherLabel(teacher) {
 
 function CenterStudentsPage() {
   const [rows, setRows] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(new Set());
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -54,6 +57,7 @@ function CenterStudentsPage() {
   const [teachers, setTeachers] = useState([]);
   const [levels, setLevels] = useState([]);
   const [courses, setCourses] = useState([]);
+  const [batches, setBatches] = useState([]);
 
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -129,7 +133,6 @@ function CenterStudentsPage() {
   const [assignCourseSaving, setAssignCourseSaving] = useState(false);
   const [assignCourseError, setAssignCourseError] = useState("");
 
-  const [batches, setBatches] = useState([]);
   const [enrollStudentId, setEnrollStudentId] = useState(null);
   const [enrollCurrentLabel, setEnrollCurrentLabel] = useState("");
   const [enrollSelectedBatchId, setEnrollSelectedBatchId] = useState("");
@@ -1008,7 +1011,7 @@ function CenterStudentsPage() {
   const levelOptions = useMemo(() => levels, [levels]);
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading students..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   return (
@@ -1865,7 +1868,22 @@ function CenterStudentsPage() {
         </form>
       ) : null}
 
-      <DataTable columns={columns} rows={rows} keyField="id" />
+      <BulkOperationsToolbar
+        selectedIds={Array.from(selectedIds)}
+        onComplete={() => { setSelectedIds(new Set()); void load({ limit, offset, q, status: statusFilter, teacherUserId: teacherFilter, levelId: levelFilter, courseCode: courseCodeFilter }); }}
+        levels={levels}
+        batches={batches}
+        teachers={teachers.map(t => ({ id: t.userId || t.id, name: t.name || `${t.firstName || ''} ${t.lastName || ''}`.trim() }))}
+      />
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        keyField="id"
+        selectable
+        selectedKeys={selectedIds}
+        onSelectionChange={setSelectedIds}
+      />
 
       <PaginationBar
         limit={limit}

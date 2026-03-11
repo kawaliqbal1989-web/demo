@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { PageHeader } from "../../components/PageHeader";
 import { listBatches } from "../../services/batchesService";
 import { createEnrollment, exportEnrollmentsCsvUrl, listEnrollments, updateEnrollment } from "../../services/enrollmentsService";
 import { listStudents } from "../../services/studentsService";
@@ -176,15 +177,12 @@ function CenterEnrollmentsPage() {
   };
 
   if (loading && !batches.length) {
-    return <LoadingState label="Loading roster..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>Enrollments / Roster</h2>
-        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>View roster by batch and enroll/unenroll students</div>
-      </div>
+      <PageHeader title="Enrollments / Roster" subtitle="View roster by batch and enroll/unenroll students" />
 
       {error ? (
         <div className="card">

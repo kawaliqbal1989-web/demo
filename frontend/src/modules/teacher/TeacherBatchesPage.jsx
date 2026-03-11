@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { DataTable } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   assignWorksheetToBatch,
@@ -202,15 +203,12 @@ function TeacherBatchesPage() {
   }, [searchParams]);
 
   if (loading) {
-    return <LoadingState label="Loading batches..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>My Batches</h2>
-        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Batches assigned to you and their students.</div>
-      </div>
+      <PageHeader title="My Batches" subtitle="Batches assigned to you and their students." />
 
       {!batches.length ? <div className="card" style={{ color: "var(--color-text-muted)" }}>No batches assigned yet.</div> : null}
 
@@ -249,7 +247,7 @@ function TeacherBatchesPage() {
       {!batchId ? (
         <div className="card" style={{ color: "var(--color-text-muted)" }}>Select a batch to view its roster.</div>
       ) : rosterLoading ? (
-        <LoadingState label="Loading roster..." />
+        <SkeletonLoader variant="list" rows={4} />
       ) : (
         <div className="card" style={{ display: "grid", gap: 10 }}>
           <h3 style={{ margin: 0 }}>Batch Roster (read-only)</h3>
@@ -371,7 +369,7 @@ function TeacherBatchesPage() {
           {!mockTestId ? (
             <div style={{ color: "var(--color-text-muted)" }}>Select a mock test.</div>
           ) : loadingMockTest ? (
-            <LoadingState label="Loading mock test..." />
+            <SkeletonLoader variant="list" rows={3} />
           ) : (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

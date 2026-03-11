@@ -1,11 +1,32 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { PageHeader } from "../../components/PageHeader";
 import { createTeacher, listTeachers, resetTeacherPassword, shiftTeacherStudents, updateTeacher, uploadTeacherPhoto } from "../../services/teachersService";
 import { baseURL } from "../../services/apiClient";
 import { listStudents } from "../../services/studentsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+
+const photoFrameStyle = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  padding: 8,
+  background: "linear-gradient(180deg, var(--color-bg-subtle), var(--color-bg-muted))",
+  border: "1px solid var(--color-border-strong)",
+  borderRadius: 12,
+  boxShadow: "0 8px 24px rgba(0,0,0,0.12)"
+};
+
+const buildPhotoStyle = (size, objectFit = "cover") => ({
+  width: size,
+  height: size,
+  objectFit,
+  borderRadius: 10,
+  border: "1px solid var(--color-border)",
+  background: "var(--color-bg-card)"
+});
 
 function CenterTeachersPage() {
   const [rows, setRows] = useState([]);
@@ -38,6 +59,7 @@ function CenterTeachersPage() {
   const [createLoginAccount, setCreateLoginAccount] = useState(true);
   const [creating, setCreating] = useState(false);
   const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState("");
   const [tempPasswordDialog, setTempPasswordDialog] = useState(null);
 
   const [q, setQ] = useState("");
@@ -127,6 +149,18 @@ function CenterTeachersPage() {
   }, []);
 
   useEffect(() => {
+    if (!photoFile) {
+      setPhotoPreview("");
+      return undefined;
+    }
+    const objectUrl = URL.createObjectURL(photoFile);
+    setPhotoPreview(objectUrl);
+    return () => {
+      URL.revokeObjectURL(objectUrl);
+    };
+  }, [photoFile]);
+
+  useEffect(() => {
     if (!editPhotoFile) {
       setEditPhotoPreview("");
       return undefined;
@@ -164,6 +198,16 @@ function CenterTeachersPage() {
     setStatus("ACTIVE");
     setCreateLoginAccount(true);
     setPhotoFile(null);
+    setPhotoPreview("");
+  };
+
+  const getTeacherInitials = (row) => {
+    const label = row?.teacherProfile?.fullName || row?.username || "Teacher";
+    const parts = String(label)
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2);
+    return (parts.map((part) => part[0]).join("") || "T").toUpperCase();
   };
 
   const loadAssignedStudents = async (teacher, page = 0) => {
@@ -383,6 +427,33 @@ function CenterTeachersPage() {
 
   const columns = [
     {
+      key: "photo",
+      header: "Photo",
+      render: (r) => {
+        const src = resolvePhotoUrl(r?.teacherProfile?.photoUrl);
+        const label = r?.teacherProfile?.fullName || r?.username || "Teacher";
+        return src ? (
+          <div style={photoFrameStyle}>
+            <img src={src} alt={label} style={buildPhotoStyle(52)} />
+          </div>
+        ) : (
+          <div
+            style={{
+              ...photoFrameStyle,
+              width: 68,
+              height: 68,
+              padding: 0,
+              color: "var(--color-text-secondary)",
+              fontSize: 14,
+              fontWeight: 800
+            }}
+          >
+            {getTeacherInitials(r)}
+          </div>
+        );
+      }
+    },
+    {
       key: "username",
       header: "Code",
       render: (r) => (r?.username || "")
@@ -438,17 +509,16 @@ function CenterTeachersPage() {
   const selectedTeacherLabel = selectedTeacher
     ? `${selectedTeacher?.teacherProfile?.fullName || selectedTeacher?.username || "Teacher"} (${selectedTeacher?.username || ""})`.trim()
     : "";
+  const createPhotoPreviewSrc = photoPreview || resolvePhotoUrl(photoUrl);
+  const createPhotoPreviewLabel = photoPreview ? "Selected Photo" : "Photo Preview";
 
   if (loading && !rows.length) {
-    return <LoadingState label="Loading teachers..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>Teachers</h2>
-        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Create and manage teachers for this center.</div>
-      </div>
+      <PageHeader title="Teachers" subtitle="Create and manage teachers for this center." />
 
       {error ? (
         <div className="card">
@@ -629,6 +699,14 @@ function CenterTeachersPage() {
               onChange={(e) => setPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
             />
           </label>
+          {createPhotoPreviewSrc ? (
+            <div style={{ gridColumn: "1 / -1", display: "grid", gap: 6 }}>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{createPhotoPreviewLabel}</div>
+              <div style={photoFrameStyle}>
+                <img src={createPhotoPreviewSrc} alt="Teacher selected" style={buildPhotoStyle(160, "contain")} />
+              </div>
+            </div>
+          ) : null}
           <label style={{ gridColumn: "1 / -1" }}>
             Notes
             <textarea className="input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Additional notes" rows={3} />
@@ -722,11 +800,13 @@ function CenterTeachersPage() {
             {resolvePhotoUrl(viewTeacher.photoUrl) ? (
               <div style={{ gridColumn: "1 / -1", display: "grid", gap: 6 }}>
                 <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Photo Preview</div>
-                <img
-                  src={resolvePhotoUrl(viewTeacher.photoUrl)}
-                  alt="Teacher"
-                  style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-border)" }}
-                />
+                <div style={photoFrameStyle}>
+                  <img
+                    src={resolvePhotoUrl(viewTeacher.photoUrl)}
+                    alt="Teacher"
+                    style={buildPhotoStyle(160, "contain")}
+                  />
+                </div>
               </div>
             ) : null}
           </div>
@@ -877,21 +957,25 @@ function CenterTeachersPage() {
             {resolvePhotoUrl(editingTeacher.photoUrl) ? (
               <div style={{ gridColumn: "1 / -1", display: "grid", gap: 6 }}>
                 <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Current Photo</div>
-                <img
-                  src={resolvePhotoUrl(editingTeacher.photoUrl)}
-                  alt="Teacher"
-                  style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-border)" }}
-                />
+                <div style={photoFrameStyle}>
+                  <img
+                    src={resolvePhotoUrl(editingTeacher.photoUrl)}
+                    alt="Teacher"
+                    style={buildPhotoStyle(160, "contain")}
+                  />
+                </div>
               </div>
             ) : null}
             {editPhotoFile ? (
               <div style={{ gridColumn: "1 / -1", display: "grid", gap: 6 }}>
                 <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Selected New Photo</div>
-                <img
-                  src={editPhotoPreview}
-                  alt="Teacher new"
-                  style={{ width: 140, height: 140, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-border)" }}
-                />
+                <div style={photoFrameStyle}>
+                  <img
+                    src={editPhotoPreview}
+                    alt="Teacher new"
+                    style={buildPhotoStyle(160, "contain")}
+                  />
+                </div>
               </div>
             ) : null}
           </div>
@@ -918,7 +1002,7 @@ function CenterTeachersPage() {
             </div>
           </div>
 
-          {loadingStudents ? <LoadingState label="Loading assigned students..." /> : null}
+          {loadingStudents ? <SkeletonLoader variant="list" rows={3} /> : null}
 
           <DataTable
             columns={[

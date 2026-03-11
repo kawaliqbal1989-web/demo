@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { InputDialog } from "../../components/InputDialog";
+import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { listMyStudents, overrideTeacherStudentPromotion } from "../../services/teacherPortalService";
 
@@ -71,7 +72,7 @@ function TeacherStudentsPage() {
   }, [search]);
 
   if (loading) {
-    return <LoadingState label="Loading students..." />;
+    return <SkeletonLoader variant="table" rows={6} />;
   }
 
   const total = rows.length;
@@ -98,15 +99,15 @@ function TeacherStudentsPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Assigned Students</h2>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Students assigned to you through active enrollments.</div>
-        </div>
-        <Link className="button secondary" style={{ width: "auto" }} to="/teacher/results">
-          Open Results
-        </Link>
-      </div>
+      <PageHeader
+        title="Assigned Students"
+        subtitle="Students assigned to you through active enrollments."
+        actions={
+          <Link className="button secondary" style={{ width: "auto" }} to="/teacher/results">
+            Open Results
+          </Link>
+        }
+      />
 
       <div className="card" style={{ display: "grid", gap: 8 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>

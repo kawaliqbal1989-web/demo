@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { callAiPlayground, getAiPlaygroundUsage, getAiPlaygroundHistory } from "../../services/aiPlaygroundService";
+import { getCoachDashboard } from "../../services/studentCoachService";
+import { PageHeader } from "../../components/PageHeader";
+import { DailyMission, ReadinessGauge, PerformanceExplainer, MilestoneCard } from "../../components/StudentCoach";
 
 /* ------------------------------------------------------------------ */
 /*  Reusable tiny components                                          */
@@ -412,7 +415,7 @@ function QuizPlayer({ questions }) {
 /* ------------------------------------------------------------------ */
 
 function StudentAiPlaygroundPage() {
-  const [tab, setTab] = useState("playground"); // playground | learn | chatbot-builder | history
+  const [tab, setTab] = useState("ai-coach"); // ai-coach | playground | learn | chatbot-builder | history
   const [activeTool, setActiveTool] = useState(TOOLS[0].id);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -421,11 +424,17 @@ function StudentAiPlaygroundPage() {
   const [usage, setUsage] = useState(null);
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [coach, setCoach] = useState(null);
+  const [coachLoading, setCoachLoading] = useState(true);
 
   useEffect(() => {
     getAiPlaygroundUsage()
       .then((res) => setUsage(res?.data || null))
       .catch(() => {});
+    getCoachDashboard()
+      .then((res) => setCoach(res.data?.data || null))
+      .catch(() => {})
+      .finally(() => setCoachLoading(false));
   }, []);
 
   const selectedTool = TOOLS.find((t) => t.id === activeTool) || TOOLS[0];
@@ -481,18 +490,17 @@ function StudentAiPlaygroundPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div>
-        <h2 style={{ margin: 0 }}>🤖 AI Playground</h2>
-        <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
-          Learn about AI by using real AI tools! Experiment, explore, and discover how artificial intelligence works.
-        </div>
-      </div>
+      <PageHeader
+        title="🤖 AI Learning Lab"
+        subtitle="Your personal AI coach, tools, and learning space — all powered by intelligence."
+      />
 
       <UsageBadge usage={usage} />
 
       {/* Tab bar */}
       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
         {[
+          { id: "ai-coach", label: "🧠 AI Coach" },
           { id: "playground", label: "🧪 AI Tools" },
           { id: "learn", label: "📖 Learn About AI" },
           { id: "chatbot-builder", label: "🤖 Build a Chatbot" },
@@ -508,6 +516,18 @@ function StudentAiPlaygroundPage() {
           </button>
         ))}
       </div>
+
+      {/* ---- AI Coach Tab ---- */}
+      {tab === "ai-coach" ? (
+        <div style={{ display: "grid", gap: 14 }}>
+          <DailyMission missions={coach?.dailyMission} loading={coachLoading} />
+          <div className="coach-grid">
+            <ReadinessGauge readiness={coach?.readiness} loading={coachLoading} />
+            <MilestoneCard milestones={coach?.milestones} loading={coachLoading} />
+          </div>
+          <PerformanceExplainer data={coach?.performanceExplainer} loading={coachLoading} />
+        </div>
+      ) : null}
 
       {/* ---- Playground Tab ---- */}
       {tab === "playground" ? (

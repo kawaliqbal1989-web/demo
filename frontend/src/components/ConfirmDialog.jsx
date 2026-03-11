@@ -1,38 +1,51 @@
+import { useEffect, useRef } from "react";
+
 function ConfirmDialog({
   open,
   title = "Confirm",
   message = "Are you sure?",
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
+  danger = false,
   onConfirm,
-  onCancel
+  onCancel,
 }) {
-  if (!open) {
-    return null;
-  }
+  const cancelRef = useRef(null);
+
+  /* Focus trap: focus the cancel button on open, close on Escape */
+  useEffect(() => {
+    if (!open) return;
+    cancelRef.current?.focus();
+    const onKey = (e) => {
+      if (e.key === "Escape") onCancel?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.35)",
-        display: "grid",
-        placeItems: "center",
-        padding: 16,
-        zIndex: 50
-      }}
-    >
-      <div className="card" style={{ width: "100%", maxWidth: 420 }}>
-        <h3 style={{ marginTop: 0 }}>{title}</h3>
-        <p style={{ marginTop: 0 }}>{message}</p>
-        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-          <button className="button secondary" style={{ width: "auto" }} onClick={onCancel}>
+    <div className="modal-overlay" role="dialog" aria-modal="true" onClick={onCancel}>
+      <div className="modal-panel" style={{ maxWidth: 420 }} onClick={(e) => e.stopPropagation()}>
+        <div className="modal-panel__header">
+          <h3 className="modal-panel__title">{title}</h3>
+          <button className="modal-panel__close" onClick={onCancel} aria-label="Close">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div className="modal-panel__body">{message}</div>
+        <div className="modal-panel__footer">
+          <button ref={cancelRef} className="button secondary" style={{ width: "auto" }} onClick={onCancel}>
             {cancelLabel}
           </button>
-          <button className="button" style={{ width: "auto" }} onClick={onConfirm}>
+          <button
+            className="button"
+            style={{ width: "auto", ...(danger ? { background: "var(--color-text-danger)", borderColor: "var(--color-text-danger)" } : {}) }}
+            onClick={onConfirm}
+          >
             {confirmLabel}
           </button>
         </div>

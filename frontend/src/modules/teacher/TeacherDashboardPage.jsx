@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { Link } from "react-router-dom";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { MetricCard } from "../../components/MetricCard";
+import { PageHeader } from "../../components/PageHeader";
+import { InsightPanel } from "../../components/InsightCard";
+import { AtRiskQueue, BatchHeatmap, WorksheetRecommendations, InterventionPanel } from "../../components/TeacherCockpit";
+import { getInsights } from "../../services/insightsService";
+import { getCockpitDashboard } from "../../services/teacherCockpitService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getTeacherMe, listMyStudents } from "../../services/teacherPortalService";
+import { TeacherCopilot } from "../../components/AiNarrativeSurfaces";
 
 function TeacherDashboardPage() {
   const [loading, setLoading] = useState(true);
@@ -12,6 +18,10 @@ function TeacherDashboardPage() {
   const [me, setMe] = useState(null);
   const [assignedStudentsCount, setAssignedStudentsCount] = useState(0);
   const [activeEnrollmentsCount, setActiveEnrollmentsCount] = useState(0);
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [cockpit, setCockpit] = useState(null);
+  const [cockpitLoading, setCockpitLoading] = useState(true);
   const { branding } = useAuth();
 
   const load = async () => {
@@ -40,27 +50,41 @@ function TeacherDashboardPage() {
     void load();
   }, []);
 
+  useEffect(() => {
+    setInsightsLoading(true);
+    getInsights()
+      .then((res) => setInsights(res.data?.insights || []))
+      .catch(() => {})
+      .finally(() => setInsightsLoading(false));
+
+    setCockpitLoading(true);
+    getCockpitDashboard()
+      .then((res) => setCockpit(res.data || null))
+      .catch(() => {})
+      .finally(() => setCockpitLoading(false));
+  }, []);
+
   if (loading) {
-    return <LoadingState label="Loading dashboard..." />;
+    return (
+      <section className="dash-section">
+        <SkeletonLoader variant="card" count={2} />
+        <SkeletonLoader variant="detail" />
+      </section>
+    );
   }
 
   return (
     <section className="dash-section">
-      <div className="dash-header">
-        <div>
-          <h2 className="dashboard-title">Teacher Dashboard</h2>
-          <div className="subtext">Your assigned students and enrollments.</div>
-        </div>
-
-        <div className="dash-header__actions">
-          <Link className="button secondary" style={{ width: "auto" }} to="/teacher/notes">
-            Notes
-          </Link>
-          <Link className="button" style={{ width: "auto" }} to="/teacher/students">
-            Assigned Students
-          </Link>
-        </div>
-      </div>
+      <PageHeader
+        title="Teacher Dashboard"
+        subtitle="Your assigned students and enrollments."
+        actions={
+          <>
+            <Link className="button secondary" style={{ width: "auto" }} to="/teacher/notes">Notes</Link>
+            <Link className="button" style={{ width: "auto" }} to="/teacher/students">Assigned Students</Link>
+          </>
+        }
+      />
 
       {error ? (
         <div className="card">
@@ -71,33 +95,52 @@ function TeacherDashboardPage() {
         </div>
       ) : null}
 
+      <InsightPanel
+        insights={insights}
+        loading={insightsLoading}
+        onDismiss={(id) => setInsights((prev) => prev.filter((i) => i.id !== id))}
+      />
+
+      <TeacherCopilot />
+
       <div className="dash-kpi-grid">
-        <MetricCard label="Assigned Students" value={assignedStudentsCount} />
-        <MetricCard label="Active Enrollments" value={activeEnrollmentsCount} />
+        <MetricCard label="Assigned Students" value={assignedStudentsCount} icon="👥" accent="var(--role-teacher)" />
+        <MetricCard label="Active Enrollments" value={activeEnrollmentsCount} icon="📚" />
+      </div>
+
+      <InterventionPanel items={cockpit?.interventions} loading={cockpitLoading} />
+
+      <AtRiskQueue data={cockpit?.atRiskQueue} loading={cockpitLoading} />
+
+      <div className="cockpit-grid">
+        <BatchHeatmap batches={cockpit?.batchHeatmap} loading={cockpitLoading} />
+        <WorksheetRecommendations items={cockpit?.worksheetRecommendations} loading={cockpitLoading} />
       </div>
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div style={{ fontWeight: 700 }}>Teacher Profile</div>
+        <div className="section-header">
+          <span className="section-header__text">Teacher Profile</span>
+        </div>
         <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>View your profile information.</div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, alignItems: "center" }}>
-          <div style={{ color: "var(--color-text-muted)" }}>Name</div>
-          <div>{me?.fullName || ""}</div>
+        <div className="info-grid">
+          <div className="info-grid__label">Name</div>
+          <div className="info-grid__value">{me?.fullName || ""}</div>
 
-          <div style={{ color: "var(--color-text-muted)" }}>Teacher Code</div>
-          <div>{me?.teacherCode || me?.username || ""}</div>
+          <div className="info-grid__label">Teacher Code</div>
+          <div className="info-grid__value">{me?.teacherCode || me?.username || ""}</div>
 
-          <div style={{ color: "var(--color-text-muted)" }}>Username</div>
-          <div>{me?.username || ""}</div>
+          <div className="info-grid__label">Username</div>
+          <div className="info-grid__value">{me?.username || ""}</div>
 
-          <div style={{ color: "var(--color-text-muted)" }}>Email</div>
-          <div>{me?.email || ""}</div>
+          <div className="info-grid__label">Email</div>
+          <div className="info-grid__value">{me?.email || ""}</div>
 
-          <div style={{ color: "var(--color-text-muted)" }}>Phone</div>
-          <div>{me?.phonePrimary || ""}</div>
+          <div className="info-grid__label">Phone</div>
+          <div className="info-grid__value">{me?.phonePrimary || ""}</div>
 
-          <div style={{ color: "var(--color-text-muted)" }}>Status</div>
-          <div>{me?.status || ""}</div>
+          <div className="info-grid__label">Status</div>
+          <div className="info-grid__value">{me?.status || ""}</div>
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>

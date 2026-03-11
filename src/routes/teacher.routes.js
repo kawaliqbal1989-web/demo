@@ -2,6 +2,14 @@ import { Router } from "express";
 import { requireRole } from "../middleware/rbac.js";
 import { auditAction } from "../middleware/audit-logger.js";
 import {
+  getCockpitDashboard,
+  getAtRisk,
+  getBatches as getCockpitBatches,
+  getRecommendations,
+  getInterventions,
+} from "../controllers/teacher-cockpit.controller.js";
+import { getTeacherAiNarrative } from "../controllers/ai-narrative.controller.js";
+import {
   getTeacherMe,
   updateTeacherProfile,
   listTeacherBatches,
@@ -157,5 +165,15 @@ teacherRouter.post(
   auditAction("TEACHER_BULK_ASSIGN_WORKSHEET", "WORKSHEET"),
   bulkAssignWorksheetToStudents
 );
+
+/* ── Cockpit / Intervention Console ── */
+teacherRouter.get("/cockpit/dashboard", getCockpitDashboard);
+teacherRouter.get("/cockpit/at-risk", getAtRisk);
+teacherRouter.get("/cockpit/batches", getCockpitBatches);
+teacherRouter.get("/cockpit/recommendations", getRecommendations);
+teacherRouter.get("/cockpit/interventions", getInterventions);
+
+/* ── AI Narrative (Phase 10) ── */
+teacherRouter.get("/ai/narrative", getTeacherAiNarrative);
 
 export { teacherRouter };

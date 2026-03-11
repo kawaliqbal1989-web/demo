@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { DataTable } from "../../components/DataTable";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { MetricCard } from "../../components/MetricCard";
+import { PageHeader } from "../../components/PageHeader";
+import { InsightPanel } from "../../components/InsightCard";
+import { HealthScoreCard, TeacherWorkloadCard, AnomalyPanel, FeePulseCard } from "../../components/LeadershipIntel";
+import { ApprovalQueueWidget } from "../../components/WorkflowWidgets";
+import { getInsights } from "../../services/insightsService";
+import { getCenterIntelDashboard } from "../../services/leadershipIntelService";
 import { listBatches } from "../../services/batchesService";
 import { listMockTests, createMockTest, getMockTest, saveMockTestResults, updateMockTestStatus } from "../../services/mockTestsService";
 import { getCenterDashboard, getCenterMe } from "../../services/centerService";
@@ -9,6 +16,7 @@ import { listAttendanceSessions } from "../../services/attendanceService";
 import { getDashboardSummary } from "../../services/reportsService";
 import { listWorksheets } from "../../services/worksheetsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { CenterAssistant } from "../../components/AiNarrativeSurfaces";
 
 function todayISO() {
   const d = new Date();
@@ -39,15 +47,6 @@ function getMockTestStatusStyle(status) {
   };
 }
 
-function MetricCard({ label, value }) {
-  return (
-    <div className="card" style={{ display: "grid", gap: 6 }}>
-      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{label}</div>
-      <div style={{ fontSize: 28, fontWeight: 800 }}>{value}</div>
-    </div>
-  );
-}
-
 import { useAuth } from "../../hooks/useAuth";
 
 function CenterDashboardPage() {
@@ -57,6 +56,10 @@ function CenterDashboardPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [insights, setInsights] = useState([]);
+  const [insightsLoading, setInsightsLoading] = useState(true);
+  const [intel, setIntel] = useState(null);
+  const [intelLoading, setIntelLoading] = useState(true);
 
   const [me, setMe] = useState(null);
   const [summary, setSummary] = useState(null);
@@ -148,6 +151,20 @@ function CenterDashboardPage() {
   }, []);
 
   useEffect(() => {
+    setInsightsLoading(true);
+    getInsights()
+      .then((res) => setInsights(res.data?.insights || []))
+      .catch(() => {})
+      .finally(() => setInsightsLoading(false));
+
+    setIntelLoading(true);
+    getCenterIntelDashboard()
+      .then((res) => setIntel(res.data || null))
+      .catch(() => {})
+      .finally(() => setIntelLoading(false));
+  }, []);
+
+  useEffect(() => {
     if (searchParams.get("section") !== "mock-tests") {
       return;
     }
@@ -229,22 +246,23 @@ function CenterDashboardPage() {
   };
 
   if (loading) {
-    return <LoadingState label="Loading center dashboard..." />;
+    return (
+      <section style={{ display: "grid", gap: 12 }}>
+        <SkeletonLoader variant="card" count={4} />
+        <SkeletonLoader variant="detail" />
+        <SkeletonLoader variant="table" />
+      </section>
+    );
   }
 
   const centerProfile = me?.centerProfile;
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div className="dash-header">
-        <div>
-          <h2 className="dashboard-title">Center Dashboard</h2>
-          <div className="subtext">Quick snapshot of your center operations.</div>
-          {branding?.displayName || branding?.name ? (
-            <div className="dash-brand-name">{branding?.displayName || branding?.name}</div>
-          ) : null}
-        </div>
-      </div>
+      <PageHeader
+        title="Center Dashboard"
+        subtitle={branding?.displayName || branding?.name || "Quick snapshot of your center operations."}
+      />
 
       {error ? (
         <div className="card">
@@ -252,22 +270,41 @@ function CenterDashboardPage() {
         </div>
       ) : null}
 
+      <InsightPanel
+        insights={insights}
+        loading={insightsLoading}
+        onDismiss={(id) => setInsights((prev) => prev.filter((i) => i.id !== id))}
+      />
+
+      <CenterAssistant />
+
+      <ApprovalQueueWidget />
+
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <MetricCard label="Active Students" value={summary?.activeStudents ?? 0} />
-        <MetricCard label="Active Teachers" value={summary?.activeTeachers ?? 0} />
-        <MetricCard label="New Admissions (7 days)" value={summary?.newAdmissions7d ?? 0} />
-        <MetricCard label="Active Enrollments" value={summary?.activeEnrollments ?? 0} />
+        <MetricCard label="Active Students" value={summary?.activeStudents ?? 0} icon="👥" accent="var(--role-center)" />
+        <MetricCard label="Active Teachers" value={summary?.activeTeachers ?? 0} icon="🏅" />
+        <MetricCard label="New Admissions (7 days)" value={summary?.newAdmissions7d ?? 0} icon="🌟" />
+        <MetricCard label="Active Enrollments" value={summary?.activeEnrollments ?? 0} icon="📚" />
         {revenueStats?.totalRevenue != null && (
-          <MetricCard label="Total Revenue" value={`₹${Number(revenueStats.totalRevenue).toLocaleString()}`} />
+          <MetricCard label="Total Revenue" value={`₹${Number(revenueStats.totalRevenue).toLocaleString()}`} icon="💰" accent="#16a34a" />
         )}
         {revenueStats?.pendingDues != null && (
-          <MetricCard label="Pending Dues" value={`₹${Number(revenueStats.pendingDues).toLocaleString()}`} />
+          <MetricCard label="Pending Dues" value={`₹${Number(revenueStats.pendingDues).toLocaleString()}`} icon="⏳" accent="#d97706" />
         )}
       </div>
 
+      <AnomalyPanel anomalies={intel?.anomalies} loading={intelLoading} />
+
+      <div className="intel-grid">
+        <HealthScoreCard health={intel?.healthScore} loading={intelLoading} />
+        <FeePulseCard pulse={intel?.feePulse} loading={intelLoading} />
+      </div>
+
+      <TeacherWorkloadCard teachers={intel?.teacherWorkload} loading={intelLoading} />
+
       {/* Quick Actions */}
       <div className="card" style={{ display: "grid", gap: 8 }}>
-        <div style={{ fontWeight: 700 }}>⚡ Quick Actions</div>
+        <div className="section-header"><span className="section-header__text">⚡ Quick Actions</span></div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <Link className="button secondary" style={{ width: "auto" }} to="/center/students">➕ Add Student</Link>
           <Link className="button secondary" style={{ width: "auto" }} to="/center/teachers">➕ Add Teacher</Link>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { LoadingState } from "../../components/LoadingState";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
+import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   getStudent,
@@ -95,7 +96,12 @@ function TeacherStudentViewPage() {
   }, [studentId]);
 
   if (loading) {
-    return <LoadingState label="Loading student..." />;
+    return (
+      <section style={{ display: "grid", gap: 12 }}>
+        <SkeletonLoader variant="card" count={1} />
+        <SkeletonLoader variant="detail" />
+      </section>
+    );
   }
 
   if (!data) {
@@ -111,15 +117,15 @@ function TeacherStudentViewPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Student</h2>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Teacher-scoped student view</div>
-        </div>
-        <Link className="button" style={{ width: "auto" }} to={`/teacher/students/${studentId}/360`}>
-          View Full Profile →
-        </Link>
-      </div>
+      <PageHeader
+        title={`${student?.firstName || ""} ${student?.lastName || ""}`}
+        subtitle={`${student?.admissionNo || ""} · ${student?.level ? `${student.level.name} / Level ${student.level.rank}` : "No level"}`}
+        actions={
+          <Link className="button" style={{ width: "auto" }} to={`/teacher/students/${studentId}/360`}>
+            View Full Profile →
+          </Link>
+        }
+      />
 
       {error ? (
         <div className="card">

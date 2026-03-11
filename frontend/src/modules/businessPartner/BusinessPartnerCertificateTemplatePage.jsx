@@ -154,9 +154,9 @@ function BusinessPartnerCertificateTemplatePage() {
           onClick={handlePreview}
           style={{
             padding: "8px 20px",
-            background: "#2563eb",
+            background: "var(--color-primary)",
             color: "#fff",
-            border: "none",
+            border: "1px solid var(--color-primary)",
             borderRadius: 6,
             fontWeight: 600,
             cursor: "pointer"
@@ -167,51 +167,51 @@ function BusinessPartnerCertificateTemplatePage() {
       </div>
 
       {error && (
-        <div style={{ padding: 12, background: "#fef2f2", color: "#b91c1c", borderRadius: 8 }}>
+        <div style={{ padding: 12, background: "var(--color-bg-danger-light)", color: "var(--color-text-danger)", border: "1px solid var(--color-border-danger)", borderRadius: 8 }}>
           {error}
         </div>
       )}
 
       {saveMsg && (
-        <div style={{ padding: 10, background: "#f0fdf4", color: "#166534", borderRadius: 8, fontSize: 14 }}>
+        <div style={{ padding: 10, background: "var(--color-bg-success-light)", color: "var(--color-text-success)", border: "1px solid var(--color-border-success-light)", borderRadius: 8, fontSize: 14 }}>
           {saveMsg}
         </div>
       )}
 
       {/* Text settings */}
-      <form onSubmit={handleSaveText} style={{ display: "grid", gap: 16, background: "#fff", padding: 24, borderRadius: 12, border: "1px solid #e5e7eb" }}>
+      <form onSubmit={handleSaveText} style={{ display: "grid", gap: 16, background: "var(--color-bg-card)", padding: 24, borderRadius: 12, border: "1px solid var(--color-border)" }}>
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>Certificate Details</h3>
 
         <div style={{ display: "grid", gap: 6 }}>
-          <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Certificate Title</label>
+          <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-label)" }}>Certificate Title</label>
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Certificate of Achievement"
-            style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
+            style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--color-border-strong)", background: "var(--color-bg-card)", color: "var(--color-text-primary)", fontSize: 14 }}
           />
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <div style={{ display: "grid", gap: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Signatory Name</label>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-label)" }}>Signatory Name</label>
             <input
               type="text"
               value={signatoryName}
               onChange={(e) => setSignatoryName(e.target.value)}
               placeholder="e.g. John Doe"
-              style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
+              style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--color-border-strong)", background: "var(--color-bg-card)", color: "var(--color-text-primary)", fontSize: 14 }}
             />
           </div>
           <div style={{ display: "grid", gap: 6 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Signatory Designation</label>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-label)" }}>Signatory Designation</label>
             <input
               type="text"
               value={signatoryDesignation}
               onChange={(e) => setSignatoryDesignation(e.target.value)}
               placeholder="e.g. Director"
-              style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 }}
+              style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid var(--color-border-strong)", background: "var(--color-bg-card)", color: "var(--color-text-primary)", fontSize: 14 }}
             />
           </div>
         </div>
@@ -222,9 +222,9 @@ function BusinessPartnerCertificateTemplatePage() {
             disabled={saving}
             style={{
               padding: "8px 24px",
-              background: saving ? "#9ca3af" : "#2563eb",
+              background: saving ? "var(--color-text-faint)" : "var(--color-primary)",
               color: "#fff",
-              border: "none",
+              border: "1px solid transparent",
               borderRadius: 6,
               fontWeight: 600,
               cursor: saving ? "not-allowed" : "pointer"
@@ -245,8 +245,8 @@ function BusinessPartnerCertificateTemplatePage() {
             <div
               key={asset.key}
               style={{
-                background: "#fff",
-                border: "1px solid #e5e7eb",
+                background: "var(--color-bg-card)",
+                border: "1px solid var(--color-border)",
                 borderRadius: 12,
                 padding: 20,
                 display: "grid",
@@ -255,11 +255,11 @@ function BusinessPartnerCertificateTemplatePage() {
             >
               <div>
                 <h4 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{asset.label}</h4>
-                <p style={{ margin: "4px 0 0", fontSize: 12, color: "#6b7280" }}>{asset.description}</p>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>{asset.description}</p>
               </div>
 
               {currentUrl ? (
-                <div style={{ display: "flex", justifyContent: "center", padding: 8, background: "#f9fafb", borderRadius: 8 }}>
+                <div style={{ display: "flex", justifyContent: "center", padding: 8, background: "var(--color-bg-subtle)", border: "1px solid var(--color-border-divider)", borderRadius: 8 }}>
                   <img
                     src={currentUrl}
                     alt={asset.label}
@@ -273,9 +273,10 @@ function BusinessPartnerCertificateTemplatePage() {
                     alignItems: "center",
                     justifyContent: "center",
                     height: 80,
-                    background: "#f9fafb",
+                    background: "var(--color-bg-subtle)",
+                    border: "1px dashed var(--color-border-strong)",
                     borderRadius: 8,
-                    color: "#9ca3af",
+                    color: "var(--color-text-faint)",
                     fontSize: 13
                   }}
                 >
@@ -295,9 +296,9 @@ function BusinessPartnerCertificateTemplatePage() {
                 disabled={isUploading}
                 style={{
                   padding: "7px 16px",
-                  background: isUploading ? "#d1d5db" : "#f3f4f6",
-                  color: "#374151",
-                  border: "1px solid #d1d5db",
+                  background: isUploading ? "var(--color-bg-badge)" : "var(--color-bg-muted)",
+                  color: "var(--color-text-label)",
+                  border: "1px solid var(--color-border-strong)",
                   borderRadius: 6,
                   fontSize: 13,
                   fontWeight: 500,
@@ -312,7 +313,7 @@ function BusinessPartnerCertificateTemplatePage() {
       </div>
 
       {/* Visual Layout Editor */}
-      <div style={{ background: "#fff", padding: 24, borderRadius: 12, border: "1px solid #e5e7eb" }}>
+      <div style={{ background: "var(--color-bg-card)", padding: 24, borderRadius: 12, border: "1px solid var(--color-border)" }}>
         <CertificateVisualEditor layout={layout} onChange={handleLayoutChange} template={template} />
       </div>
     </section>

@@ -11,8 +11,7 @@ dotenv.config(
 function requiredEnv(name) {
   const value = process.env[name];
   if (!value || !String(value).trim()) {
-    console.log(`Missing required environment variable: ${name}`)
-    // throw new Error(`Missing required environment variable: ${name}`);
+    throw new Error(`Missing required environment variable: ${name}`);
   }
 
   return String(value).trim();

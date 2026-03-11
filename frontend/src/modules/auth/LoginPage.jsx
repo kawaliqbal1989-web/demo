@@ -58,7 +58,7 @@ function LoginPage() {
                 AW
               </div>
               <div>
-                <div className="login-title">Welcome back</div>
+                <div className="login-title">Welcome</div>
                 <div className="login-subtitle">Sign in to AbacusWeb</div>
               </div>
             </div>

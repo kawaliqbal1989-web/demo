@@ -1,12 +1,6 @@
 import dotenv from "dotenv";
 
-dotenv.config(
-  // process.env.DOTENV_CONFIG_PATH
-  //   ? {
-  //       path: process.env.DOTENV_CONFIG_PATH
-  //     }
-  //   : undefined
-);
+dotenv.config();
 
 function requiredEnv(name) {
   const value = process.env[`${name}`];
@@ -37,7 +31,7 @@ const env = {
   corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || "")
     .split(",")
     .map((item) => item.trim())
-    .filter(Boolean) || ["https://abacuseducation.online"],
+    .filter(Boolean) ,
   kpiRateLimitWindowMs: Number(process.env.KPI_RATE_LIMIT_WINDOW_MS || 60000),
   kpiRateLimitMax: Number(process.env.KPI_RATE_LIMIT_MAX || 120),
   geminiApiKey: process.env.GEMINI_API_KEY || "",

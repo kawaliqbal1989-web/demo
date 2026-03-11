@@ -2,8 +2,8 @@ import axios from "axios";
 import { decrement, increment } from "./loadingStore";
 import { logApiError } from "../utils/apiErrors";
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || "http://localhost:4000/api";
-
+const baseURL = "https://api.abacuseducation.online/api";
+//  import.meta.env.VITE_API_BASE_URL ||
 const apiClient = axios.create({
   baseURL,
   timeout: 20000

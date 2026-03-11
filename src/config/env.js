@@ -1,11 +1,11 @@
 import dotenv from "dotenv";
 
 dotenv.config(
-  process.env.DOTENV_CONFIG_PATH
-    ? {
-        path: process.env.DOTENV_CONFIG_PATH
-      }
-    : undefined
+  // process.env.DOTENV_CONFIG_PATH
+  //   ? {
+  //       path: process.env.DOTENV_CONFIG_PATH
+  //     }
+  //   : undefined
 );
 
 function requiredEnv(name) {

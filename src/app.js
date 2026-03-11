@@ -11,6 +11,9 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { prisma } from "./lib/prisma.js";
 import { verifyAccessToken } from "./utils/token.js";
 
+
+console.log(env,"checkingenvvvvv")
+
 const app = express();
 
 const productionCorsAllowedOrigins = new Set(

@@ -21,6 +21,7 @@ const nodeEnv = process.env.NODE_ENV || "development";
 const isProduction = nodeEnv === "production";
 
 const env = {
+
   nodeEnv,
   isProduction,
   port: Number(process.env.PORT || 4000),
@@ -36,7 +37,7 @@ const env = {
   corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || "")
     .split(",")
     .map((item) => item.trim())
-    .filter(Boolean),
+    .filter(Boolean) || ["https://abacuseducation.online"],
   kpiRateLimitWindowMs: Number(process.env.KPI_RATE_LIMIT_WINDOW_MS || 60000),
   kpiRateLimitMax: Number(process.env.KPI_RATE_LIMIT_MAX || 120),
   geminiApiKey: process.env.GEMINI_API_KEY || "",

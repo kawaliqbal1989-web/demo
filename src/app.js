@@ -34,7 +34,7 @@ if (env.isProduction) {
 app.use(helmet());
 app.use(
   cors({
-    origin:defaultAllowedOrigins,
+    origin:defaultAllowedOrigins
     // origin: (origin, callback) => {
     //   if (!origin) {
     //     return callback(null, true);

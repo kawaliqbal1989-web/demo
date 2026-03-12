@@ -1,15 +1,9 @@
 import dotenv from "dotenv";
 
-dotenv.config(
-  process.env.DOTENV_CONFIG_PATH
-    ? {
-        path: process.env.DOTENV_CONFIG_PATH
-      }
-    : undefined
-);
+dotenv.config();
 
 function requiredEnv(name) {
-  const value = process.env[name];
+  const value = process.env[`${name}`];
   if (!value || !String(value).trim()) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
@@ -21,13 +15,14 @@ const nodeEnv = process.env.NODE_ENV || "development";
 const isProduction = nodeEnv === "production";
 
 const env = {
+
   nodeEnv,
   isProduction,
   port: Number(process.env.PORT || 4000),
-  jwtAccessSecret: requiredEnv("JWT_ACCESS_SECRET"),
-  jwtRefreshSecret: requiredEnv("JWT_REFRESH_SECRET"),
-  jwtIssuer: requiredEnv("JWT_ISSUER"),
-  jwtAudience: requiredEnv("JWT_AUDIENCE"),
+  jwtAccessSecret: process.env.JWT_ACCESS_SECRET,
+  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
+  jwtIssuer: process.env.JWT_ISSUER,
+  jwtAudience: process.env.JWT_AUDIENCE,
   jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "20m",
   jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
   requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "1mb",
@@ -36,7 +31,7 @@ const env = {
   corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || "")
     .split(",")
     .map((item) => item.trim())
-    .filter(Boolean),
+    .filter(Boolean) ,
   kpiRateLimitWindowMs: Number(process.env.KPI_RATE_LIMIT_WINDOW_MS || 60000),
   kpiRateLimitMax: Number(process.env.KPI_RATE_LIMIT_MAX || 120),
   geminiApiKey: process.env.GEMINI_API_KEY || "",

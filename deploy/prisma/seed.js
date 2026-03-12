@@ -47,7 +47,7 @@ async function upsertUser({
   hierarchyNodeId = null,
   parentUserId = null,
   studentId = null,
-  mustChangePassword = false
+  mustChangePassword = true
 }) {
   return prisma.authUser.upsert({
     where: {
@@ -84,6 +84,10 @@ async function upsertUser({
 }
 
 async function main() {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Refusing to run seed in production. Set NODE_ENV to something else to proceed.");
+  }
+
   const passwordHash = await bcrypt.hash("Pass@123", 12);
 
   const tenant = await prisma.tenant.upsert({

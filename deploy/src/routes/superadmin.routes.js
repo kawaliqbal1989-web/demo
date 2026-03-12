@@ -158,4 +158,35 @@ superadminRouter.get(
   saGetCenterDetail
 );
 
+/* ── Intelligence ── */
+import { getSuperadminNetworkPulse } from "../controllers/leadership-intel.controller.js";
+import { getSuperadminAiNarrative, getAiNarrativeStats } from "../controllers/ai-narrative.controller.js";
+import { handleGetInsightAnalytics, handleGetPlaygroundAnalytics, handleGetAiDashboard } from "../controllers/recommendation-analytics.controller.js";
+
+import {
+  handleGetWaveStatus,
+  handleGetFeatureStatus,
+  handleToggleWave,
+  handleGetDeployInfo,
+  handleGetMigrationSequence,
+} from "../controllers/release-management.controller.js";
+
+superadminRouter.get("/intel/network-pulse", requireSuperadmin(), getSuperadminNetworkPulse);
+
+/* ── AI Narrative (Phase 10) ── */
+superadminRouter.get("/ai/narrative", requireSuperadmin(), getSuperadminAiNarrative);
+superadminRouter.get("/ai/stats", requireSuperadmin(), getAiNarrativeStats);
+
+/* ── Recommendation Analytics (Phase 11) ── */
+superadminRouter.get("/analytics/insights", requireSuperadmin(), handleGetInsightAnalytics);
+superadminRouter.get("/analytics/ai-playground", requireSuperadmin(), handleGetPlaygroundAnalytics);
+superadminRouter.get("/analytics/ai-dashboard", requireSuperadmin(), handleGetAiDashboard);
+
+/* ── Release Management (Phase 12) ── */
+superadminRouter.get("/release/waves", requireSuperadmin(), handleGetWaveStatus);
+superadminRouter.get("/release/features", requireSuperadmin(), handleGetFeatureStatus);
+superadminRouter.patch("/release/waves/:waveKey", requireSuperadmin(), handleToggleWave);
+superadminRouter.get("/release/deploy-info", requireSuperadmin(), handleGetDeployInfo);
+superadminRouter.get("/release/migrations", requireSuperadmin(), handleGetMigrationSequence);
+
 export { superadminRouter };

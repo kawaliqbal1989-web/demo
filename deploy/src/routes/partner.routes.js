@@ -177,4 +177,13 @@ partnerRouter.post(
   uploadBackgroundImage
 );
 
+/* ── Intelligence ── */
+import { getBpNetworkPulse } from "../controllers/leadership-intel.controller.js";
+import { getBpAiNarrative } from "../controllers/ai-narrative.controller.js";
+
+partnerRouter.get("/intel/network-pulse", getBpNetworkPulse);
+
+/* ── AI Narrative (Phase 10) ── */
+partnerRouter.get("/ai/narrative", getBpAiNarrative);
+
 export { partnerRouter };

@@ -60,7 +60,7 @@ function LoginPage() {
             <div className="login-form-header">
               <img src="/logo.svg" alt="" className="login-logo login-logo--small" aria-hidden="true" />
               <div>
-                <div className="login-title">Welcome</div>
+                <div className="login-title">Welcome Back</div>
                 <div className="login-subtitle">Sign in to AbacusWeb</div>
               </div>
             </div>

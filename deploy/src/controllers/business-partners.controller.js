@@ -17,8 +17,9 @@ import {
 
 function parseISODateOnly(value) {
   const text = String(value || "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
-  const date = new Date(`${text}T00:00:00.000Z`);
+  const dateOnly = text.includes("T") ? text.slice(0, 10) : text;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) return null;
+  const date = new Date(`${dateOnly}T00:00:00.000Z`);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
@@ -393,6 +394,33 @@ const updateBusinessPartner = asyncHandler(async (req, res) => {
   const logoUrlNormalized = req.body.logoUrl !== undefined ? normalizeString(req.body.logoUrl) : undefined;
   validateLogoUrl(logoUrlNormalized);
 
+  const subscriptionStatus = req.body.subscriptionStatus
+    ? String(req.body.subscriptionStatus).trim().toUpperCase()
+    : undefined;
+
+  if (
+    subscriptionStatus !== undefined
+    && !["ACTIVE", "SUSPENDED", "EXPIRED"].includes(subscriptionStatus)
+  ) {
+    return res.apiError(
+      400,
+      "subscriptionStatus must be ACTIVE, SUSPENDED, or EXPIRED",
+      "VALIDATION_ERROR"
+    );
+  }
+
+  let subscriptionExpiresAt;
+  if (req.body.subscriptionExpiresAt !== undefined) {
+    if (req.body.subscriptionExpiresAt === null || req.body.subscriptionExpiresAt === "") {
+      subscriptionExpiresAt = null;
+    } else {
+      subscriptionExpiresAt = parseISODateOnly(req.body.subscriptionExpiresAt);
+      if (!subscriptionExpiresAt) {
+        return res.apiError(400, "Invalid subscriptionExpiresAt date", "VALIDATION_ERROR");
+      }
+    }
+  }
+
   const address = req.body.address && typeof req.body.address === "object" ? req.body.address : null;
   const operationalStates = Array.isArray(req.body.operationalStates) ? req.body.operationalStates : null;
   const operationalDistricts = Array.isArray(req.body.operationalDistricts) ? req.body.operationalDistricts : null;
@@ -404,29 +432,37 @@ const updateBusinessPartner = asyncHandler(async (req, res) => {
       where: { id: existing.id },
       data: {
         name: normalizeString(req.body.name) ?? undefined,
-        displayName: normalizeString(req.body.displayName) ?? undefined,
+        ...(req.body.displayName !== undefined ? { displayName: normalizeString(req.body.displayName) } : {}),
         status: req.body.status ? String(req.body.status).trim().toUpperCase() : undefined,
         isActive: req.body.isActive === undefined ? undefined : normalizeBoolean(req.body.isActive, true),
-        logoPath: normalizeString(req.body.logoPath) ?? undefined,
+        ...(req.body.logoPath !== undefined ? { logoPath: normalizeString(req.body.logoPath) } : {}),
         ...(req.body.logoUrl !== undefined ? { logoUrl: logoUrlNormalized } : {}),
-        primaryPhone: normalizeString(req.body.primaryPhone) ?? undefined,
-        alternatePhone: normalizeString(req.body.alternatePhone) ?? undefined,
-        contactEmail: normalizeString(req.body.contactEmail) ?? undefined,
-        supportEmail: normalizeString(req.body.supportEmail) ?? undefined,
+        ...(req.body.primaryPhone !== undefined ? { primaryPhone: normalizeString(req.body.primaryPhone) } : {}),
+        ...(req.body.alternatePhone !== undefined ? { alternatePhone: normalizeString(req.body.alternatePhone) } : {}),
+        ...(req.body.contactEmail !== undefined ? { contactEmail: normalizeString(req.body.contactEmail) } : {}),
+        ...(req.body.supportEmail !== undefined ? { supportEmail: normalizeString(req.body.supportEmail) } : {}),
         whatsappEnabled: req.body.whatsappEnabled === undefined
           ? undefined
           : normalizeBoolean(req.body.whatsappEnabled, false),
         businessType: req.body.businessType ? String(req.body.businessType).trim().toUpperCase() : undefined,
-        gstNumber: normalizeString(req.body.gstNumber) ?? undefined,
-        panNumber: normalizeString(req.body.panNumber) ?? undefined,
-        onboardingDate: req.body.onboardingDate ? parseISODateOnly(req.body.onboardingDate) || undefined : undefined,
-        primaryBrandColor: normalizeString(req.body.primaryBrandColor) ?? undefined,
-        secondaryBrandColor: normalizeString(req.body.secondaryBrandColor) ?? undefined,
-        websiteUrl: normalizeString(req.body.websiteUrl) ?? undefined,
-        facebookUrl: normalizeString(req.body.facebookUrl) ?? undefined,
-        instagramUrl: normalizeString(req.body.instagramUrl) ?? undefined,
-        youtubeUrl: normalizeString(req.body.youtubeUrl) ?? undefined,
+        ...(req.body.gstNumber !== undefined ? { gstNumber: normalizeString(req.body.gstNumber) } : {}),
+        ...(req.body.panNumber !== undefined ? { panNumber: normalizeString(req.body.panNumber) } : {}),
+        ...(req.body.onboardingDate !== undefined
+          ? {
+              onboardingDate: req.body.onboardingDate
+                ? parseISODateOnly(req.body.onboardingDate) || undefined
+                : null
+            }
+          : {}),
+        ...(req.body.primaryBrandColor !== undefined ? { primaryBrandColor: normalizeString(req.body.primaryBrandColor) } : {}),
+        ...(req.body.secondaryBrandColor !== undefined ? { secondaryBrandColor: normalizeString(req.body.secondaryBrandColor) } : {}),
+        ...(req.body.websiteUrl !== undefined ? { websiteUrl: normalizeString(req.body.websiteUrl) } : {}),
+        ...(req.body.facebookUrl !== undefined ? { facebookUrl: normalizeString(req.body.facebookUrl) } : {}),
+        ...(req.body.instagramUrl !== undefined ? { instagramUrl: normalizeString(req.body.instagramUrl) } : {}),
+        ...(req.body.youtubeUrl !== undefined ? { youtubeUrl: normalizeString(req.body.youtubeUrl) } : {}),
         accessMode: req.body.accessMode ? String(req.body.accessMode).trim().toUpperCase() : undefined,
+        ...(subscriptionStatus !== undefined ? { subscriptionStatus } : {}),
+        ...(req.body.subscriptionExpiresAt !== undefined ? { subscriptionExpiresAt } : {}),
         legacyLoginEnabled: false,
         legacyUsername: null,
         legacyPasswordHash: null

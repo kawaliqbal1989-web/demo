@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../middleware/authenticate.js";
 import { enforceMustChangePassword } from "../middleware/enforce-must-change-password.js";
 import { enforceSubscription } from "../middleware/enforce-subscription.js";
-import { getHealth } from "../controllers/health.controller.js";
+import { getHealth, getReadiness } from "../controllers/health.controller.js";
 import { authRouter } from "./auth.routes.js";
 import { superadminRouter } from "./superadmin.routes.js";
 import { hierarchyRouter } from "./hierarchy.routes.js";
@@ -43,6 +43,8 @@ import { examCyclesRouter } from "./exam-cycles.routes.js";
 import { brandingRouter } from "./branding.routes.js";
 import { practiceAllocationRouter } from "./practice-allocation.routes.js";
 import { publicCertificateRouter } from "./public-certificate.routes.js";
+import { insightsRouter } from "./insights.routes.js";
+import bulkRouter from "./bulk-operations.routes.js";
 
 const apiRouter = Router();
 
@@ -50,6 +52,7 @@ apiRouter.use("/auth", authRouter);
 apiRouter.use("/teacher", teacherPublicRouter);
 apiRouter.use("/public/certificates", publicCertificateRouter);
 apiRouter.get("/health", getHealth);
+apiRouter.get("/ready", getReadiness);
 apiRouter.use(authenticate);
 apiRouter.use(enforceMustChangePassword);
 apiRouter.use(enforceSubscription());
@@ -92,5 +95,7 @@ apiRouter.use("/student", studentRouter);
 apiRouter.use("/exam-cycles", examCyclesRouter);
 apiRouter.use("/branding", brandingRouter);
 apiRouter.use("/practice-allocations", practiceAllocationRouter);
+apiRouter.use("/insights", insightsRouter);
+apiRouter.use("/bulk", bulkRouter);
 
 export { apiRouter };

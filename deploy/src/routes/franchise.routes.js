@@ -135,4 +135,13 @@ franchiseRouter.get(
   listFranchiseCourses
 );
 
+/* ── Intelligence ── */
+import { getFranchiseNetworkPulse } from "../controllers/leadership-intel.controller.js";
+import { getFranchiseAiNarrative } from "../controllers/ai-narrative.controller.js";
+
+franchiseRouter.get("/intel/network-pulse", getFranchiseNetworkPulse);
+
+/* ── AI Narrative (Phase 10) ── */
+franchiseRouter.get("/ai/narrative", getFranchiseAiNarrative);
+
 export { franchiseRouter };

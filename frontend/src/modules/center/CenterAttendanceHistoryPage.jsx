@@ -184,7 +184,7 @@ function CenterAttendanceHistoryPage() {
             <DataTable
               columns={columns}
               rows={items}
-              keyField="sessionId"
+              keyField={(row, index) => `${row?.sessionId || "session"}-${row?.studentId || `student-${index}`}`}
             />
             <PaginationBar
               limit={limit}

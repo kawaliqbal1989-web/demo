@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { computeStudentRisk } from "./student-risk.service.js";
 import { evaluatePromotionEligibility } from "./promotion-eligibility.service.js";
 import { getLevelPerformance } from "./student-performance.service.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 // ─── Milestone Definitions ──────────────────────────────────────────
 const MILESTONE_DEFS = [
@@ -20,6 +21,37 @@ const MILESTONE_DEFS = [
   { key: "promotion_ready", title: "Level Up Ready", description: "Met all promotion criteria", icon: "🚀" },
   { key: "first_practice", title: "Self-Starter", description: "Created your first practice worksheet", icon: "✨" },
 ];
+
+function buildEmptyCoachDashboard() {
+  return {
+    dailyMission: [],
+    weeklyPlan: {
+      goals: [],
+      progress: 0,
+      weekStart: new Date().toISOString()
+    },
+    streaks: {
+      attendance: { current: 0, best: 0 },
+      practice: { current: 0 }
+    },
+    readiness: {
+      mockTest: null,
+      competition: null,
+      promotion: null
+    },
+    milestones: {
+      earned: [],
+      newlyEarned: [],
+      nextHints: []
+    },
+    performanceExplainer: {
+      summary: ["Advanced coaching insights are temporarily unavailable."],
+      strengths: [],
+      improvements: [],
+      tips: []
+    }
+  };
+}
 
 // ─── Compute Streaks ────────────────────────────────────────────────
 async function computeStreaks(studentId, tenantId) {
@@ -585,24 +617,32 @@ async function checkAndAwardMilestones(studentId, tenantId, levelId) {
 
 // ─── Full Coach Dashboard ───────────────────────────────────────────
 async function getCoachDashboard(studentId, tenantId, levelId) {
-  const [dailyMission, weeklyPlan, streaks, readiness, milestones, performanceExplainer] =
-    await Promise.all([
-      generateDailyMission(studentId, tenantId, levelId),
-      generateWeeklyPlan(studentId, tenantId, levelId),
-      computeStreaks(studentId, tenantId),
-      computeReadiness(studentId, tenantId, levelId),
-      checkAndAwardMilestones(studentId, tenantId, levelId),
-      explainPerformance(studentId, tenantId, levelId),
-    ]);
+  try {
+    const [dailyMission, weeklyPlan, streaks, readiness, milestones, performanceExplainer] =
+      await Promise.all([
+        generateDailyMission(studentId, tenantId, levelId),
+        generateWeeklyPlan(studentId, tenantId, levelId),
+        computeStreaks(studentId, tenantId),
+        computeReadiness(studentId, tenantId, levelId),
+        checkAndAwardMilestones(studentId, tenantId, levelId),
+        explainPerformance(studentId, tenantId, levelId),
+      ]);
 
-  return {
-    dailyMission,
-    weeklyPlan,
-    streaks,
-    readiness,
-    milestones,
-    performanceExplainer,
-  };
+    return {
+      dailyMission,
+      weeklyPlan,
+      streaks,
+      readiness,
+      milestones,
+      performanceExplainer,
+    };
+  } catch (error) {
+    if (!isSchemaMismatchError(error)) {
+      throw error;
+    }
+
+    return buildEmptyCoachDashboard();
+  }
 }
 
 export {

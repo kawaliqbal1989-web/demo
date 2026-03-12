@@ -1,23 +1,48 @@
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+
+function buildDefaultCertificateTemplate() {
+  return {
+    title: "Certificate of Achievement",
+    signatoryName: null,
+    signatoryDesignation: null,
+    signatureImageUrl: null,
+    affiliationLogoUrl: null,
+    stampImageUrl: null,
+    backgroundImageUrl: null,
+    layout: null,
+    schemaMissing: true
+  };
+}
 
 const getCertificateTemplate = asyncHandler(async (req, res) => {
   const businessPartnerId = req.bpScope.businessPartner.id;
 
-  const template = await prisma.certificateTemplate.findUnique({
-    where: { businessPartnerId }
-  });
+  let template = null;
+  try {
+    template = await prisma.certificateTemplate.findUnique({
+      where: { businessPartnerId },
+      select: {
+        id: true,
+        title: true,
+        signatoryName: true,
+        signatoryDesignation: true,
+        signatureImageUrl: true,
+        affiliationLogoUrl: true,
+        stampImageUrl: true,
+        backgroundImageUrl: true,
+        layout: true
+      }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
+      throw error;
+    }
+  }
 
   return res.apiSuccess("Certificate template fetched", {
-    template: template || {
-      title: "Certificate of Achievement",
-      signatoryName: null,
-      signatoryDesignation: null,
-      signatureImageUrl: null,
-      affiliationLogoUrl: null,
-      stampImageUrl: null,
-      backgroundImageUrl: null
-    }
+    template: template || buildDefaultCertificateTemplate()
   });
 });
 
@@ -32,11 +57,19 @@ const upsertCertificateTemplate = asyncHandler(async (req, res) => {
   if (signatoryDesignation !== undefined) data.signatoryDesignation = signatoryDesignation ? String(signatoryDesignation).trim() : null;
   if (layout !== undefined) data.layout = layout;
 
-  const template = await prisma.certificateTemplate.upsert({
-    where: { businessPartnerId },
-    create: { tenantId, businessPartnerId, ...data },
-    update: data
-  });
+  let template;
+  try {
+    template = await prisma.certificateTemplate.upsert({
+      where: { businessPartnerId },
+      create: { tenantId, businessPartnerId, ...data },
+      update: data
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
+      throw error;
+    }
+    return res.apiError(503, "Certificate template storage is unavailable until database migrations are applied", "CERTIFICATE_TEMPLATE_SCHEMA_MISSING");
+  }
 
   res.locals.entityId = template.id;
   return res.apiSuccess("Certificate template updated", { template });
@@ -54,19 +87,27 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
 
     const url = `${req.protocol}://${req.get("host")}/uploads/${uploadSubDir}/${file.filename}`;
 
-    const template = await prisma.certificateTemplate.upsert({
-      where: { businessPartnerId },
-      create: {
-        tenantId,
-        businessPartnerId,
-        [fieldPath]: file.filename,
-        [fieldUrl]: url
-      },
-      update: {
-        [fieldPath]: file.filename,
-        [fieldUrl]: url
+    let template;
+    try {
+      template = await prisma.certificateTemplate.upsert({
+        where: { businessPartnerId },
+        create: {
+          tenantId,
+          businessPartnerId,
+          [fieldPath]: file.filename,
+          [fieldUrl]: url
+        },
+        update: {
+          [fieldPath]: file.filename,
+          [fieldUrl]: url
+        }
+      });
+    } catch (error) {
+      if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
+        throw error;
       }
-    });
+      return res.apiError(503, "Certificate template storage is unavailable until database migrations are applied", "CERTIFICATE_TEMPLATE_SCHEMA_MISSING");
+    }
 
     res.locals.entityId = template.id;
     return res.apiSuccess("Certificate template asset uploaded", { template });

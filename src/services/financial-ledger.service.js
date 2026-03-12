@@ -483,10 +483,81 @@ async function recordStudentPaymentTransaction({
   }
 
   const normalizedInstallmentId = installmentId ? String(installmentId).trim() : null;
-  let effectiveInstallmentId = normalizedInstallmentId;
-  if (normalizedType === "ADJUSTMENT" && !effectiveInstallmentId) {
-    effectiveInstallmentId = await chooseAdjustmentInstallmentId({ tx, tenantId, studentId });
+  const adjustedTotalAmount = quantize2(toDecimal(grossAmount));
+  assertNonNegative(adjustedTotalAmount, "grossAmount");
+
+  const student = await tx.student.findFirst({
+    where: {
+      id: studentId,
+      tenantId
+    },
+    select: {
+      id: true,
+      hierarchyNodeId: true,
+      totalFeeAmount: true,
+      admissionFeeAmount: true
+    }
+  });
+
+  if (!student) {
+    throw createHttpError(404, "Student not found", "STUDENT_NOT_FOUND");
   }
+
+  if (normalizedType === "ADJUSTMENT") {
+    const currentTotal = student.totalFeeAmount == null ? null : quantize2(toDecimal(student.totalFeeAmount));
+    const admissionFee = student.admissionFeeAmount == null ? null : quantize2(toDecimal(student.admissionFeeAmount));
+
+    if (admissionFee !== null && adjustedTotalAmount.lt(admissionFee)) {
+      throw createHttpError(400, "Adjustment amount cannot be less than admission fee", "VALIDATION_ERROR");
+    }
+
+    if (currentTotal !== null && adjustedTotalAmount.gt(currentTotal)) {
+      throw createHttpError(400, "Adjustment amount cannot exceed current total fee", "VALIDATION_ERROR");
+    }
+
+    const { actor, franchiseUser, bpUser } = await resolveActorChain({ tx, tenantId, actorUserId });
+    const centerId = actor.hierarchyNodeId || student.hierarchyNodeId;
+    if (!centerId) {
+      throw createHttpError(400, "centerId could not be resolved", "CENTER_ID_REQUIRED");
+    }
+
+    const franchiseId = franchiseUser?.hierarchyNodeId || null;
+    const businessPartnerId = await resolveBusinessPartnerId({ tx, tenantId, bpUser });
+    const previousTotalText = currentTotal == null ? "(not-set)" : currentTotal.toString();
+    const noteText = paymentReference ? ` | note: ${String(paymentReference).trim()}` : "";
+    const adjustmentReference = `TOTAL_FEE_ADJUSTMENT from ${previousTotalText} to ${adjustedTotalAmount.toString()}${noteText}`;
+
+    const created = await createTransaction({
+      tx,
+      tenantId,
+      type: normalizedType,
+      grossAmount: 0,
+      studentId: student.id,
+      centerId,
+      franchiseId,
+      businessPartnerId,
+      createdByUserId: actor.id,
+      paymentMode: null,
+      receivedAt: null,
+      feeScheduleType: null,
+      feeMonth: null,
+      feeYear: null,
+      feeLevelId: null,
+      paymentReference: adjustmentReference,
+      installmentId: null
+    });
+
+    await tx.student.update({
+      where: { id: student.id },
+      data: {
+        totalFeeAmount: adjustedTotalAmount
+      }
+    });
+
+    return created;
+  }
+
+  const effectiveInstallmentId = normalizedInstallmentId;
 
   if (effectiveInstallmentId) {
     const installment = await tx.studentFeeInstallment.findFirst({
@@ -500,21 +571,6 @@ async function recordStudentPaymentTransaction({
     if (!installment) {
       throw createHttpError(400, "installmentId is not valid for this student", "VALIDATION_ERROR");
     }
-  }
-
-  const student = await tx.student.findFirst({
-    where: {
-      id: studentId,
-      tenantId
-    },
-    select: {
-      id: true,
-      hierarchyNodeId: true
-    }
-  });
-
-  if (!student) {
-    throw createHttpError(404, "Student not found", "STUDENT_NOT_FOUND");
   }
 
   const { actor, franchiseUser, bpUser } = await resolveActorChain({ tx, tenantId, actorUserId });
@@ -546,10 +602,6 @@ async function recordStudentPaymentTransaction({
     paymentReference,
     installmentId: effectiveInstallmentId
   });
-
-  if (normalizedType === "ADJUSTMENT") {
-    await settleStudentFeesForAdjustment({ tx, tenantId, studentId: student.id });
-  }
 
   return created;
 }

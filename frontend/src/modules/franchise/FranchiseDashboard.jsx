@@ -11,6 +11,7 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { useAuth } from "../../hooks/useAuth";
 import { getFranchiseDashboard, getMyFranchise } from "../../services/franchiseService";
 import { NetworkAdvisor } from "../../components/AiNarrativeSurfaces";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 
 const ALERT_STYLES = {
   critical: {
@@ -220,7 +221,7 @@ function FranchiseDashboard() {
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
           {profile?.logoUrl ? (
             <img
-              src={profile.logoUrl}
+              src={resolveAssetUrl(profile.logoUrl)}
               alt="Franchise logo"
               style={{ width: 150, height: 150, borderRadius: 8, objectFit: "cover" }}
             />

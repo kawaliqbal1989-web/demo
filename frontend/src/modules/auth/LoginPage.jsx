@@ -30,7 +30,11 @@ function LoginPage() {
     }
 
     try {
-      const result = await login({ username, password });
+      const result = await login({
+        tenantCode: "DEFAULT",
+        username: username.trim().toUpperCase(),
+        password
+      });
       navigate(result?.mustChangePassword ? "/change-password" : "/", { replace: true });
     } catch (e) {
       const status = e?.response?.status;
@@ -54,9 +58,7 @@ function LoginPage() {
         <div className="login-panel login-panel--right">
           <div className="login-form">
             <div className="login-form-header">
-              <div className="login-logo login-logo--small" aria-hidden="true">
-                AW
-              </div>
+              <img src="/logo.svg" alt="" className="login-logo login-logo--small" aria-hidden="true" />
               <div>
                 <div className="login-title">Welcome</div>
                 <div className="login-subtitle">Sign in to AbacusWeb</div>
@@ -164,9 +166,7 @@ function LoginPage() {
 
         <div className="login-panel login-panel--left">
           <div className="login-hero">
-            <div className="login-hero-logo" aria-hidden="true">
-              AW
-            </div>
+            <img src="/logo.svg" alt="" className="login-hero-logo" aria-hidden="true" />
             <h1 className="login-hero-title">Master mental math with the abacus</h1>
             <p className="login-hero-subtitle">
               The all-in-one platform for abacus centers, teachers, and students — structured courses, worksheets, and progress tracking.

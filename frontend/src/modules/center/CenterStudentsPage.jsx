@@ -28,6 +28,7 @@ import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
 import { listCatalogCourses } from "../../services/catalogService";
 import { listLedger } from "../../services/ledgerService";
+import { baseURL } from "../../services/apiClient";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   FEE_SCHEDULE_OPTIONS,
@@ -164,9 +165,21 @@ function CenterStudentsPage() {
   const [editStatus, setEditStatus] = useState("ACTIVE");
   const [editPhotoFile, setEditPhotoFile] = useState(null);
   const [editPhotoPreview, setEditPhotoPreview] = useState(null);
+  const [editCurrentPhotoUrl, setEditCurrentPhotoUrl] = useState("");
   const [editing, setEditing] = useState(false);
   const [editError, setEditError] = useState("");
   const [editInfo, setEditInfo] = useState("");
+
+  const resolvePhotoUrl = (value) => {
+    const text = String(value || "").trim();
+    if (!text) return "";
+    if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
+    const apiOrigin = String(baseURL || "").replace(/\/api\/?$/, "");
+    if (text.startsWith("/")) {
+      return `${apiOrigin}${text}`;
+    }
+    return `${apiOrigin}/${text}`;
+  };
 
   const load = async (next) => {
     setLoading(true);
@@ -269,6 +282,7 @@ function CenterStudentsPage() {
     setEditCurrentTeacherUserId("");
     setEditStatus("ACTIVE");
     setEditPhotoFile(null);
+    setEditCurrentPhotoUrl("");
     setEditError("");
     setEditInfo("");
   };
@@ -521,6 +535,7 @@ function CenterStudentsPage() {
     setEditStatus(row?.isActive ? "ACTIVE" : "INACTIVE");
     setEditPhotoFile(null);
     setEditPhotoPreview(null);
+    setEditCurrentPhotoUrl(resolvePhotoUrl(row?.photoUrl));
   };
 
   // create object URLs for previews
@@ -1111,6 +1126,9 @@ function CenterStudentsPage() {
                 onChange={(e) => setStudentEmail(e.target.value)}
                 placeholder="student@example.com"
               />
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 4 }}>
+                Leave blank to create username/password login only.
+              </div>
             </label>
           ) : null}
 
@@ -1858,10 +1876,16 @@ function CenterStudentsPage() {
                 onChange={(e) => setEditPhotoFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
               />
             </label>
+            {editCurrentPhotoUrl ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Current Photo</div>
+                <img src={editCurrentPhotoUrl} alt="current" style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-border)" }} />
+              </div>
+            ) : null}
             {editPhotoPreview ? (
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Preview</div>
-                <img src={editPhotoPreview} alt="preview" style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-border)" }} />
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Selected New Photo</div>
+                <img src={editPhotoPreview} alt="selected" style={{ width: 80, height: 80, objectFit: "cover", borderRadius: 8, border: "1px solid var(--color-border)" }} />
               </div>
             ) : null}
           </div>

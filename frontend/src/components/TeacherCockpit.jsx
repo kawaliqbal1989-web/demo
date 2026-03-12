@@ -56,41 +56,60 @@ function AtRiskQueue({ data, loading }) {
         </div>
       ) : (
         <div className="at-risk-queue__list">
-          {data.items.map((student) => (
-            <div
-              key={student.studentId}
-              className={`at-risk-queue__item at-risk-queue__item--${student.riskLevel.toLowerCase()}`}
-              onClick={() => navigate(`/teacher/students/${student.studentId}`)}
-            >
-              <div className="at-risk-queue__student">
-                <span className="at-risk-queue__name">{student.name}</span>
-                <span className="at-risk-queue__meta">
-                  {student.admissionNo} · {student.level}
-                </span>
-              </div>
+          {data.items.map((student) => {
+            const visibleIndicators = (Array.isArray(student.indicators) ? student.indicators : [])
+              .filter((indicator) => isTriggeredIndicator(indicator))
+              .slice(0, 3);
 
-              <div className="at-risk-queue__indicators">
-                {student.indicators.slice(0, 3).map((ind) => (
-                  <span key={ind} className="at-risk-queue__tag">{formatIndicator(ind)}</span>
-                ))}
-              </div>
-
-              {student.topAction && (
-                <div className="at-risk-queue__action">
-                  <span>{student.topAction.icon}</span>
-                  <span>{student.topAction.label}</span>
+            return (
+              <div
+                key={student.studentId}
+                className={`at-risk-queue__item at-risk-queue__item--${student.riskLevel.toLowerCase()}`}
+                onClick={() => navigate(`/teacher/students/${student.studentId}`)}
+              >
+                <div className="at-risk-queue__student">
+                  <span className="at-risk-queue__name">{student.name}</span>
+                  <span className="at-risk-queue__meta">
+                    {student.admissionNo} · {student.level}
+                  </span>
                 </div>
-              )}
 
-              <div className={`at-risk-queue__badge at-risk-queue__badge--${student.riskLevel.toLowerCase()}`}>
-                {student.riskLevel === "AT_RISK" ? "High Risk" : "Attention"}
+                <div className="at-risk-queue__indicators">
+                  {visibleIndicators.map((indicator, index) => (
+                    <span key={getIndicatorKey(indicator, index)} className="at-risk-queue__tag">
+                      {formatIndicator(indicator)}
+                    </span>
+                  ))}
+                </div>
+
+                {student.topAction && (
+                  <div className="at-risk-queue__action">
+                    <span>{student.topAction.icon}</span>
+                    <span>{student.topAction.label}</span>
+                  </div>
+                )}
+
+                <div className={`at-risk-queue__badge at-risk-queue__badge--${student.riskLevel.toLowerCase()}`}>
+                  {student.riskLevel === "AT_RISK" ? "High Risk" : "Attention"}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
+}
+
+function isTriggeredIndicator(indicator) {
+  if (!indicator) return false;
+  if (typeof indicator === "string") return true;
+  return indicator.triggered !== false;
+}
+
+function getIndicatorKey(indicator, index) {
+  if (typeof indicator === "string") return indicator;
+  return indicator?.key || indicator?.label || `indicator-${index}`;
 }
 
 function formatIndicator(ind) {
@@ -102,7 +121,20 @@ function formatIndicator(ind) {
     PROMOTION_BLOCKED: "Promo Blocked",
     LOW_PRACTICE: "Low Practice",
   };
-  return map[ind] || ind;
+
+  if (typeof ind === "string") {
+    return map[ind] || ind;
+  }
+
+  if (ind?.label) {
+    return ind.label;
+  }
+
+  if (ind?.key) {
+    return map[ind.key] || ind.key;
+  }
+
+  return "Indicator";
 }
 
 /* ─── Batch Heatmap ──────────────────────────────────────────────── */

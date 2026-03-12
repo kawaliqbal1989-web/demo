@@ -415,7 +415,7 @@ async function buildDetailedStudentExportRows(where) {
       where: {
         tenantId: where.tenantId,
         studentId: { in: studentIds },
-        type: { in: ["ENROLLMENT", "RENEWAL", "ADJUSTMENT"] }
+        type: { in: ["ENROLLMENT", "RENEWAL"] }
       },
       _sum: { grossAmount: true },
       _count: { _all: true },
@@ -1618,6 +1618,25 @@ const updateStudent = asyncHandler(async (req, res) => {
     feeUpdateData.feeConcessionAmount = normalizedFeeConcessionAmount;
   }
 
+  const effectiveTotalFeeAmount = feeUpdateData.totalFeeAmount !== undefined
+    ? feeUpdateData.totalFeeAmount
+    : (existing.totalFeeAmount == null ? null : Number(existing.totalFeeAmount));
+  const effectiveAdmissionFeeAmount = feeUpdateData.admissionFeeAmount !== undefined
+    ? feeUpdateData.admissionFeeAmount
+    : (existing.admissionFeeAmount == null ? null : Number(existing.admissionFeeAmount));
+
+  if (effectiveAdmissionFeeAmount !== null && effectiveTotalFeeAmount === null) {
+    return res.apiError(400, "admissionFeeAmount requires totalFeeAmount", "VALIDATION_ERROR");
+  }
+
+  if (
+    effectiveAdmissionFeeAmount !== null &&
+    effectiveTotalFeeAmount !== null &&
+    Number(effectiveAdmissionFeeAmount) > Number(effectiveTotalFeeAmount)
+  ) {
+    return res.apiError(400, "admissionFeeAmount must be less than or equal to totalFeeAmount", "VALIDATION_ERROR");
+  }
+
   const updateData = {
     ...(admissionNo !== undefined ? { admissionNo: String(admissionNo) } : {}),
     ...(firstName !== undefined ? { firstName: String(firstName) } : {}),
@@ -1836,12 +1855,16 @@ const getStudentFeesContext = asyncHandler(async (req, res) => {
     }
   });
 
-  const paidTotal = payments.reduce((sum, p) => sum + Number(p.grossAmount || 0), 0);
+  const paidTotal = payments.reduce(
+    (sum, p) => (p.type === "ENROLLMENT" || p.type === "RENEWAL" ? sum + Number(p.grossAmount || 0) : sum),
+    0
+  );
   const totalFee = student.totalFeeAmount == null ? null : Number(student.totalFeeAmount);
   const pendingTotal = totalFee == null ? null : Math.max(0, Number((totalFee - paidTotal).toFixed(2)));
 
   const paidByInstallmentId = new Map();
   for (const payment of payments) {
+    if (payment.type !== "ENROLLMENT" && payment.type !== "RENEWAL") continue;
     if (!payment.installmentId) continue;
     const prev = paidByInstallmentId.get(payment.installmentId) || 0;
     paidByInstallmentId.set(payment.installmentId, prev + Number(payment.grossAmount || 0));

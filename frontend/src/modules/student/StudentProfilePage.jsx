@@ -59,7 +59,10 @@ function StudentProfilePage() {
   const startEditing = () => {
     setEditData({
       email: me?.email || "",
+      gender: me?.gender || "",
+      dateOfBirth: me?.dateOfBirth ? String(me.dateOfBirth).slice(0, 10) : "",
       phonePrimary: me?.phonePrimary || "",
+      phoneSecondary: me?.phoneSecondary || "",
       guardianName: me?.guardianName || "",
       guardianPhone: me?.guardianPhone || "",
       guardianEmail: me?.guardianEmail || "",
@@ -183,17 +186,38 @@ function StudentProfilePage() {
         <div style={{ fontWeight: 700 }}>Personal Information</div>
         {editing ? (
           <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="form-field">
+                <label className="form-label">Gender</label>
+                <select className="select" value={editData.gender} onChange={(e) => setEditData({ ...editData, gender: e.target.value })}>
+                  <option value="">Select gender</option>
+                  <option value="MALE">Male</option>
+                  <option value="FEMALE">Female</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div className="form-field">
+                <label className="form-label">Date of Birth</label>
+                <input className="input" type="date" value={editData.dateOfBirth} onChange={(e) => setEditData({ ...editData, dateOfBirth: e.target.value })} />
+              </div>
+            </div>
             <div className="form-field">
               <label className="form-label">Email</label>
               <input className="input" value={editData.email} onChange={(e) => setEditData({ ...editData, email: e.target.value })} placeholder="student@example.com" />
             </div>
-            <div className="form-field">
-              <label className="form-label">Phone</label>
-              <input className="input" value={editData.phonePrimary} onChange={(e) => setEditData({ ...editData, phonePrimary: e.target.value })} placeholder="Phone number" />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div className="form-field">
+                <label className="form-label">Primary Phone</label>
+                <input className="input" value={editData.phonePrimary} onChange={(e) => setEditData({ ...editData, phonePrimary: e.target.value })} placeholder="Primary phone number" />
+              </div>
+              <div className="form-field">
+                <label className="form-label">Secondary Phone</label>
+                <input className="input" value={editData.phoneSecondary} onChange={(e) => setEditData({ ...editData, phoneSecondary: e.target.value })} placeholder="Secondary phone number" />
+              </div>
             </div>
             <div className="form-field">
               <label className="form-label">Address</label>
-              <input className="input" value={editData.address} onChange={(e) => setEditData({ ...editData, address: e.target.value })} placeholder="Address" />
+              <textarea className="input" rows={3} value={editData.address} onChange={(e) => setEditData({ ...editData, address: e.target.value })} placeholder="Address" style={{ resize: "vertical" }} />
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div className="form-field">
@@ -212,7 +236,8 @@ function StudentProfilePage() {
             <InfoRow label="Email" value={me.email} />
             <InfoRow label="Gender" value={me.gender} />
             <InfoRow label="Date of Birth" value={formatDate(me.dateOfBirth)} />
-            <InfoRow label="Phone" value={me.phonePrimary} />
+            <InfoRow label="Primary Phone" value={me.phonePrimary} />
+            <InfoRow label="Secondary Phone" value={me.phoneSecondary} />
             <InfoRow label="Address" value={[me.address, me.district, me.state].filter(Boolean).join(", ")} />
           </div>
         )}

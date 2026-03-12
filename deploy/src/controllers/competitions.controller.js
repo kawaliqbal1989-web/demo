@@ -18,6 +18,116 @@ function isCompetitionResultStatusSchemaMissing(error) {
   return error?.code === "P2022" || msg.includes("resultstatus") || msg.includes("resultpublishedat");
 }
 
+function buildCompetitionSelect({ includeResultMeta = true, includeStageTransitions = false } = {}) {
+  const select = {
+    id: true,
+    tenantId: true,
+    title: true,
+    description: true,
+    status: true,
+    workflowStage: true,
+    rejectedAt: true,
+    rejectedByUserId: true,
+    startsAt: true,
+    endsAt: true,
+    hierarchyNodeId: true,
+    levelId: true,
+    createdByUserId: true,
+    createdAt: true,
+    updatedAt: true,
+    hierarchyNode: { select: { id: true, name: true, type: true, code: true } },
+    level: { select: { id: true, name: true, rank: true } },
+    createdBy: { select: { id: true, email: true, role: true } },
+    enrollments: { select: { studentId: true, rank: true, totalScore: true, enrolledAt: true } },
+    worksheets: { select: { worksheetId: true, assignedAt: true } }
+  };
+
+  if (includeResultMeta) {
+    select.resultStatus = true;
+    select.resultPublishedAt = true;
+  }
+
+  if (includeStageTransitions) {
+    select.stageTransitions = {
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        fromStage: true,
+        toStage: true,
+        action: true,
+        reason: true,
+        createdAt: true,
+        actedByUser: { select: { id: true, email: true, role: true } }
+      }
+    };
+  }
+
+  return select;
+}
+
+function applyLegacyCompetitionResultMeta(item) {
+  if (!item) return item;
+  return {
+    ...item,
+    resultStatus: item.resultStatus || "DRAFT",
+    resultPublishedAt: item.resultPublishedAt || null,
+    legacyResultStatus: true
+  };
+}
+
+async function findCompetitionsWithResultFallback({ where, orderBy, skip, take }) {
+  try {
+    return {
+      items: await prisma.competition.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        select: buildCompetitionSelect({ includeResultMeta: true })
+      }),
+      legacyResultStatus: false
+    };
+  } catch (error) {
+    if (!isCompetitionResultStatusSchemaMissing(error)) {
+      throw error;
+    }
+
+    const items = await prisma.competition.findMany({
+      where,
+      orderBy,
+      skip,
+      take,
+      select: buildCompetitionSelect({ includeResultMeta: false })
+    });
+
+    return {
+      items: items.map(applyLegacyCompetitionResultMeta),
+      legacyResultStatus: true
+    };
+  }
+}
+
+async function findCompetitionDetailWithResultFallback(where) {
+  try {
+    return await prisma.competition.findFirst({
+      where,
+      select: buildCompetitionSelect({ includeResultMeta: true, includeStageTransitions: true })
+    });
+  } catch (error) {
+    if (!isCompetitionResultStatusSchemaMissing(error)) {
+      throw error;
+    }
+
+    const item = await prisma.competition.findFirst({
+      where,
+      select: buildCompetitionSelect({ includeResultMeta: false, includeStageTransitions: true })
+    });
+
+    return applyLegacyCompetitionResultMeta(item);
+  }
+}
+
 async function getCompetitionResultMeta({ competitionId, tenantId }) {
   try {
     const row = await prisma.competition.findFirst({
@@ -57,20 +167,8 @@ const listCompetitions = asyncHandler(async (req, res) => {
     where.hierarchyNodeId = req.auth.hierarchyNodeId;
   }
 
-  const [items, total] = await prisma.$transaction([
-    prisma.competition.findMany({
-      where,
-      orderBy,
-      skip,
-      take,
-      include: {
-        hierarchyNode: { select: { id: true, name: true, type: true } },
-        level: { select: { id: true, name: true, rank: true } },
-        createdBy: { select: { id: true, email: true, role: true } },
-        enrollments: { select: { studentId: true, rank: true, totalScore: true } },
-        worksheets: { select: { worksheetId: true, assignedAt: true } }
-      }
-    }),
+  const [{ items, legacyResultStatus }, total] = await Promise.all([
+    findCompetitionsWithResultFallback({ where, orderBy, skip, take }),
     prisma.competition.count({ where })
   ]);
 
@@ -78,7 +176,8 @@ const listCompetitions = asyncHandler(async (req, res) => {
     items,
     total,
     limit,
-    offset
+    offset,
+    legacyResultStatus
   });
 });
 
@@ -94,29 +193,7 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
     where.hierarchyNodeId = req.auth.hierarchyNodeId;
   }
 
-  const item = await prisma.competition.findFirst({
-    where,
-    include: {
-      hierarchyNode: { select: { id: true, name: true, type: true, code: true } },
-      level: { select: { id: true, name: true, rank: true } },
-      createdBy: { select: { id: true, email: true, role: true } },
-      enrollments: { select: { studentId: true, rank: true, totalScore: true, enrolledAt: true } },
-      worksheets: { select: { worksheetId: true, assignedAt: true } },
-      stageTransitions: {
-        orderBy: { createdAt: "desc" },
-        take: 20,
-        select: {
-          id: true,
-          fromStage: true,
-          toStage: true,
-          action: true,
-          reason: true,
-          createdAt: true,
-          actedByUser: { select: { id: true, email: true, role: true } }
-        }
-      }
-    }
-  });
+  const item = await findCompetitionDetailWithResultFallback(where);
 
   if (!item) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");

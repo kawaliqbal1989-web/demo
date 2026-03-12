@@ -70,7 +70,9 @@ function Topbar({ onToggleSidebar }) {
               alt="Business partner logo"
               className="topbar-brand-logo topbar-brand-logo--75"
             />
-          ) : null}
+          ) : (
+            <img src="/logo.svg" alt="AbacusWeb" className="topbar-brand-logo topbar-brand-logo--75" />
+          )}
           <strong className="brand-title">{branding?.displayName || branding?.name || "AbacusWeb"}</strong>
         </div>
 

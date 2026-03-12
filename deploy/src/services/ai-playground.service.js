@@ -111,6 +111,24 @@ function callFallback(prompt) {
     text = prompt.trim() + " ... and that is how artificial intelligence is transforming the world around us, making everyday tasks smarter and more efficient.";
   } else if (lower.includes("describe") || lower.includes("image")) {
     text = "I can see a colorful image. In a real setup with Gemini Vision, I would describe the objects, colors, and context in the image.";
+  } else if (lower.includes("story") || lower.includes("once upon")) {
+    text = `Once upon a time in a land of circuits and code, a young robot named Sparky discovered it could dream. Every night, its processors would paint vivid worlds of color and sound.\n\nSparky began writing down its dreams, and soon the whole village gathered to hear the robot's tales. "Even machines can imagine," Sparky would say, "if you give them the right data."\n\nAnd so began the age of creative machines — not to replace human stories, but to inspire new ones.\n\n— The End`;
+  } else if (lower.includes("summar")) {
+    text = "**Summary:**\n• The main topic is discussed with supporting evidence.\n• Key points are highlighted for quick understanding.\n• The conclusion reinforces the central message.\n\n(This is a demo summary. Configure GEMINI_API_KEY for real AI summaries.)";
+  } else if (lower.includes("translat")) {
+    text = "(Demo translation) The text has been translated. In a real setup with Gemini, the AI would accurately translate between 100+ languages while preserving meaning and tone.";
+  } else if (lower.includes("math") || lower.includes("solve") || lower.includes("equation") || lower.includes("calculate")) {
+    text = "**Step-by-step Solution:**\n\nStep 1: Identify the problem type\nStep 2: Apply the relevant formula\nStep 3: Calculate the result\nStep 4: Verify the answer\n\n**Answer:** The solution is demonstrated above.\n\n(This is a demo solution. Configure GEMINI_API_KEY for real step-by-step math solving.)";
+  } else if (lower.includes("code") || lower.includes("function") || lower.includes("program") || lower.includes("script")) {
+    text = "**Code Explanation:**\n\nThis code defines a set of instructions for the computer. Here's what each part does:\n\n1. **Input** — The program receives data\n2. **Processing** — It transforms the data using logic\n3. **Output** — It returns or displays the result\n\nThink of it like a recipe: ingredients go in, steps are followed, and a dish comes out!\n\n(This is a demo explanation. Configure GEMINI_API_KEY for detailed code analysis.)";
+  } else if (lower.includes("word problem")) {
+    text = JSON.stringify({
+      problems: [
+        { problem: "A bakery makes 48 cupcakes in the morning and 36 in the afternoon. If each box holds 12 cupcakes, how many boxes are needed?", hint: "First add, then divide.", answer: "7 boxes" },
+        { problem: "A train travels at 60 km/h for 2.5 hours. How far does it travel?", hint: "Use: Distance = Speed × Time", answer: "150 km" },
+        { problem: "Priya has ₹500. She buys 3 notebooks at ₹45 each and 2 pens at ₹20 each. How much money is left?", hint: "Calculate total cost first.", answer: "₹325" }
+      ]
+    });
   }
 
   return { text, tokensUsed: 0, durationMs: 5 };
@@ -154,12 +172,100 @@ async function promptLab(prompt) {
   return callGemini(prompt, { maxTokens: 400, temperature: 0.7 });
 }
 
+// ---------------------------------------------------------------------------
+// New tools — Phase 1
+// ---------------------------------------------------------------------------
+
+async function storyGen(prompt) {
+  return callGemini(
+    `Write a short, creative, age-appropriate story (suitable for school students ages 8-16) based on the following idea. The story should be 150-250 words with a clear beginning, middle, and end.\n\nIdea: "${prompt}"\n\nStory:`,
+    { maxTokens: 400, temperature: 0.9 }
+  );
+}
+
+async function mathSolver(prompt) {
+  return callGemini(
+    `You are a friendly math tutor for school students (ages 8-16). Solve the following math problem step by step. Show each step clearly. Use simple language. At the end, clearly state the final answer.\n\nProblem: "${prompt}"\n\nSolution:`,
+    { maxTokens: 500, temperature: 0.3 }
+  );
+}
+
+async function summarize(prompt) {
+  return callGemini(
+    `Summarize the following text into 3-5 clear bullet points. Keep it simple and understandable for school students.\n\nText: "${prompt}"\n\nSummary:`,
+    { maxTokens: 300, temperature: 0.4 }
+  );
+}
+
+async function translate(prompt) {
+  return callGemini(
+    `Translate the following text. If the target language is specified after "→" or "to", use that language. Otherwise translate to English. Provide only the translation, no explanations.\n\nText: "${prompt}"\n\nTranslation:`,
+    { maxTokens: 400, temperature: 0.2 }
+  );
+}
+
+async function codeExplain(prompt) {
+  return callGemini(
+    `Explain the following code snippet in simple terms that a school student (ages 10-16) can understand. Break it down line by line if helpful. Use analogies where possible.\n\nCode:\n${prompt}\n\nExplanation:`,
+    { maxTokens: 500, temperature: 0.5 }
+  );
+}
+
+async function wordProblem(prompt) {
+  return callGemini(
+    `Generate exactly 3 math word problems about "${prompt}" suitable for school students (ages 8-16). Each should have a problem statement, a hint, and the answer.\n\nRespond ONLY with valid JSON: {"problems": [{"problem": "...", "hint": "...", "answer": "..."}]}\n\nJSON:`,
+    { maxTokens: 500, temperature: 0.7 }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Meta-AI: Suggest improvements for the playground itself
+// ---------------------------------------------------------------------------
+
+async function suggestImprovementsMeta(currentFeatures) {
+  return callGemini(
+    `You are an AI product analyst reviewing an AI Learning Playground for school students (ages 8-16). The playground currently has these features:\n\n${currentFeatures}\n\nSuggest exactly 5 concrete, actionable improvements. For each, provide a title, description, and category (one of: "New Tool", "UX Improvement", "Content", "Engagement", "Accessibility").\n\nRespond ONLY with valid JSON: {"suggestions": [{"title": "...", "description": "...", "category": "..."}]}\n\nJSON:`,
+    { maxTokens: 600, temperature: 0.8 }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Meta-AI: Generate a custom tool definition from a student's description
+// ---------------------------------------------------------------------------
+
+async function generateToolDefinition(description) {
+  return callGemini(
+    `A school student wants to create a custom AI tool. They describe it as: "${description}"\n\nGenerate a tool definition. Respond ONLY with valid JSON:\n{"toolName": "short-kebab-case-name", "icon": "single emoji", "title": "Short Title (3-5 words)", "description": "One sentence describing what the tool does", "systemPrompt": "The system prompt to use when running this tool. It should instruct the AI on how to respond to user input for this specific tool. Keep it age-appropriate for school students.", "placeholder": "Example input text the student might type"}\n\nJSON:`,
+    { maxTokens: 400, temperature: 0.7 }
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Run a custom tool using its stored system prompt
+// ---------------------------------------------------------------------------
+
+async function runCustomTool(systemPrompt, userInput) {
+  return callGemini(
+    `${systemPrompt}\n\nUser input: "${userInput}"`,
+    { maxTokens: 500, temperature: 0.7 }
+  );
+}
+
 export {
   textComplete,
   imageDescribe,
   sentimentAnalysis,
   generateQuiz,
   promptLab,
+  storyGen,
+  mathSolver,
+  summarize,
+  translate,
+  codeExplain,
+  wordProblem,
+  suggestImprovementsMeta,
+  generateToolDefinition,
+  runCustomTool,
   checkRateLimit,
   DAILY_LIMIT_PER_STUDENT
 };

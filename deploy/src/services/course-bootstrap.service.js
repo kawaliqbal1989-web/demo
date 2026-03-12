@@ -9,8 +9,17 @@ async function ensureTenantCourseCatalog(tenantId) {
     return null;
   }
 
-  const [courseCount, levels] = await prisma.$transaction([
+  const [courseCount, existingDefaultCourse, levels] = await prisma.$transaction([
     prisma.course.count({ where: { tenantId } }),
+    prisma.course.findUnique({
+      where: {
+        tenantId_code: {
+          tenantId,
+          code: DEFAULT_COURSE_CODE
+        }
+      },
+      select: { id: true }
+    }),
     prisma.level.findMany({
       where: { tenantId },
       orderBy: { rank: "asc" },
@@ -18,7 +27,11 @@ async function ensureTenantCourseCatalog(tenantId) {
     })
   ]);
 
-  if (courseCount > 0 || !levels.length) {
+  if (!levels.length) {
+    return null;
+  }
+
+  if (courseCount > 0 && !existingDefaultCourse) {
     return null;
   }
 

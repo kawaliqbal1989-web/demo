@@ -1,7 +1,11 @@
 const FRIENDLY_BY_CODE = {
   INVALID_ACCESS_TOKEN: "Your session has expired. Please log in again.",
   INVALID_REFRESH_TOKEN: "Your session has expired. Please log in again.",
+  INVALID_CURRENT_PASSWORD: "Current password is incorrect.",
   AUTH_REQUIRED: "Please log in to continue.",
+  AUTH_EMAIL_EXISTS: "This student email is already used by another login account. Use a different email or leave Student Email blank.",
+  AUTH_USERNAME_EXISTS: "This student code is already used by another login account. Refresh and try again.",
+  STUDENT_EMAIL_EXISTS: "This student email already exists in student records. Use a different email or leave it blank.",
   SUBSCRIPTION_EXPIRED: "Your subscription has expired. Please renew or contact support.",
   DUPLICATE_ACTIVE_ENROLLMENT: "This student is already enrolled in this competition.",
   LEVEL_SKIP_NOT_ALLOWED: "You can’t skip levels. Promote the student one level at a time.",
@@ -37,6 +41,13 @@ function getFriendlyErrorMessage(error) {
     return FRIENDLY_BY_CODE[code];
   }
 
+  const isNetworkDown =
+    !error?.response &&
+    (error?.code === "ERR_NETWORK" || String(error?.message || "").toLowerCase().includes("network error"));
+  if (isNetworkDown) {
+    return "Cannot reach the server. Please ensure backend is running and try again.";
+  }
+
   return error?.response?.data?.message || error?.message || "Something went wrong.";
 }
 
@@ -51,14 +62,24 @@ function logApiError(error) {
   const code = getApiErrorCode(error);
   const path = error?.config?.url;
   const method = error?.config?.method;
+  const isNetworkDown =
+    !error?.response &&
+    (error?.code === "ERR_NETWORK" || String(error?.message || "").toLowerCase().includes("network error"));
+  const isStudentDuplicateConflict =
+    status === 409 &&
+    method === "post" &&
+    (path === "/students" || (typeof path === "string" && /\/students\/[^/]+\/create-login$/.test(path))) &&
+    (code === "AUTH_EMAIL_EXISTS" || code === "AUTH_USERNAME_EXISTS" || code === "STUDENT_EMAIL_EXISTS");
 
   // Some 409s are expected control flow (e.g. "create" when record already exists).
   // Avoid polluting the console with noise for these cases.
   if (
+    isNetworkDown ||
     (code === "SESSION_ALREADY_EXISTS" && method === "post" && path === "/teacher/attendance/sessions") ||
     (code === "DUPLICATE_PENDING" && method === "post" && path === "/student/reassignment-requests") ||
     (code === "FEATURE_NOT_ASSIGNED" && method === "get" && path === "/student/practice-worksheets/options") ||
-    (code === "FEATURE_NOT_ASSIGNED" && method === "get" && path === "/student/abacus-practice-worksheets/options")
+    (code === "FEATURE_NOT_ASSIGNED" && method === "get" && path === "/student/abacus-practice-worksheets/options") ||
+    isStudentDuplicateConflict
   ) {
     return;
   }

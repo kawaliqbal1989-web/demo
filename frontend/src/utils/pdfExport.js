@@ -269,13 +269,60 @@ export async function preloadTemplateImages(template) {
 
 /**
  * Generate a worksheet result / scorecard PDF.
- * @param {{ studentName: string, worksheetTitle: string, score: number, totalQuestions: number, correctCount: number, submittedAt: string, totalTimeText?: string, takenTimeText?: string, questions: Array<{questionNumber: number, prompt: string, studentAnswer: string, correctAnswer: string, resultStatus?: string}> }} data
+ * @param {{ studentName: string, studentCode?: string, teacherName?: string, centerLabel?: string, batchName?: string, courseLevelLabel?: string, worksheetTitle: string, score: number, totalQuestions: number, correctCount: number, submittedAt: string, totalTimeText?: string, takenTimeText?: string, questions: Array<{questionNumber: number, prompt: string, studentAnswer: string, correctAnswer: string, resultStatus?: string}> }} data
  * @returns {jsPDF}
  */
-export function generateWorksheetResultPdf({ studentName, worksheetTitle, score, totalQuestions, correctCount, submittedAt, totalTimeText, takenTimeText, questions = [] }) {
+export function generateWorksheetResultPdf({
+  studentName,
+  studentCode,
+  teacherName,
+  centerLabel,
+  batchName,
+  courseLevelLabel,
+  worksheetTitle,
+  score,
+  totalQuestions,
+  correctCount,
+  submittedAt,
+  totalTimeText,
+  takenTimeText,
+  questions = []
+}) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const w = doc.internal.pageSize.getWidth();
   let y = 20;
+  const rowLeft = 20;
+  const rowRight = w - 20;
+
+  const safeValue = (value) => {
+    if (value === null || value === undefined) {
+      return "—";
+    }
+    const text = String(value).trim();
+    return text || "—";
+  };
+
+  const drawInfoLine = (label, value, maxWidth = w - 40) => {
+    const lines = doc.splitTextToSize(`${label}: ${safeValue(value)}`, maxWidth);
+    doc.text(lines, rowLeft, y);
+    y += lines.length * 5;
+  };
+
+  const drawTableHeader = () => {
+    doc.setFillColor(243, 244, 246);
+    doc.rect(rowLeft, y, w - 40, 8, "F");
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(55, 65, 81);
+    doc.text("#", 24, y + 5.5);
+    doc.text("Question", 34, y + 5.5);
+    doc.text("Your Answer", 118, y + 5.5);
+    doc.text("Correct", 152, y + 5.5);
+    doc.text("Result", 176, y + 5.5);
+    y += 10;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+  };
 
   // Title
   doc.setFontSize(18);
@@ -294,53 +341,58 @@ export function generateWorksheetResultPdf({ studentName, worksheetTitle, score,
   doc.setFontSize(12);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(55, 65, 81);
-  doc.text(`Student: ${studentName}`, 20, y);
-  y += 6;
-  doc.text(`Worksheet: ${worksheetTitle}`, 20, y);
-  y += 6;
-  doc.text(`Score: ${score}% (${correctCount}/${totalQuestions})`, 20, y);
-  y += 6;
+  drawInfoLine("Student", studentName);
+  if (studentCode) {
+    drawInfoLine("Student Code", studentCode);
+  }
+  if (teacherName) {
+    drawInfoLine("Teacher", teacherName);
+  }
+  if (centerLabel) {
+    drawInfoLine("Center", centerLabel);
+  }
+  if (batchName) {
+    drawInfoLine("Batch", batchName);
+  }
+  if (courseLevelLabel) {
+    drawInfoLine("Course / Level", courseLevelLabel);
+  }
+  drawInfoLine("Worksheet", worksheetTitle);
+  drawInfoLine("Score", `${safeValue(score)}% (${safeValue(correctCount)}/${safeValue(totalQuestions)})`);
   if (totalTimeText) {
-    doc.text(`Total Time: ${totalTimeText}`, 20, y);
-    y += 6;
+    drawInfoLine("Total Time", totalTimeText);
   }
   if (takenTimeText) {
-    doc.text(`Taken Time: ${takenTimeText}`, 20, y);
-    y += 6;
+    drawInfoLine("Taken Time", takenTimeText);
   }
   if (submittedAt) {
-    doc.text(`Submitted: ${new Date(submittedAt).toLocaleString()}`, 20, y);
-    y += 6;
+    drawInfoLine("Submitted", new Date(submittedAt).toLocaleString());
   }
   y += 4;
 
-  // Table header
-  doc.setFillColor(243, 244, 246);
-  doc.rect(20, y, w - 40, 8, "F");
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(55, 65, 81);
-  doc.text("#", 24, y + 5.5);
-  doc.text("Question", 34, y + 5.5);
-  doc.text("Your Answer", 110, y + 5.5);
-  doc.text("Correct", 150, y + 5.5);
-  doc.text("Result", 175, y + 5.5);
-  y += 10;
+  if (y > 245) {
+    doc.addPage();
+    y = 20;
+  }
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
+  // Table header
+  drawTableHeader();
 
   for (const q of questions) {
-    if (y > 270) {
+    const promptLines = doc.splitTextToSize(String(q.prompt || ""), 78);
+    const rowHeight = Math.max(promptLines.length * 4.2, 5) + 2;
+
+    if (y + rowHeight > 275) {
       doc.addPage();
       y = 20;
+      drawTableHeader();
     }
 
     doc.setTextColor(55, 65, 81);
     doc.text(String(q.questionNumber), 24, y + 4);
-    doc.text(String(q.prompt || "").slice(0, 30), 34, y + 4);
-    doc.text(String(q.studentAnswer ?? "—"), 110, y + 4);
-    doc.text(String(q.correctAnswer ?? "—"), 150, y + 4);
+    doc.text(promptLines, 34, y + 4);
+    doc.text(String(q.studentAnswer ?? "—"), 118, y + 4);
+    doc.text(String(q.correctAnswer ?? "—"), 152, y + 4);
 
     if (q.resultStatus === "Right") {
       doc.setTextColor(22, 101, 52);
@@ -353,7 +405,10 @@ export function generateWorksheetResultPdf({ studentName, worksheetTitle, score,
       doc.text("Wrong", 173, y + 4);
     }
 
-    y += 7;
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.2);
+    doc.line(rowLeft, y + rowHeight, rowRight, y + rowHeight);
+    y += rowHeight + 2;
   }
 
   return doc;

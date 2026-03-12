@@ -14,6 +14,7 @@ import {
   requireStudentFeature,
 } from "../services/practice-entitlement.service.js";
 import { logger } from "../lib/logger.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -110,9 +111,16 @@ const getStudentMe = asyncHandler(async (req, res) => {
       firstName: true,
       lastName: true,
       email: true,
+      gender: true,
       dateOfBirth: true,
       guardianName: true,
       guardianPhone: true,
+      guardianEmail: true,
+      phonePrimary: true,
+      phoneSecondary: true,
+      address: true,
+      state: true,
+      district: true,
       hierarchyNodeId: true,
       levelId: true,
       isActive: true,
@@ -154,10 +162,17 @@ const getStudentMe = asyncHandler(async (req, res) => {
   ]);
 
   // fetch any explicit assigned courses (multi-assign feature)
-  const assignedCourseRows = await prisma.studentAssignedCourse.findMany({
-    where: { tenantId: req.auth.tenantId, studentId: student.id },
-    include: { course: { select: { id: true, code: true, name: true } } }
-  });
+  let assignedCourseRows = [];
+  try {
+    assignedCourseRows = await prisma.studentAssignedCourse.findMany({
+      where: { tenantId: req.auth.tenantId, studentId: student.id },
+      include: { course: { select: { id: true, code: true, name: true } } }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["studentassignedcourse"])) {
+      throw error;
+    }
+  }
 
   const assignedCourses = assignedCourseRows.map((r) => ({
     courseId: r.course.id,
@@ -186,20 +201,61 @@ const getStudentMe = asyncHandler(async (req, res) => {
     status: student.isActive ? "ACTIVE" : "INACTIVE",
     email: student.email || null,
     photoUrl: student.photoUrl || null,
+    gender: student.gender || null,
     guardianName: student.guardianName || null,
     guardianPhone: student.guardianPhone || null,
+    guardianEmail: student.guardianEmail || null,
+    phonePrimary: student.phonePrimary || null,
+    phoneSecondary: student.phoneSecondary || null,
+    address: student.address || null,
+    state: student.state || null,
+    district: student.district || null,
     dateOfBirth: student.dateOfBirth || null
   });
 });
 
 const updateStudentProfile = asyncHandler(async (req, res) => {
-  const allowedFields = ["email", "phonePrimary", "guardianName", "guardianPhone", "guardianEmail", "address", "state", "district"];
+  const allowedStringFields = [
+    "email",
+    "phonePrimary",
+    "phoneSecondary",
+    "guardianName",
+    "guardianPhone",
+    "guardianEmail",
+    "address",
+    "state",
+    "district"
+  ];
   const data = {};
 
-  for (const field of allowedFields) {
+  for (const field of allowedStringFields) {
     if (req.body[field] !== undefined) {
       const val = req.body[field] === null ? null : String(req.body[field]).trim();
       data[field] = val || null;
+    }
+  }
+
+  if (req.body.gender !== undefined) {
+    const rawGender = req.body.gender === null ? null : String(req.body.gender).trim().toUpperCase();
+    if (!rawGender) {
+      data.gender = null;
+    } else if (!["MALE", "FEMALE", "OTHER"].includes(rawGender)) {
+      return res.apiError(400, "Invalid gender", "INVALID_GENDER");
+    } else {
+      data.gender = rawGender;
+    }
+  }
+
+  if (req.body.dateOfBirth !== undefined) {
+    const rawDate = req.body.dateOfBirth === null ? null : String(req.body.dateOfBirth).trim();
+    if (!rawDate) {
+      data.dateOfBirth = null;
+    } else {
+      const parsedDate = new Date(rawDate);
+      if (Number.isNaN(parsedDate.getTime())) {
+        return res.apiError(400, "Invalid date of birth", "INVALID_DATE_OF_BIRTH");
+      }
+      data.dateOfBirth = parsedDate;
     }
   }
 
@@ -219,6 +275,13 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
     });
     if (existing) {
       return res.apiError(409, "Email already in use by another student", "EMAIL_TAKEN");
+    }
+  }
+
+  if (data.guardianEmail) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(data.guardianEmail)) {
+      return res.apiError(400, "Invalid guardian email format", "INVALID_GUARDIAN_EMAIL");
     }
   }
 
@@ -1034,9 +1097,12 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
   }
 
   const worksheetIds = worksheets.map((w) => w.id);
-  const [submissions, reassignmentAggregates] = worksheetIds.length
-    ? await Promise.all([
-        prisma.worksheetSubmission.findMany({
+  let submissions = [];
+  let reassignmentAggregates = [];
+
+  if (worksheetIds.length) {
+    [submissions, reassignmentAggregates] = await Promise.all([
+      prisma.worksheetSubmission.findMany({
         where: {
           tenantId: req.auth.tenantId,
           studentId: req.student.id,
@@ -1051,18 +1117,24 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
           totalQuestions: true
         }
       }),
-        prisma.worksheetReassignmentRequest.groupBy({
-          by: ["currentWorksheetId"],
-          where: {
-            tenantId: req.auth.tenantId,
-            studentId: req.student.id,
-            currentWorksheetId: { in: worksheetIds },
-            status: "APPROVED"
-          },
-          _count: { id: true }
-        })
-      ])
-    : [[], []];
+      prisma.worksheetReassignmentRequest.groupBy({
+        by: ["currentWorksheetId"],
+        where: {
+          tenantId: req.auth.tenantId,
+          studentId: req.student.id,
+          currentWorksheetId: { in: worksheetIds },
+          status: "APPROVED"
+        },
+        _count: { id: true }
+      }).catch((error) => {
+        if (!isSchemaMismatchError(error, ["worksheetreassignmentrequest"])) {
+          throw error;
+        }
+
+        return [];
+      })
+    ]);
+  }
 
   const byWorksheetId = new Map(submissions.map((s) => [s.worksheetId, s]));
   const reassignmentCountByWorksheetId = new Map(reassignmentAggregates.map((item) => [item.currentWorksheetId, item._count.id]));
@@ -1369,6 +1441,12 @@ const getStudentPracticeReport = asyncHandler(async (req, res) => {
       include: {
         currentWorksheet: { select: { id: true, title: true, timeLimitSeconds: true } }
       }
+    }).catch((error) => {
+      if (!isSchemaMismatchError(error, ["worksheetreassignmentrequest"])) {
+        throw error;
+      }
+
+      return [];
     })
   ]);
 
@@ -2601,7 +2679,7 @@ const getStudentFeesSummary = asyncHandler(async (req, res) => {
     where: {
       tenantId: req.auth.tenantId,
       studentId: req.student.id,
-      type: { in: ["ENROLLMENT", "RENEWAL", "COMPETITION", "ADJUSTMENT"] }
+      type: { in: ["ENROLLMENT", "RENEWAL", "COMPETITION"] }
     },
     orderBy: { createdAt: "desc" },
     take: 50,
@@ -3623,23 +3701,41 @@ const submitStudentMockTestAttempt = asyncHandler(async (req, res) => {
 });
 
 const listStudentCertificates = asyncHandler(async (req, res) => {
-  const certs = await prisma.certificate.findMany({
-    where: {
-      tenantId: req.auth.tenantId,
-      studentId: req.student.id
-    },
-    orderBy: { issuedAt: "desc" },
-    select: {
-      id: true,
-      certificateNumber: true,
-      status: true,
-      issuedAt: true,
-      revokedAt: true,
-      reason: true,
-      verificationToken: true,
-      level: { select: { id: true, name: true, rank: true } }
+  const where = {
+    tenantId: req.auth.tenantId,
+    studentId: req.student.id
+  };
+  const baseSelect = {
+    id: true,
+    certificateNumber: true,
+    status: true,
+    issuedAt: true,
+    revokedAt: true,
+    reason: true,
+    level: { select: { id: true, name: true, rank: true } }
+  };
+
+  let certs;
+  try {
+    certs = await prisma.certificate.findMany({
+      where,
+      orderBy: { issuedAt: "desc" },
+      select: {
+        ...baseSelect,
+        verificationToken: true
+      }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["Certificate.verificationToken", "verificationToken"])) {
+      throw error;
     }
-  });
+
+    certs = await prisma.certificate.findMany({
+      where,
+      orderBy: { issuedAt: "desc" },
+      select: baseSelect
+    });
+  }
 
   const data = certs.map((c) => ({
     id: c.id,
@@ -3650,7 +3746,7 @@ const listStudentCertificates = asyncHandler(async (req, res) => {
     issuedAt: c.issuedAt,
     revokedAt: c.revokedAt,
     reason: c.reason,
-    verificationToken: c.verificationToken
+    verificationToken: c.verificationToken || null
   }));
 
   return res.apiSuccess("Student certificates fetched", data);

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getMyFranchise, updateFranchiseProfile } from "../../services/franchiseService";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 
 function FranchiseProfilePage() {
   const [loading, setLoading] = useState(false);
@@ -130,7 +131,7 @@ function FranchiseProfilePage() {
         <h3 style={{ margin: 0 }}>1) Identity (read-only)</h3>
         {profile?.logoUrl ? (
           <img
-            src={profile.logoUrl}
+            src={resolveAssetUrl(profile.logoUrl)}
             alt="Franchise logo"
             style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover" }}
           />

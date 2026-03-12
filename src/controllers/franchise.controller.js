@@ -929,7 +929,11 @@ const listFranchiseCompetitionRequests = asyncHandler(async (req, res) => {
     orderBy,
     skip,
     take,
-    include: {
+    select: {
+      id: true,
+      title: true,
+      status: true,
+      workflowStage: true,
       hierarchyNode: { select: { id: true, name: true, type: true } },
       level: { select: { id: true, name: true, rank: true } },
       createdBy: { select: { id: true, email: true, role: true } }

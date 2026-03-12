@@ -5,8 +5,10 @@ import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { listBatches } from "../../services/batchesService";
+import { listCatalogCourseLevels } from "../../services/catalogService";
+import { listCenterAvailableCourses } from "../../services/centerService";
 import { createEnrollment, exportEnrollmentsCsvUrl, listEnrollments, updateEnrollment } from "../../services/enrollmentsService";
-import { listStudents } from "../../services/studentsService";
+import { listStudents, assignStudentCourse } from "../../services/studentsService";
 import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
@@ -28,6 +30,11 @@ function CenterEnrollmentsPage() {
 
   const [studentId, setStudentId] = useState("");
   const [assignedTeacherUserId, setAssignedTeacherUserId] = useState("");
+  const [courseId, setCourseId] = useState("");
+  const [courses, setCourses] = useState([]);
+  const [courseLevelId, setCourseLevelId] = useState("");
+  const [courseLevels, setCourseLevels] = useState([]);
+  const [courseLevelsLoading, setCourseLevelsLoading] = useState(false);
   const [creating, setCreating] = useState(false);
 
   const PAGE_SIZE = 100;
@@ -81,12 +88,14 @@ function CenterEnrollmentsPage() {
     setLoading(true);
     setError("");
     try {
-      const [b, t] = await Promise.all([
+      const [b, t, c] = await Promise.all([
         listBatches({ limit: 200, offset: 0 }),
-        listTeachers({ limit: 200, offset: 0 })
+        listTeachers({ limit: 200, offset: 0 }),
+        listCenterAvailableCourses()
       ]);
       setBatches(b.data?.items || []);
       setTeachers(t.data || []);
+      setCourses(Array.isArray(c?.data) ? c.data : c?.data?.items || []);
       await loadStudentOptions("", 0);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load setup data.");
@@ -123,10 +132,49 @@ function CenterEnrollmentsPage() {
     void bootstrap();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCourseLevels = async () => {
+      if (!courseId) {
+        setCourseLevels([]);
+        setCourseLevelId("");
+        return;
+      }
+
+      setCourseLevelsLoading(true);
+      try {
+        const resp = await listCatalogCourseLevels({ courseId, limit: 200, offset: 0, status: "ACTIVE" });
+        if (cancelled) return;
+
+        const items = Array.isArray(resp?.data?.items) ? resp.data.items : [];
+        setCourseLevels(items);
+        setCourseLevelId((prev) => (items.some((item) => item?.level?.id === prev) ? prev : ""));
+      } catch (_err) {
+        if (cancelled) return;
+        setCourseLevels([]);
+        setCourseLevelId("");
+        toast.error("Failed to load course levels.");
+      } finally {
+        if (!cancelled) {
+          setCourseLevelsLoading(false);
+        }
+      }
+    };
+
+    void loadCourseLevels();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [courseId]);
+
   const onSelectBatch = async (id) => {
     setBatchId(id);
     setStudentId("");
     setAssignedTeacherUserId("");
+    setCourseId("");
+    setCourseLevelId("");
     await loadEnrollments(id, 0);
   };
 
@@ -148,10 +196,20 @@ function CenterEnrollmentsPage() {
       await createEnrollment({
         batchId,
         studentId,
-        assignedTeacherUserId: assignedTeacherUserId || undefined
+        assignedTeacherUserId: assignedTeacherUserId || undefined,
+        levelId: courseLevelId || undefined
       });
+      if (courseId) {
+        try {
+          await assignStudentCourse(studentId, courseId);
+        } catch (_courseErr) {
+          toast.error("Enrolled successfully but failed to assign course.");
+        }
+      }
       setStudentId("");
       setAssignedTeacherUserId("");
+      setCourseId("");
+      setCourseLevelId("");
       await loadEnrollments(batchId, rosterPage);
       await loadEnrolledIds(batchId);
     } catch (err) {
@@ -268,7 +326,7 @@ function CenterEnrollmentsPage() {
             </button>
           </div>
           {studentsError ? <div className="error">{studentsError}</div> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
             <label>
               Student
               <select className="select" value={studentId} onChange={(e) => setStudentId(e.target.value)}>
@@ -292,6 +350,42 @@ function CenterEnrollmentsPage() {
                 ))}
               </select>
             </label>
+
+            <label>
+              Course (optional)
+              <select
+                className="select"
+                value={courseId}
+                onChange={(e) => {
+                  setCourseId(e.target.value);
+                  setCourseLevelId("");
+                }}
+              >
+                <option value="">None</option>
+                {courses.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              Course level (optional)
+              <select
+                className="select"
+                value={courseLevelId}
+                onChange={(e) => setCourseLevelId(e.target.value)}
+                disabled={!courseId || courseLevelsLoading}
+              >
+                <option value="">{!courseId ? "Select course first" : courseLevelsLoading ? "Loading..." : "None"}</option>
+                {courseLevels.map((item) => (
+                  <option key={item.id} value={item?.level?.id || ""}>
+                    {item?.title || item?.level?.name || `Level ${item?.levelNumber || ""}`}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
 
           <button className="button" disabled={creating} style={{ width: "auto" }}>
@@ -310,6 +404,7 @@ function CenterEnrollmentsPage() {
             columns={[
               { key: "admissionNo", header: "Admission No", render: (r) => r?.student?.admissionNo || "" },
               { key: "name", header: "Student", render: (r) => `${r?.student?.firstName || ""} ${r?.student?.lastName || ""}`.trim() },
+              { key: "level", header: "Level", render: (r) => r?.level?.name || "" },
               { key: "teacher", header: "Assigned Teacher", render: (r) => r?.assignedTeacher?.username || "" },
               { key: "status", header: "Status", render: (r) => r?.status || "" },
               {

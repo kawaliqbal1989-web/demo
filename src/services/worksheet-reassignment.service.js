@@ -1,4 +1,16 @@
 import { prisma } from "../lib/prisma.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+
+function isMissingReassignmentSchemaError(error) {
+  return isSchemaMismatchError(error, ["worksheetreassignmentrequest"]);
+}
+
+function buildReassignmentUnavailableResult() {
+  return {
+    error: "Worksheet reassignment is unavailable in this environment",
+    code: "REASSIGNMENT_UNAVAILABLE"
+  };
+}
 
 function buildArchivedResultSnapshot(submission) {
   if (!submission?.finalSubmittedAt) {
@@ -28,6 +40,7 @@ async function createReassignmentRequest({
   reason,
   requestedByUserId,
 }) {
+  try {
   // Guard: no duplicate PENDING request for same student + worksheet
   const existing = await prisma.worksheetReassignmentRequest.findFirst({
     where: {
@@ -78,6 +91,13 @@ async function createReassignmentRequest({
   });
 
   return { data: request };
+  } catch (error) {
+    if (!isMissingReassignmentSchemaError(error)) {
+      throw error;
+    }
+
+    return buildReassignmentUnavailableResult();
+  }
 }
 
 /**
@@ -92,42 +112,50 @@ async function listReassignmentRequests({
   skip = 0,
   take = 50,
 }) {
-  const where = { tenantId };
-  if (status) where.status = status;
-  if (studentId) where.studentId = studentId;
-  if (reviewerUserId) where.reviewedByUserId = reviewerUserId;
-  if (studentIds && studentIds.length > 0) where.studentId = { in: studentIds };
+  try {
+    const where = { tenantId };
+    if (status) where.status = status;
+    if (studentId) where.studentId = studentId;
+    if (reviewerUserId) where.reviewedByUserId = reviewerUserId;
+    if (studentIds && studentIds.length > 0) where.studentId = { in: studentIds };
 
-  const [total, items] = await Promise.all([
-    prisma.worksheetReassignmentRequest.count({ where }),
-    prisma.worksheetReassignmentRequest.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip,
-      take,
-      include: {
-        student: { select: { id: true, admissionNo: true, firstName: true, lastName: true } },
-        currentWorksheet: {
-          select: {
-            id: true,
-            title: true,
-            level: { select: { id: true, name: true, rank: true } },
+    const [total, items] = await Promise.all([
+      prisma.worksheetReassignmentRequest.count({ where }),
+      prisma.worksheetReassignmentRequest.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take,
+        include: {
+          student: { select: { id: true, admissionNo: true, firstName: true, lastName: true } },
+          currentWorksheet: {
+            select: {
+              id: true,
+              title: true,
+              level: { select: { id: true, name: true, rank: true } },
+            },
           },
-        },
-        newWorksheet: {
-          select: {
-            id: true,
-            title: true,
-            level: { select: { id: true, name: true, rank: true } },
+          newWorksheet: {
+            select: {
+              id: true,
+              title: true,
+              level: { select: { id: true, name: true, rank: true } },
+            },
           },
+          requestedBy: { select: { id: true, username: true, role: true } },
+          reviewedBy: { select: { id: true, username: true, role: true } },
         },
-        requestedBy: { select: { id: true, username: true, role: true } },
-        reviewedBy: { select: { id: true, username: true, role: true } },
-      },
-    }),
-  ]);
+      }),
+    ]);
 
-  return { total, items };
+    return { total, items };
+  } catch (error) {
+    if (!isMissingReassignmentSchemaError(error)) {
+      throw error;
+    }
+
+    return { total: 0, items: [] };
+  }
 }
 
 /**
@@ -140,6 +168,7 @@ async function reviewReassignmentRequest({
   reviewedByUserId,
   reviewReason,
 }) {
+  try {
   const request = await prisma.worksheetReassignmentRequest.findFirst({
     where: { id: requestId, tenantId, status: "PENDING" },
   });
@@ -265,12 +294,20 @@ async function reviewReassignmentRequest({
   });
 
   return { data: { requestId, status: "REJECTED" } };
+  } catch (error) {
+    if (!isMissingReassignmentSchemaError(error)) {
+      throw error;
+    }
+
+    return buildReassignmentUnavailableResult();
+  }
 }
 
 /**
  * Cancel a pending request (by the student who created it).
  */
 async function cancelReassignmentRequest({ tenantId, requestId, userId }) {
+  try {
   const request = await prisma.worksheetReassignmentRequest.findFirst({
     where: { id: requestId, tenantId, status: "PENDING", requestedByUserId: userId },
   });
@@ -284,6 +321,13 @@ async function cancelReassignmentRequest({ tenantId, requestId, userId }) {
   });
 
   return { data: { requestId, status: "CANCELLED" } };
+  } catch (error) {
+    if (!isMissingReassignmentSchemaError(error)) {
+      throw error;
+    }
+
+    return buildReassignmentUnavailableResult();
+  }
 }
 
 /**
@@ -298,6 +342,7 @@ async function directReassign({
   reason,
   performedByUserId,
 }) {
+  try {
   // Validate submission exists
   const submission = await prisma.worksheetSubmission.findFirst({
     where: { tenantId, studentId, worksheetId: currentWorksheetId, finalSubmittedAt: { not: null } },
@@ -372,6 +417,13 @@ async function directReassign({
   });
 
   return { data: result };
+  } catch (error) {
+    if (!isMissingReassignmentSchemaError(error)) {
+      throw error;
+    }
+
+    return buildReassignmentUnavailableResult();
+  }
 }
 
 /**

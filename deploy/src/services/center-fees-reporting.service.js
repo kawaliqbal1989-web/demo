@@ -1,6 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 
-const PAYMENT_TYPES = ["ENROLLMENT", "RENEWAL", "ADJUSTMENT"];
+const PAYMENT_TYPES = ["ENROLLMENT", "RENEWAL"];
 
 function toSafeNumber(value) {
   if (value === null || value === undefined) return 0;
@@ -29,7 +29,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
         ON t.installmentId = i.id
         AND t.tenantId = i.tenantId
         AND t.centerId = ${centerId}
-        AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+        AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
       WHERE i.tenantId = ${tenantId}
         AND s.tenantId = ${tenantId}
         AND s.hierarchyNodeId = ${centerId}
@@ -58,7 +58,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
       ON t.installmentId = i.id
       AND t.tenantId = i.tenantId
       AND t.centerId = ${centerId}
-      AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+      AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
     WHERE i.tenantId = ${tenantId}
       AND s.tenantId = ${tenantId}
       AND s.hierarchyNodeId = ${centerId}
@@ -119,7 +119,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
         WHERE tenantId = ${tenantId}
           AND centerId = ${centerId}
           AND studentId IS NOT NULL
-          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
           AND createdAt >= ${from}
           AND createdAt < ${toExclusive}
         GROUP BY studentId
@@ -138,7 +138,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
           WHERE tenantId = ${tenantId}
             AND centerId = ${centerId}
             AND installmentId IS NOT NULL
-            AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+            AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
           GROUP BY installmentId
         ) p ON p.installmentId = i.id
         WHERE i.tenantId = ${tenantId}
@@ -176,7 +176,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
       WHERE tenantId = ${tenantId}
         AND centerId = ${centerId}
         AND studentId IS NOT NULL
-        AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+        AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
         AND createdAt >= ${from}
         AND createdAt < ${toExclusive}
       GROUP BY studentId
@@ -195,7 +195,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
         WHERE tenantId = ${tenantId}
           AND centerId = ${centerId}
           AND installmentId IS NOT NULL
-          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
         GROUP BY installmentId
       ) p ON p.installmentId = i.id
       WHERE i.tenantId = ${tenantId}
@@ -259,7 +259,7 @@ async function getMonthlyDues({ tenantId, centerId, range }) {
         ON t.installmentId = i.id
         AND t.tenantId = i.tenantId
         AND t.centerId = ${centerId}
-        AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+        AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
       WHERE i.tenantId = ${tenantId}
         AND s.tenantId = ${tenantId}
         AND s.hierarchyNodeId = ${centerId}
@@ -304,7 +304,7 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
           WHERE tenantId = ${tenantId}
             AND centerId = ${centerId}
             AND installmentId IS NOT NULL
-            AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+            AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
           GROUP BY installmentId
         ) p ON p.installmentId = i.id
         WHERE i.tenantId = ${tenantId}
@@ -349,7 +349,7 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
         WHERE tenantId = ${tenantId}
           AND centerId = ${centerId}
           AND installmentId IS NOT NULL
-          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]}, ${PAYMENT_TYPES[2]})
+          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
         GROUP BY installmentId
       ) p ON p.installmentId = i.id
       WHERE i.tenantId = ${tenantId}

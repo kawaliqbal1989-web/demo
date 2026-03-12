@@ -184,11 +184,16 @@ function SuperadminBusinessPartnerProfilePage() {
 
     setPracticeSaving(true);
     try {
-      await updateBPPracticeEntitlements({
+      const saveResp = await updateBPPracticeEntitlements({
         id,
         practice: practiceEntitlements.practice,
         abacusPractice: practiceEntitlements.abacusPractice
       });
+
+      if (saveResp?.data?._meta?.unavailable) {
+        toast("Practice entitlement feature is unavailable in this environment.");
+        return;
+      }
 
       // Reload usage
       const usageRes = await getBPPracticeUsage(id);

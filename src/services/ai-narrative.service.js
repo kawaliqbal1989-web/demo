@@ -235,16 +235,23 @@ export async function generateTeacherNarrative(cockpitData, tenantId) {
   usageStats.totalCalls++;
   incrementNarrativeRateLimit(tenantId, `teacher:${cockpitData.teacherId}`);
 
-  const atRiskCount = atRiskStudents?.length || 0;
-  const batchSummary = (batchHeatmap || []).map(b => `${b.batchName}: ${b.healthLabel}, avg ${b.avgScore}%, attendance ${b.avgAttendance}%`).join("; ");
+  const atRiskItems = Array.isArray(atRiskStudents)
+    ? atRiskStudents
+    : Array.isArray(atRiskStudents?.items)
+      ? atRiskStudents.items
+      : [];
+  const atRiskCount = typeof atRiskStudents?.summary?.atRisk === "number"
+    ? atRiskStudents.summary.atRisk
+    : atRiskItems.length;
+  const batchSummary = (batchHeatmap || []).map(b => `${b.batchName}: ${b.health || "UNKNOWN"}, avg ${b.avgScore}%, attendance ${b.avgAttendance}%`).join("; ");
   const recCount = recommendations?.length || 0;
-  const pendingInterventions = (interventions || []).filter(i => i.count > 0);
+  const pendingInterventions = Array.isArray(interventions) ? interventions : [];
 
   const dataContext = [
-    `At-risk students: ${atRiskCount}${atRiskCount > 0 ? ` (top: ${atRiskStudents.slice(0, 3).map(s => `${s.name} [${s.riskLevel}]`).join(", ")})` : ""}`,
+    `At-risk students: ${atRiskCount}${atRiskCount > 0 ? ` (top: ${atRiskItems.slice(0, 3).map(s => `${s.name} [${s.riskLevel}]`).join(", ")})` : ""}`,
     `Batches: ${batchSummary || "No batch data"}`,
     `Pending recommendations: ${recCount}`,
-    pendingInterventions.length > 0 ? `Alerts: ${pendingInterventions.map(i => `${i.label}: ${i.count}`).join(", ")}` : "No pending alerts",
+    pendingInterventions.length > 0 ? `Alerts: ${pendingInterventions.map(i => i.title || i.description || i.type || "Action needed").join(", ")}` : "No pending alerts",
   ].join("\n");
 
   const prompt = `You are an AI teaching copilot for an abacus math teacher. Based on this data, write a focused 2-3 paragraph cohort briefing. Be practical and direct. Include: (1) cohort health overview, (2) priority actions ranked by urgency, (3) a quick win suggestion. Plain text, no markdown.
@@ -270,10 +277,10 @@ JSON format: {"summary": "one-line status", "overview": "paragraph about cohort 
       ai: false,
       summary: atRiskCount === 0 ? "All students are on track" : `${atRiskCount} student${atRiskCount > 1 ? "s" : ""} need attention`,
       overview: atRiskCount > 0
-        ? `You have ${atRiskCount} at-risk student${atRiskCount > 1 ? "s" : ""} requiring intervention. ${pendingInterventions.length > 0 ? `There are ${pendingInterventions.map(i => `${i.count} ${i.label.toLowerCase()}`).join(", ")} pending.` : ""}`
+        ? `You have ${atRiskCount} at-risk student${atRiskCount > 1 ? "s" : ""} requiring intervention. ${pendingInterventions.length > 0 ? `Active alerts: ${pendingInterventions.map(i => i.title || i.type || "Action needed").join(", ")}.` : ""}`
         : "Your cohort is healthy with no at-risk students. Focus on maintaining engagement and pushing for excellence.",
       priorities: atRiskCount > 0
-        ? `Priority: Reach out to ${atRiskStudents[0]?.name || "the highest-risk student"} first. ${recCount > 0 ? `Review ${recCount} worksheet recommendation${recCount > 1 ? "s" : ""} for struggling students.` : ""}`
+        ? `Priority: Reach out to ${atRiskItems[0]?.name || "the highest-risk student"} first. ${recCount > 0 ? `Review ${recCount} worksheet recommendation${recCount > 1 ? "s" : ""} for struggling students.` : ""}`
         : "Consider challenging your top performers with advanced practice worksheets.",
       quickWin: recCount > 0 ? "Assign recommended worksheets to struggling students — it takes 2 minutes and directly targets weak areas." : "Schedule a quick check-in with any students you haven't heard from this week.",
     };

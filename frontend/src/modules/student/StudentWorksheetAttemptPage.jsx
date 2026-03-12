@@ -2,6 +2,8 @@ import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AuthContext } from "../../auth/AuthContext";
 import {
+  getStudentMe,
+  getStudentMyCourse,
   getStudentWorksheet,
   startOrResumeStudentWorksheetAttempt,
   saveStudentAttemptAnswers,
@@ -134,6 +136,25 @@ function formatQuestionPrompt(q) {
   return operation || "—";
 }
 
+function formatCenterLabel(name, code) {
+  const safeName = String(name || "").trim();
+  const safeCode = String(code || "").trim();
+  if (safeName && safeCode) {
+    return `${safeName} (${safeCode})`;
+  }
+  return safeName || safeCode || null;
+}
+
+function formatCourseLevelLabel({ courseLevelLabel, courseCode, levelTitle, courseName }) {
+  if (courseLevelLabel) {
+    return courseLevelLabel;
+  }
+  if (courseCode && levelTitle) {
+    return `${courseCode} / ${levelTitle}`;
+  }
+  return courseName || levelTitle || courseCode || null;
+}
+
 function StudentWorksheetAttemptPage() {
   const { worksheetId } = useParams();
   const navigate = useNavigate();
@@ -146,6 +167,8 @@ function StudentWorksheetAttemptPage() {
   const [answersByQuestionId, setAnswersByQuestionId] = useState({});
   const [inlineErrorsByQuestionId, setInlineErrorsByQuestionId] = useState({});
   const [result, setResult] = useState(null);
+  const [studentProfile, setStudentProfile] = useState(null);
+  const [studentCourseSummary, setStudentCourseSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -233,6 +256,33 @@ function StudentWorksheetAttemptPage() {
         window.clearTimeout(autoSubmitRetryTimerRef.current);
         autoSubmitRetryTimerRef.current = null;
       }
+    };
+  }, [worksheetId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setStudentProfile(null);
+    setStudentCourseSummary(null);
+
+    Promise.allSettled([getStudentMe(), getStudentMyCourse()])
+      .then(([profileRes, courseRes]) => {
+        if (cancelled) {
+          return;
+        }
+
+        setStudentProfile(profileRes.status === "fulfilled" ? profileRes.value?.data?.data || null : null);
+        setStudentCourseSummary(courseRes.status === "fulfilled" ? courseRes.value?.data?.data || null : null);
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setStudentProfile(null);
+        setStudentCourseSummary(null);
+      });
+
+    return () => {
+      cancelled = true;
     };
   }, [worksheetId]);
 
@@ -950,6 +1000,22 @@ function StudentWorksheetAttemptPage() {
   const isExamWorksheet = String(worksheet?.generationMode || "").toUpperCase() === "EXAM";
   const useExamPageStyling = isColumnSumGrid;
   const worksheetTitle = String(worksheet?.title || "Worksheet");
+  const currentEnrollment = studentCourseSummary?.currentEnrollment || null;
+  const currentCourse = studentCourseSummary?.myCourse || null;
+  const studentName = String(studentProfile?.fullName || auth?.displayName || "Student").trim() || "Student";
+  const studentCode = studentProfile?.studentCode || null;
+  const teacherName = currentEnrollment?.assignedTeacherName || currentCourse?.teacher || null;
+  const centerLabel =
+    formatCenterLabel(currentEnrollment?.centerName, currentEnrollment?.centerCode) ||
+    formatCenterLabel(currentCourse?.center?.name, currentCourse?.center?.code) ||
+    formatCenterLabel(studentProfile?.centerName, studentProfile?.centerCode);
+  const batchName = currentEnrollment?.batchName || null;
+  const courseLevelLabel = formatCourseLevelLabel({
+    courseLevelLabel: currentEnrollment?.courseLevelLabel,
+    courseCode: currentCourse?.courseCode || studentProfile?.courseCode,
+    levelTitle: currentEnrollment?.levelTitle || currentCourse?.currentLevel || studentProfile?.levelTitle,
+    courseName: currentCourse?.courseName || studentProfile?.courseName
+  });
   const reviewRows = questionRows.map((q) => {
     const qid = q.questionId || q.id;
     const studentAnswer = answersByQuestionId?.[qid]?.value;
@@ -984,6 +1050,34 @@ function StudentWorksheetAttemptPage() {
       resultTone
     };
   });
+
+  const handleDownloadPdf = () => {
+    const questions = reviewRows.map((row) => ({
+      questionNumber: row.questionNumber,
+      prompt: row.prompt,
+      studentAnswer: formatAnswerValue(row.studentAnswer),
+      correctAnswer: row.hasKey ? formatAnswerValue(row.correctAnswer) : "—",
+      resultStatus: row.resultStatus
+    }));
+
+    const doc = generateWorksheetResultPdf({
+      studentName,
+      studentCode,
+      teacherName,
+      centerLabel,
+      batchName,
+      courseLevelLabel,
+      worksheetTitle: worksheet?.title || "Worksheet",
+      score: result?.score,
+      totalQuestions: result?.total,
+      correctCount: result?.resultBreakdown?.correctCount || 0,
+      submittedAt: result?.submittedAt || new Date().toISOString(),
+      totalTimeText: timeLimitSeconds ? totalTimeText : undefined,
+      takenTimeText: Number.isFinite(Number(submittedAttemptedTime)) ? formatSeconds(submittedAttemptedTime) : timerText,
+      questions
+    });
+    doc.save(`Worksheet_Result_${worksheet?.title || "report"}.pdf`);
+  };
 
   return (
     <div className={useExamPageStyling ? "ws-attempt-page ws-attempt-page--exam" : "ws-attempt-page"}>
@@ -1170,33 +1264,7 @@ function StudentWorksheetAttemptPage() {
             className="button secondary"
             type="button"
             style={{ width: "auto", marginTop: 10, fontSize: 12 }}
-            onClick={() => {
-              const questions = questionRows.map((q) => {
-                const qid = q.questionId || q.id;
-                return {
-                  questionNumber: q.questionNumber,
-                  prompt: formatQuestionPrompt(q),
-                  studentAnswer: answersByQuestionId?.[qid]?.value ?? "",
-                  correctAnswer: q.correctAnswer ?? "",
-                  resultStatus:
-                    answersByQuestionId?.[qid]?.value === "" || answersByQuestionId?.[qid]?.value === null || answersByQuestionId?.[qid]?.value === undefined
-                      ? "Not Attempted"
-                      : (q.correctAnswer != null && Number(answersByQuestionId?.[qid]?.value) === Number(q.correctAnswer) ? "Right" : "Wrong")
-                };
-              });
-              const doc = generateWorksheetResultPdf({
-                studentName: "Student",
-                worksheetTitle: worksheet?.title || "Worksheet",
-                score: result.score,
-                totalQuestions: result.total,
-                correctCount: result.resultBreakdown?.correctCount || 0,
-                submittedAt: result?.submittedAt || new Date().toISOString(),
-                totalTimeText: timeLimitSeconds ? totalTimeText : undefined,
-                takenTimeText: Number.isFinite(Number(submittedAttemptedTime)) ? formatSeconds(submittedAttemptedTime) : timerText,
-                questions
-              });
-              doc.save(`Worksheet_Result_${worksheet?.title || "report"}.pdf`);
-            }}
+            onClick={handleDownloadPdf}
           >
             📄 Download PDF
           </button>

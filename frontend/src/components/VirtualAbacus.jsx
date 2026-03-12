@@ -28,34 +28,24 @@ function computeIntegerValue(columns, unitsIndex) {
   return total;
 }
 
+const PLACE_LABELS = {
+  6: "Millions",
+  5: "Hundred Thousands",
+  4: "Ten Thousands",
+  3: "Thousands",
+  2: "Hundreds",
+  1: "Tens",
+  0: "Units",
+  "-1": "Tenths",
+  "-2": "Hundredths",
+  "-3": "Thousandths",
+  "-4": "Ten Thousandths",
+  "-5": "Hundred Thousandths",
+  "-6": "Millionths"
+};
+
 function placeLabelForExponent(exponent) {
-  if (exponent === 0) return "Units";
-
-  const positive = [
-    "Tens",
-    "Hundreds",
-    "Thousands",
-    "Ten Thousands",
-    "Hundred Thousands",
-    "Millions",
-    "Ten Millions",
-    "Hundred Millions",
-    "Billions"
-  ];
-
-  const negative = [
-    "Tenths",
-    "Hundredths",
-    "Thousandths",
-    "Ten Thousandths",
-    "Hundred Thousandths",
-    "Millionths",
-    "Ten Millionths",
-    "Hundred Millionths"
-  ];
-
-  if (exponent > 0) return positive[exponent - 1] || `10^${exponent}`;
-  return negative[Math.abs(exponent) - 1] || `10^${exponent}`;
+  return PLACE_LABELS[exponent] || `10^${exponent}`;
 }
 
 function VirtualAbacus({ columns = 13, fractionalRods = 6 } = {}) {
@@ -97,6 +87,10 @@ function VirtualAbacus({ columns = 13, fractionalRods = 6 } = {}) {
     });
   };
 
+  // Bead travel distances (px)
+  const UPPER_TRAVEL = 36;
+  const LOWER_SLIDE = 52;
+
   return (
     <div className="virtual-abacus">
       <div className="virtual-abacus__top">
@@ -123,17 +117,23 @@ function VirtualAbacus({ columns = 13, fractionalRods = 6 } = {}) {
               className={`virtual-abacus__rod ${isUnits ? "is-units" : ""} ${isFractional ? "is-decimal" : ""}`}
               aria-label={placeLabel}
             >
-              <button
-                type="button"
-                className={`virtual-abacus__bead virtual-abacus__bead--upper ${col.upper ? "is-active" : ""}`}
-                onClick={() => toggleUpper(colIndex)}
-                aria-pressed={col.upper}
-                title={`Upper bead (5) — ${placeLabel}`}
-              />
+              {/* Upper deck — 1 heaven bead */}
+              <div className="virtual-abacus__upper-deck">
+                <button
+                  type="button"
+                  className="virtual-abacus__bead virtual-abacus__bead--upper"
+                  style={{ transform: `translateY(${col.upper ? UPPER_TRAVEL : 0}px)` }}
+                  onClick={() => toggleUpper(colIndex)}
+                  aria-pressed={col.upper}
+                  title={`Upper bead (5) — ${placeLabel}`}
+                />
+              </div>
 
+              {/* Reckoning bar */}
               <div className="virtual-abacus__bar" aria-hidden="true" />
 
-              <div className="virtual-abacus__lower">
+              {/* Lower deck — 4 earth beads */}
+              <div className="virtual-abacus__lower-deck">
                 {Array.from({ length: 4 }).map((_, beadIdx) => {
                   const beadNumber = beadIdx + 1;
                   const isActive = beadNumber <= col.lower;
@@ -142,7 +142,8 @@ function VirtualAbacus({ columns = 13, fractionalRods = 6 } = {}) {
                     <button
                       key={beadIdx}
                       type="button"
-                      className={`virtual-abacus__bead virtual-abacus__bead--lower ${isActive ? "is-active" : ""}`}
+                      className="virtual-abacus__bead virtual-abacus__bead--lower"
+                      style={{ transform: `translateY(${isActive ? 0 : LOWER_SLIDE}px)` }}
                       onClick={() => setLower(colIndex, isActive ? beadIdx : beadNumber)}
                       aria-pressed={isActive}
                       title={`Lower bead (${beadNumber}) — ${placeLabel}`}
@@ -151,7 +152,7 @@ function VirtualAbacus({ columns = 13, fractionalRods = 6 } = {}) {
                 })}
               </div>
 
-              <div className="virtual-abacus__place muted">{placeLabel}</div>
+              <div className="virtual-abacus__place">{placeLabel}</div>
             </div>
           );
         })}

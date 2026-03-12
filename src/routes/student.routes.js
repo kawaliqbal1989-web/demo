@@ -40,7 +40,12 @@ import {
 import {
   aiPlayground,
   getAiPlaygroundUsage,
-  getAiPlaygroundHistory
+  getAiPlaygroundHistory,
+  suggestImprovements,
+  createCustomTool,
+  listCustomTools,
+  deleteCustomTool,
+  runCustomToolEndpoint
 } from "../controllers/ai-playground.controller.js";
 import { getStudentLeaderboard } from "../controllers/student-leaderboard.controller.js";
 import {
@@ -254,6 +259,35 @@ studentRouter.get(
 studentRouter.get(
   "/ai-playground/history",
   getAiPlaygroundHistory
+);
+
+studentRouter.post(
+  "/ai-playground/suggest-improvements",
+  auditAction("STUDENT_AI_SUGGEST", "STUDENT", (req) => req.student.id),
+  suggestImprovements
+);
+
+studentRouter.post(
+  "/ai-playground/custom-tools",
+  auditAction("STUDENT_AI_CREATE_TOOL", "STUDENT", (req) => req.student.id),
+  createCustomTool
+);
+
+studentRouter.get(
+  "/ai-playground/custom-tools",
+  listCustomTools
+);
+
+studentRouter.delete(
+  "/ai-playground/custom-tools/:id",
+  auditAction("STUDENT_AI_DELETE_TOOL", "STUDENT", (req) => req.student.id),
+  deleteCustomTool
+);
+
+studentRouter.post(
+  "/ai-playground/custom-tools/:id/run",
+  auditAction("STUDENT_AI_RUN_CUSTOM", "STUDENT", (req) => req.student.id),
+  runCustomToolEndpoint
 );
 
 // Leaderboard

@@ -6,7 +6,7 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
 function ChangePasswordPage() {
   const navigate = useNavigate();
-  const { setMustChangePassword, logout, username } = useAuth();
+  const { setMustChangePassword, logout, username, isAuthenticated } = useAuth();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -15,6 +15,12 @@ function ChangePasswordPage() {
 
   const onSubmit = async (event) => {
     event.preventDefault();
+    if (!isAuthenticated) {
+      setError("Your session expired. Please log in again.");
+      navigate("/login", { replace: true });
+      return;
+    }
+
     setError("");
     setLoading(true);
 
@@ -42,6 +48,12 @@ function ChangePasswordPage() {
         <p style={{ margin: 0, fontSize: 14, color: "var(--color-text-label)" }}>
           You must change your password to continue.
         </p>
+
+        {!isAuthenticated ? (
+          <p className="error" style={{ margin: 0 }}>
+            Your session expired. Please log in again.
+          </p>
+        ) : null}
 
         <input
           type="text"

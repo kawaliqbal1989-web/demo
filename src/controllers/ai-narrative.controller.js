@@ -9,6 +9,7 @@ import {
 } from "../services/ai-narrative.service.js";
 import { getStudent360Data } from "../services/student-360.service.js";
 import { logger } from "../lib/logger.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 // Rate limit check helper — returns 429 if exceeded
 function enforceRateLimit(req, res) {
@@ -41,6 +42,17 @@ export async function getStudentAiNarrative(req, res) {
     const narrative = await generateStudentNarrative(data360, tenantId);
     res.json(narrative);
   } catch (err) {
+    if (isSchemaMismatchError(err)) {
+      return res.json({
+        type: "student",
+        ai: false,
+        summary: "Your learning summary is temporarily limited",
+        celebration: "Your student profile is available, but some advanced analytics data is still syncing.",
+        focus: "Keep attending classes and completing worksheets regularly. Consistent activity will keep your progress moving.",
+        motivation: "Steady effort matters more than perfection. One focused session today is enough to move forward."
+      });
+    }
+
     logger.error("student_ai_narrative_error", { error: err.message });
     res.status(500).json({ error: "Failed to generate narrative" });
   }

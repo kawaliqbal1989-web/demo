@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { apiClient } from "../../services/apiClient";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 
 function CertificateVerifyPage() {
   const { token } = useParams();
@@ -75,7 +76,7 @@ function CertificateVerifyPage() {
           {data.organizationLogoUrl && (
             <div style={{ textAlign: "center", marginBottom: 20 }}>
               <img
-                src={data.organizationLogoUrl}
+                src={resolveAssetUrl(data.organizationLogoUrl)}
                 alt="Organization"
                 style={{ maxHeight: 56, maxWidth: 200, objectFit: "contain" }}
               />

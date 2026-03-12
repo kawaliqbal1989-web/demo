@@ -56,7 +56,11 @@ function Student360Page() {
     setError("");
     fetch360(studentId)
       .then((res) => {
-        if (!cancelled) setData(res);
+        if (cancelled) return;
+        // Service layers are inconsistent across modules: some return the
+        // envelope ({ success, data }), others return payload directly.
+        const payload = res?.data ?? res ?? null;
+        setData(payload);
       })
       .catch((err) => {
         if (!cancelled) setError(getFriendlyErrorMessage(err) || "Failed to load student data.");
@@ -73,6 +77,9 @@ function Student360Page() {
   if (!data) return <div className="card"><p>No data found.</p><Link className="button secondary" to={backLink}>← Back</Link></div>;
 
   const { student, performance, promotion, attendance, fees, engagement, risk, recentActivity, insights } = data;
+  if (!student) {
+    return <div className="card"><p>No student data found.</p><Link className="button secondary" to={backLink}>← Back</Link></div>;
+  }
   const riskInfo = RISK_COLORS[risk?.level] || RISK_COLORS.HEALTHY;
   const fullName = [student.firstName, student.lastName].filter(Boolean).join(" ") || "—";
 

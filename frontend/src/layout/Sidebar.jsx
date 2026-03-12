@@ -42,7 +42,9 @@ function Sidebar({ open, onClose }) {
           <div className="sidebar-title-wrap">
             {showRoleLogo && resolveAssetUrl(branding?.logoUrl) ? (
               <img src={resolveAssetUrl(branding?.logoUrl)} alt="Navigation logo" className="sidebar-brand-logo sidebar-brand-logo--150" />
-            ) : null}
+            ) : (
+              <img src="/logo.svg" alt="AbacusWeb" className="sidebar-brand-logo sidebar-brand-logo--150" />
+            )}
           </div>
           <button
             className="sidebar-close"

@@ -1,10 +1,10 @@
 import { prisma } from "../lib/prisma.js";
 import { computeStudentRisk } from "./student-risk.service.js";
 import { evaluatePromotionEligibility } from "./promotion-eligibility.service.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 function isInsightStoreUnavailable(error) {
-  const message = String(error?.message || "");
-  return message.includes("table `Insight` does not exist") || message.includes("table 'Insight' does not exist");
+  return isSchemaMismatchError(error, ["insight"]);
 }
 
 function buildTransientInsights(freshInsights, auth, now = new Date()) {
@@ -379,8 +379,17 @@ async function generateRoleInsights(auth) {
 async function getInsightsForUser(auth) {
   const { userId, role, tenantId } = auth;
 
-  // Generate fresh rule-based insights first so we can fall back even if persistence is unavailable.
-  const fresh = await generateRoleInsights(auth);
+  let fresh = [];
+  try {
+    fresh = await generateRoleInsights(auth);
+  } catch (error) {
+    if (!isSchemaMismatchError(error)) {
+      throw error;
+    }
+
+    return [];
+  }
+
   const now = new Date();
   const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 

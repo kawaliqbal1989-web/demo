@@ -2,8 +2,10 @@ import axios from "axios";
 import { decrement, increment } from "./loadingStore";
 import { logApiError } from "../utils/apiErrors";
 
-const baseURL = "https://api.abacuseducation.online/api";
-//  import.meta.env.VITE_API_BASE_URL ||
+const baseURL =
+  import.meta.env.VITE_API_BASE_URL ||
+  (import.meta.env.DEV ? "http://localhost:4000/api" : "https://api.abacuseducation.online/api");
+
 const apiClient = axios.create({
   baseURL,
   timeout: 20000
@@ -93,13 +95,24 @@ function setupApiInterceptors({ getAccessToken, refreshToken, logout, onForbidde
         const errorCode = error?.response?.data?.error_code || null;
         const url = error?.config?.url;
         const method = error?.config?.method;
+        const status = error?.response?.status;
+        const isNetworkDown =
+          !error?.response &&
+          (error?.code === "ERR_NETWORK" || String(error?.message || "").toLowerCase().includes("network error"));
+        const isStudentDuplicateConflict =
+          status === 409 &&
+          method === "post" &&
+          (url === "/students" || (typeof url === "string" && /\/students\/[^/]+\/create-login$/.test(url))) &&
+          (errorCode === "AUTH_EMAIL_EXISTS" || errorCode === "AUTH_USERNAME_EXISTS" || errorCode === "STUDENT_EMAIL_EXISTS");
 
         // Avoid noisy debug logs for expected control-flow conflicts.
         const isExpectedControlFlow =
+          isNetworkDown ||
           (errorCode === "SESSION_ALREADY_EXISTS" && method === "post" && url === "/teacher/attendance/sessions") ||
           (errorCode === "DUPLICATE_PENDING" && method === "post" && url === "/student/reassignment-requests") ||
           (errorCode === "FEATURE_NOT_ASSIGNED" && method === "get" && url === "/student/practice-worksheets/options") ||
-          (errorCode === "FEATURE_NOT_ASSIGNED" && method === "get" && url === "/student/abacus-practice-worksheets/options");
+          (errorCode === "FEATURE_NOT_ASSIGNED" && method === "get" && url === "/student/abacus-practice-worksheets/options") ||
+          isStudentDuplicateConflict;
 
         if (import.meta.env.DEV && !isExpectedControlFlow && !suppressErrorLogging) {
           // eslint-disable-next-line no-console

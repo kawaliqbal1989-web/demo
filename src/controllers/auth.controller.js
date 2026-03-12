@@ -221,6 +221,7 @@ const login = asyncHandler(async (req, res) => {
       role: true,
       tenantId: true,
       isActive: true,
+      mustChangePassword: true,
       passwordHash: true,
       failedAttempts: true,
       lockUntil: true,

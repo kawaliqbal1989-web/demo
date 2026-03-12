@@ -9,7 +9,7 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { archiveCourse, createCourse, listCourses, updateCourse } from "../../services/coursesService";
 
 function statusFromCourse(course) {
-  return course?.isActive === false ? "ARCHIVED" : "ACTIVE";
+  return course?.isActive === false ? "INACTIVE" : "ACTIVE";
 }
 
 function SuperadminCoursesPage() {
@@ -27,7 +27,7 @@ function SuperadminCoursesPage() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
-  const [archiveTarget, setArchiveTarget] = useState(null);
+  const [statusActionTarget, setStatusActionTarget] = useState(null);
   const [form, setForm] = useState({
     code: "ABACUS_ONLINE",
     name: "",
@@ -117,18 +117,35 @@ function SuperadminCoursesPage() {
     });
   };
 
-  const handleArchive = async (course) => {
-    setArchiveTarget(course);
+  const handleDeactivate = async (course) => {
+    setStatusActionTarget({ course, action: "DEACTIVATE" });
   };
 
-  const executeArchive = async () => {
-    const course = archiveTarget;
-    setArchiveTarget(null);
+  const handleActivate = async (course) => {
+    setStatusActionTarget({ course, action: "ACTIVATE" });
+  };
+
+  const executeStatusAction = async () => {
+    const target = statusActionTarget;
+    setStatusActionTarget(null);
+    if (!target?.course) {
+      return;
+    }
+
+    const { course, action } = target;
+
     try {
-      await archiveCourse(course.id);
+      if (action === "ACTIVATE") {
+        await updateCourse({ id: course.id, status: "ACTIVE" });
+      } else {
+        await archiveCourse(course.id);
+      }
       await load({ limit, offset, q, status: statusFilter });
     } catch (err) {
-      setFormError(getFriendlyErrorMessage(err) || "Failed to archive course.");
+      setFormError(
+        getFriendlyErrorMessage(err) ||
+          (action === "ACTIVATE" ? "Failed to activate course." : "Failed to deactivate course.")
+      );
     }
   };
 
@@ -182,7 +199,7 @@ function SuperadminCoursesPage() {
                 onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))}
               >
                 <option value="ACTIVE">ACTIVE</option>
-                <option value="ARCHIVED">ARCHIVED</option>
+                <option value="INACTIVE">INACTIVE</option>
               </select>
             </label>
             <label>
@@ -233,7 +250,7 @@ function SuperadminCoursesPage() {
           >
             <option value="">All Status</option>
             <option value="ACTIVE">ACTIVE</option>
-            <option value="ARCHIVED">ARCHIVED</option>
+            <option value="INACTIVE">INACTIVE</option>
           </select>
           <button className="button secondary" type="submit" style={{ width: "auto" }}>
             Search
@@ -271,10 +288,19 @@ function SuperadminCoursesPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto" }}
-                  onClick={() => void handleArchive(r)}
+                  onClick={() => void handleActivate(r)}
+                  disabled={r?.isActive === true}
+                >
+                  Activate
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => void handleDeactivate(r)}
                   disabled={r?.isActive === false}
                 >
-                  Archive
+                  Deactivate
                 </button>
               </div>
             )
@@ -296,12 +322,12 @@ function SuperadminCoursesPage() {
       />
 
       <ConfirmDialog
-        open={!!archiveTarget}
-        title="Archive Course"
-        message={`Archive course "${archiveTarget?.name || ""}"? This cannot be undone.`}
-        confirmLabel="Archive"
-        onCancel={() => setArchiveTarget(null)}
-        onConfirm={() => void executeArchive()}
+        open={!!statusActionTarget}
+        title={statusActionTarget?.action === "ACTIVATE" ? "Activate Course" : "Deactivate Course"}
+        message={`${statusActionTarget?.action === "ACTIVATE" ? "Activate" : "Deactivate"} course "${statusActionTarget?.course?.name || ""}"? ${statusActionTarget?.action === "ACTIVATE" ? "You can deactivate it again later." : "You can activate it again later."}`}
+        confirmLabel={statusActionTarget?.action === "ACTIVATE" ? "Activate" : "Deactivate"}
+        onCancel={() => setStatusActionTarget(null)}
+        onConfirm={() => void executeStatusAction()}
       />
     </section>
   );

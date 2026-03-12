@@ -77,7 +77,7 @@ function StudentDashboardPage() {
     setLoading(true);
     setError("");
 
-    Promise.all([
+    Promise.allSettled([
       getStudentMe(),
       getStudentPracticeReport(),
       listStudentEnrollments(),
@@ -91,13 +91,34 @@ function StudentDashboardPage() {
         if (cancelled) {
           return;
         }
-        setMe(meRes.data?.data || null);
-        setReport(reportRes.data?.data || null);
+        const meData = meRes.status === "fulfilled" ? meRes.value.data?.data || null : null;
+        const reportData = reportRes.status === "fulfilled" ? reportRes.value.data?.data || null : null;
+        const enrollments =
+          enrollRes.status === "fulfilled" && Array.isArray(enrollRes.value.data?.data)
+            ? enrollRes.value.data.data
+            : [];
+        const examRows =
+          examEnrollRes.status === "fulfilled" && Array.isArray(examEnrollRes.value.data?.data)
+            ? examEnrollRes.value.data.data
+            : [];
+        const worksheets =
+          worksheetsRes.status === "fulfilled" && Array.isArray(worksheetsRes.value.data?.data?.items)
+            ? worksheetsRes.value.data.data.items
+            : [];
+        const attendanceRows =
+          attendanceRes.status === "fulfilled" && Array.isArray(attendanceRes.value.data?.data)
+            ? attendanceRes.value.data.data
+            : [];
+        const weakTopicRows =
+          weakTopicsRes.status === "fulfilled" && Array.isArray(weakTopicsRes.value.data?.data)
+            ? weakTopicsRes.value.data.data
+            : [];
+        const feesData = feesRes.status === "fulfilled" ? feesRes.value.data?.data || null : null;
 
-        const enrollments = Array.isArray(enrollRes.data?.data) ? enrollRes.data.data : [];
+        setMe(meData);
+        setReport(reportData);
 
-        // include any explicitly assigned courses returned on the `me` payload
-        const assignedCourses = Array.isArray(meRes.data?.data?.assignedCourses) ? meRes.data.data.assignedCourses : [];
+        const assignedCourses = Array.isArray(meData?.assignedCourses) ? meData.assignedCourses : [];
         const existingCourseCodes = new Set(enrollments.map((e) => e.courseCode));
         const assignedAsEnrollments = assignedCourses
           .filter((c) => c && !existingCourseCodes.has(c.courseCode))
@@ -110,9 +131,9 @@ function StudentDashboardPage() {
             status: "ASSIGNED",
             assignedTeacherId: null,
             assignedTeacherName: null,
-            centerId: meRes.data?.data?.centerId || null,
-            centerName: meRes.data?.data?.centerName || null,
-            centerCode: meRes.data?.data?.centerCode || null,
+            centerId: meData?.centerId || null,
+            centerName: meData?.centerName || null,
+            centerCode: meData?.centerCode || null,
             batchId: null,
             batchName: null,
             startedAt: null,
@@ -124,26 +145,23 @@ function StudentDashboardPage() {
         const current = combined.find((en) => en?.status === "ACTIVE") || combined[0] || null;
         setActiveEnrollment(current);
 
-        const items = worksheetsRes.data?.data?.items;
-        const worksheets = Array.isArray(items) ? items : [];
         const candidate =
           worksheets.find((w) => w?.status === "IN_PROGRESS") ||
           worksheets.find((w) => w?.status === "NOT_STARTED") ||
           null;
         setNextWorksheet(candidate);
 
-        setAttendance(Array.isArray(attendanceRes.data?.data) ? attendanceRes.data.data : []);
-        setWeakTopics(Array.isArray(weakTopicsRes.data?.data) ? weakTopicsRes.data.data : []);
-        setFees(feesRes.data?.data || null);
-
-        const examRows = Array.isArray(examEnrollRes.data?.data) ? examEnrollRes.data.data : [];
+        setAttendance(attendanceRows);
+        setWeakTopics(weakTopicRows);
+        setFees(feesData);
         setExamEnrollments(examRows);
-      })
-      .catch(() => {
-        if (cancelled) {
-          return;
+
+        const hasAnyFailure = [meRes, reportRes, enrollRes, examEnrollRes, worksheetsRes, attendanceRes, weakTopicsRes, feesRes]
+          .some((result) => result.status === "rejected");
+
+        if (hasAnyFailure) {
+          setError(meData ? "Some dashboard panels could not be loaded." : "Some dashboard data could not be loaded.");
         }
-        setError("Failed to load student dashboard.");
       })
       .finally(() => {
         if (cancelled) {

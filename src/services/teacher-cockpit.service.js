@@ -69,12 +69,70 @@ function getTopAction(indicators) {
   return null;
 }
 
+function getAssignmentKey(worksheetId, studentId) {
+  return `${worksheetId}:${studentId}`;
+}
+
+async function countPendingWorksheetAssignments(tenantId, studentIds) {
+  if (!Array.isArray(studentIds) || studentIds.length === 0) return 0;
+
+  const assignments = await prisma.worksheetAssignment.findMany({
+    where: {
+      tenantId,
+      studentId: { in: studentIds },
+      isActive: true,
+      unassignedAt: null,
+    },
+    select: {
+      worksheetId: true,
+      studentId: true,
+    },
+  });
+
+  if (assignments.length === 0) return 0;
+
+  const worksheetIds = [...new Set(assignments.map((assignment) => assignment.worksheetId))];
+  const submissions = await prisma.worksheetSubmission.findMany({
+    where: {
+      tenantId,
+      studentId: { in: studentIds },
+      worksheetId: { in: worksheetIds },
+    },
+    select: {
+      worksheetId: true,
+      studentId: true,
+    },
+  });
+
+  const submittedAssignments = new Set(
+    submissions.map((submission) => getAssignmentKey(submission.worksheetId, submission.studentId))
+  );
+
+  return assignments.reduce((count, assignment) => {
+    return count + (submittedAssignments.has(getAssignmentKey(assignment.worksheetId, assignment.studentId)) ? 0 : 1);
+  }, 0);
+}
+
+async function getTeacherStudentIds(teacherUserId, tenantId, centerId) {
+  const students = await prisma.student.findMany({
+    where: {
+      tenantId,
+      hierarchyNodeId: centerId,
+      currentTeacherUserId: teacherUserId,
+      isActive: true,
+    },
+    select: { id: true },
+  });
+
+  return students.map((student) => student.id);
+}
+
 // ─── Batch Heatmap ──────────────────────────────────────────────────
 async function getBatchHeatmap(teacherUserId, tenantId, centerId) {
   const batches = await prisma.batch.findMany({
     where: {
       tenantId,
-      centerId,
+      hierarchyNodeId: centerId,
       teacherAssignments: { some: { teacherUserId } },
       isActive: true,
     },
@@ -125,14 +183,7 @@ async function getBatchHeatmap(teacherUserId, tenantId, centerId) {
           _avg: { score: true },
           _count: { _all: true },
         }),
-        // Ungraded/pending worksheets
-        prisma.worksheetAssignment.count({
-          where: {
-            tenantId,
-            studentId: { in: studentIds },
-            submissions: { none: { studentId: { in: studentIds } } },
-          },
-        }),
+        countPendingWorksheetAssignments(tenantId, studentIds),
       ]);
 
       const attMap = {};
@@ -271,19 +322,15 @@ async function getWorksheetRecommendations(teacherUserId, tenantId, centerId) {
 
 // ─── Intervention Suggestions ───────────────────────────────────────
 async function getInterventionSuggestions(teacherUserId, tenantId, centerId) {
-  const [riskQueue, pendingReassignments, pendingWorksheets] = await Promise.all([
+  const [riskQueue, teacherStudentIds, pendingReassignments] = await Promise.all([
     getAtRiskQueue(teacherUserId, tenantId, centerId),
+    getTeacherStudentIds(teacherUserId, tenantId, centerId),
     prisma.worksheetReassignmentRequest.count({
       where: { tenantId, status: "PENDING", student: { currentTeacherUserId: teacherUserId } },
     }).catch(() => 0),
-    prisma.worksheetAssignment.count({
-      where: {
-        tenantId,
-        student: { currentTeacherUserId: teacherUserId, isActive: true },
-        submissions: { none: {} },
-      },
-    }).catch(() => 0),
   ]);
+
+  const pendingWorksheets = await countPendingWorksheetAssignments(tenantId, teacherStudentIds).catch(() => 0);
 
   const suggestions = [];
 

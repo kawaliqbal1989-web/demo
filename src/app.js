@@ -11,13 +11,18 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { prisma } from "./lib/prisma.js";
 import { verifyAccessToken } from "./utils/token.js";
 
-
-console.log("atartttt",env,"checkingenvvvvv")
-
 const app = express();
 
+const defaultAllowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://abacuseducation.online",
+  "https://www.abacuseducation.online",
+  "https://api.abacuseducation.online"
+];
+
 const productionCorsAllowedOrigins = new Set(
-  env.corsAllowedOrigins.length ? env.corsAllowedOrigins : ["http://localhost:5173", "http://127.0.0.1:5173"]
+  env.corsAllowedOrigins.length ? env.corsAllowedOrigins : defaultAllowedOrigins
 );
 
 app.disable("x-powered-by");
@@ -26,23 +31,21 @@ if (env.isProduction) {
   app.set("trust proxy", 1);
 }
 
-console.log(productionCorsAllowedOrigins,"ssseee")
 app.use(helmet());
 app.use(
   cors({
-    origin:productionCorsAllowedOrigins,
-    // origin: (origin, callback) => {
-    //   if (!origin) {
-    //     return callback(null, true);
-    //   }
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
 
-    //   if (!env.isProduction) {
-    //     const ok = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin);
-    //     return callback(null, ok);
-    //   }
+      if (!env.isProduction) {
+        const ok = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin);
+        return callback(null, ok);
+      }
 
-    //   return callback(null, productionCorsAllowedOrigins.has(origin));
-    // },
+      return callback(null, productionCorsAllowedOrigins.has(origin));
+    },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",
@@ -75,8 +78,9 @@ app.use(
   },
   (req, res, next) => {
     // Certificate assets must be publicly accessible (used in print flows via <img> tags).
+    // Branding logos are also public because image tags cannot attach Authorization headers.
     // All other upload subdirectories require a valid JWT.
-    const publicPrefixes = ["/certificate-"];
+    const publicPrefixes = ["/certificate-", "/business-partner-logos/", "/teacher-photos/", "/student-photos/"];
     const isPublic = publicPrefixes.some((p) => req.path.startsWith(p));
     if (isPublic) return next();
 

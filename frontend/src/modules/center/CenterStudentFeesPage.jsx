@@ -30,6 +30,32 @@ function normalizeEditableMoney(value) {
   return Number(num.toFixed(2));
 }
 
+function parseAdjustmentReference(reference) {
+  const text = String(reference || "").trim();
+  if (!text) return null;
+  let match = text.match(/TOTAL_FEE_ADJUSTMENT\s+from\s+([^\s]+)\s+to\s+([^|\s]+)/i);
+  if (!match) {
+    // Legacy formatted references used in older UI rows.
+    match = text.match(/Total\s+Fee\s+updated\s+([^\s]+)\s*->\s*([^\s]+)/i);
+  }
+  if (!match) return null;
+  const fromValue = match[1] === "(not-set)" ? null : Number(match[1]);
+  const toValue = Number(match[2]);
+  return {
+    from: Number.isFinite(fromValue) ? fromValue : null,
+    to: Number.isFinite(toValue) ? toValue : null
+  };
+}
+
+function computeTuitionFee(totalFee, admissionFee) {
+  if (totalFee === null || totalFee === undefined) return null;
+  const total = Number(totalFee);
+  if (!Number.isFinite(total)) return null;
+  const admission = admissionFee === null || admissionFee === undefined ? 0 : Number(admissionFee);
+  if (!Number.isFinite(admission)) return null;
+  return Math.max(0, Number((total - admission).toFixed(2)));
+}
+
 function CenterStudentFeesPage() {
   const { studentId } = useParams();
 
@@ -107,6 +133,22 @@ function CenterStudentFeesPage() {
     const nextAdmissionFeeAmount = normalizeEditableMoney(studentAdmissionFeeAmount);
     if (Number.isNaN(nextTotalFeeAmount) || Number.isNaN(nextAdmissionFeeAmount)) {
       setFeeConfigError("Fee amounts must be non-negative numbers.");
+      setFeeConfigInfo("");
+      return;
+    }
+
+    if (nextAdmissionFeeAmount != null && nextTotalFeeAmount == null) {
+      setFeeConfigError("Set Total Fee when Admission Fee is provided.");
+      setFeeConfigInfo("");
+      return;
+    }
+
+    if (
+      nextAdmissionFeeAmount != null &&
+      nextTotalFeeAmount != null &&
+      nextAdmissionFeeAmount > nextTotalFeeAmount
+    ) {
+      setFeeConfigError("Admission Fee must be less than or equal to Total Fee (it is included in total).");
       setFeeConfigInfo("");
       return;
     }
@@ -240,6 +282,11 @@ function CenterStudentFeesPage() {
   const studentLabel = context?.student?.fullName
     ? `${context.student.fullName} (${context.student.admissionNo || ""})`.trim()
     : context?.student?.admissionNo || "Student Fees";
+  const summaryTuitionFee = computeTuitionFee(context?.summary?.totalFee, context?.student?.admissionFeeAmount);
+  const editTuitionFee = computeTuitionFee(
+    normalizeEditableMoney(studentTotalFeeAmount),
+    normalizeEditableMoney(studentAdmissionFeeAmount)
+  );
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
@@ -262,8 +309,20 @@ function CenterStudentFeesPage() {
             <h3 style={{ margin: 0 }}>Summary</h3>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
               <div>
-                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Total Fee</div>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Total Fee (incl. Admission)</div>
                 <div style={{ fontWeight: 800 }}>{context.summary?.totalFee == null ? "(not set)" : formatMoney(context.summary.totalFee)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Admission Fee (included)</div>
+                <div style={{ fontWeight: 800 }}>
+                  {context?.student?.admissionFeeAmount == null ? "(not set)" : formatMoney(context.student.admissionFeeAmount)}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Tuition Fee (excl. Admission)</div>
+                <div style={{ fontWeight: 800 }}>
+                  {summaryTuitionFee == null ? "(not set)" : formatMoney(summaryTuitionFee)}
+                </div>
               </div>
               <div>
                 <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Paid</div>
@@ -285,7 +344,7 @@ function CenterStudentFeesPage() {
           <form className="card" onSubmit={onSaveConcession} style={{ display: "grid", gap: 10 }}>
             <h3 style={{ margin: 0 }}>Student Fee</h3>
             <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-              This page applies only to this student. Enter the total and admission fee for this student and add a note explaining the change.
+              This page applies only to this student. Admission Fee is part of Total Fee (not additional). Add a note explaining the change.
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
@@ -297,6 +356,9 @@ function CenterStudentFeesPage() {
                 Admission Fee
                 <input className="input" inputMode="decimal" value={studentAdmissionFeeAmount} onChange={(e) => setStudentAdmissionFeeAmount(e.target.value)} placeholder="e.g. 2000" />
               </label>
+              <div style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--color-text-muted)" }}>
+                Tuition Fee (excluding admission): {editTuitionFee == null ? "(set total fee first)" : formatMoney(editTuitionFee)}
+              </div>
               <label style={{ gridColumn: "1 / -1" }}>
                 Fee Change Note
                 <textarea className="input" rows={3} value={feeChangeNote} onChange={(e) => setFeeChangeNote(e.target.value)} placeholder="Explain why this student's fee is being set or changed." required />
@@ -396,18 +458,24 @@ function CenterStudentFeesPage() {
                 <select className="select" value={paymentType} onChange={(e) => setPaymentType(e.target.value)}>
                   <option value="ENROLLMENT">ENROLLMENT</option>
                   <option value="RENEWAL">RENEWAL</option>
-                  <option value="ADJUSTMENT">ADJUSTMENT (final payment)</option>
+                  <option value="ADJUSTMENT">ADJUSTMENT (set discounted total fee)</option>
                 </select>
               </label>
 
               {paymentType === "ADJUSTMENT" ? (
                 <div style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--color-text-muted)" }}>
-                  Adjustment records the last payment and waives the remaining due balance.
+                  Adjustment updates the student final total fee after discount (for example, 2500 adjusted to 1500).
+                </div>
+              ) : null}
+
+              {paymentType === "ADJUSTMENT" ? (
+                <div style={{ gridColumn: "1 / -1", fontSize: 12, color: "var(--color-text-muted)" }}>
+                  This is a non-cash update event. It changes Total Fee but does not increase cash collected.
                 </div>
               ) : null}
 
               <label>
-                Amount
+                {paymentType === "ADJUSTMENT" ? "Final Total Fee" : "Amount"}
                 <input
                   className="input"
                   inputMode="decimal"
@@ -514,21 +582,40 @@ function CenterStudentFeesPage() {
                 </thead>
                 <tbody>
                   {(context.payments || []).length ? (
-                    (context.payments || []).map((p) => (
+                    (context.payments || []).map((p) => {
+                      const isAdjustment = p.type === "ADJUSTMENT";
+                      const adjustmentMeta = isAdjustment ? parseAdjustmentReference(p.paymentReference) : null;
+                      const legacyAdjustmentAmount = Number(p.grossAmount || 0);
+                      const displayAmount = isAdjustment
+                        ? (adjustmentMeta?.to != null
+                          ? adjustmentMeta.to
+                          : (Number.isFinite(legacyAdjustmentAmount) && legacyAdjustmentAmount > 0 ? legacyAdjustmentAmount : null))
+                        : Number(p.grossAmount || 0);
+                      const adjustmentReferenceText = adjustmentMeta
+                        ? `Total Fee updated${adjustmentMeta.from != null ? ` ${formatMoney(adjustmentMeta.from)} -> ` : " to "}${adjustmentMeta.to != null ? formatMoney(adjustmentMeta.to) : ""}`
+                        : (Number.isFinite(legacyAdjustmentAmount) && legacyAdjustmentAmount > 0
+                          ? `Total Fee adjusted to ${formatMoney(legacyAdjustmentAmount)} (legacy)`
+                          : (p.paymentReference || "Total Fee adjusted"));
+
+                      return (
                       <tr key={p.id}>
                         <td>{formatDate(p.receivedAt || p.createdAt)}</td>
-                        <td>{p.type}</td>
-                        <td>{formatMoney(p.grossAmount)}</td>
-                        <td>{p.paymentMode || ""}</td>
+                        <td>{isAdjustment ? "ADJUSTMENT (non-cash)" : p.type}</td>
+                        <td>{displayAmount == null ? "—" : formatMoney(displayAmount)}</td>
+                        <td>{isAdjustment ? "—" : (p.paymentMode || "")}</td>
                         <td>
-                          {formatFeeScheduleLabel(p.feeScheduleType, p.feeMonth, p.feeYear)}
+                          {isAdjustment ? "TOTAL_FEE" : formatFeeScheduleLabel(p.feeScheduleType, p.feeMonth, p.feeYear)}
                         </td>
-                        <td>{p.feeLevel ? `${p.feeLevel.name} / ${p.feeLevel.rank}` : ""}</td>
-                        <td>{p.installment ? `${formatDate(p.installment.dueDate)} (${formatMoney(p.installment.amount)})` : ""}</td>
-                        <td>{p.paymentReference || ""}</td>
+                        <td>{isAdjustment ? "—" : (p.feeLevel ? `${p.feeLevel.name} / ${p.feeLevel.rank}` : "")}</td>
+                        <td>{isAdjustment ? "—" : (p.installment ? `${formatDate(p.installment.dueDate)} (${formatMoney(p.installment.amount)})` : "")}</td>
+                        <td>
+                          {isAdjustment
+                            ? adjustmentReferenceText
+                            : (p.paymentReference || "")}
+                        </td>
                         <td>{p.createdBy?.username || p.createdBy?.email || ""}</td>
                       </tr>
-                    ))
+                    );})
                   ) : (
                     <tr>
                       <td colSpan={9} style={{ color: "var(--color-text-muted)" }}>

@@ -9,7 +9,15 @@
 
 import { prisma } from "../lib/prisma.js";
 import { recordAudit } from "../utils/audit.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import { resolveHierarchyNodeIdsFromRoot } from "./hierarchy-cascade.service.js";
+
+function buildEmptyBPEntitlements() {
+  return {
+    PRACTICE: null,
+    ABACUS_PRACTICE: null
+  };
+}
 
 // ──────────────────────────────────────────────────────────────────────────────
 // Layer 1: Superadmin manages BP entitlements
@@ -19,51 +27,55 @@ import { resolveHierarchyNodeIdsFromRoot } from "./hierarchy-cascade.service.js"
  * Get BP entitlements for both features with usage counts
  */
 export async function getBPEntitlements({ tenantId, businessPartnerId }) {
-  const entitlements = await prisma.businessPartnerPracticeEntitlement.findMany({
-    where: { tenantId, businessPartnerId },
-    include: {
-      centerAllocations: {
-        select: {
-          id: true,
-          centerNodeId: true,
-          allocatedSeats: true,
-          _count: {
-            select: {
-              studentAssignments: {
-                where: { isActive: true }
+  try {
+    const entitlements = await prisma.businessPartnerPracticeEntitlement.findMany({
+      where: { tenantId, businessPartnerId },
+      include: {
+        centerAllocations: {
+          select: {
+            id: true,
+            centerNodeId: true,
+            allocatedSeats: true,
+            _count: {
+              select: {
+                studentAssignments: {
+                  where: { isActive: true }
+                }
               }
             }
           }
         }
       }
+    });
+
+    const result = buildEmptyBPEntitlements();
+
+    for (const ent of entitlements) {
+      const totalAllocated = ent.centerAllocations.reduce((sum, ca) => sum + ca.allocatedSeats, 0);
+      const totalAssigned = ent.centerAllocations.reduce((sum, ca) => sum + ca._count.studentAssignments, 0);
+
+      result[ent.featureKey] = {
+        id: ent.id,
+        featureKey: ent.featureKey,
+        isEnabled: ent.isEnabled,
+        totalSeats: ent.totalSeats,
+        allocatedSeats: totalAllocated,
+        assignedStudents: totalAssigned,
+        remainingToAllocate: ent.totalSeats - totalAllocated,
+        centerCount: ent.centerAllocations.length,
+        createdAt: ent.createdAt,
+        updatedAt: ent.updatedAt
+      };
     }
-  });
 
-  // Transform into a map by featureKey
-  const result = {
-    PRACTICE: null,
-    ABACUS_PRACTICE: null
-  };
+    return result;
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["businesspartnerpracticeentitlement", "centerpracticeallocation"])) {
+      throw error;
+    }
 
-  for (const ent of entitlements) {
-    const totalAllocated = ent.centerAllocations.reduce((sum, ca) => sum + ca.allocatedSeats, 0);
-    const totalAssigned = ent.centerAllocations.reduce((sum, ca) => sum + ca._count.studentAssignments, 0);
-
-    result[ent.featureKey] = {
-      id: ent.id,
-      featureKey: ent.featureKey,
-      isEnabled: ent.isEnabled,
-      totalSeats: ent.totalSeats,
-      allocatedSeats: totalAllocated,
-      assignedStudents: totalAssigned,
-      remainingToAllocate: ent.totalSeats - totalAllocated,
-      centerCount: ent.centerAllocations.length,
-      createdAt: ent.createdAt,
-      updatedAt: ent.updatedAt
-    };
+    return buildEmptyBPEntitlements();
   }
-
-  return result;
 }
 
 /**
@@ -782,21 +794,29 @@ export async function unassignStudentPracticeFeature({
  * Returns true if assigned, false otherwise
  */
 export async function checkStudentHasFeature({ tenantId, studentId, featureKey }) {
-  const assignment = await prisma.studentPracticeAssignment.findFirst({
-    where: {
-      tenantId,
-      studentId,
-      featureKey,
-      isActive: true,
-      allocation: {
-        entitlement: {
-          isEnabled: true
+  try {
+    const assignment = await prisma.studentPracticeAssignment.findFirst({
+      where: {
+        tenantId,
+        studentId,
+        featureKey,
+        isActive: true,
+        allocation: {
+          entitlement: {
+            isEnabled: true
+          }
         }
       }
-    }
-  });
+    });
 
-  return Boolean(assignment);
+    return Boolean(assignment);
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["studentpracticeassignment", "centerpracticeallocation"])) {
+      throw error;
+    }
+
+    return false;
+  }
 }
 
 /**

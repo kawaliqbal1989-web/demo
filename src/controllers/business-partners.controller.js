@@ -4,6 +4,7 @@ import { hashPassword } from "../utils/password.js";
 import { recordAudit } from "../utils/audit.js";
 import { generatePartnerCode } from "../utils/partner-code.js";
 import { parsePagination } from "../utils/pagination.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import {
   cascadeSetBusinessPartnerActiveState,
   resolveBusinessPartnerHierarchyNodeIds
@@ -1065,7 +1066,18 @@ const updateBPPracticeEntitlements = asyncHandler(async (req, res) => {
     return res.apiError(400, "No entitlement data provided", "NO_DATA");
   }
 
-  await Promise.all(updates);
+  try {
+    await Promise.all(updates);
+  } catch (error) {
+    if (isSchemaMismatchError(error, ["businesspartnerpracticeentitlement", "centerpracticeallocation", "studentpracticeassignment"])) {
+      const entitlements = await getBPEntitlements({ tenantId, businessPartnerId });
+      return res.apiSuccess("Practice entitlements are unavailable in this environment", {
+        ...entitlements,
+        _meta: { unavailable: true }
+      });
+    }
+    throw error;
+  }
 
   // Return updated state
   const entitlements = await getBPEntitlements({ tenantId, businessPartnerId });
@@ -1096,7 +1108,19 @@ const getBPPracticeUsageReport = asyncHandler(async (req, res) => {
     return res.apiError(404, "Business partner not found", "BP_NOT_FOUND");
   }
 
-  const report = await getBPUsageReport({ tenantId, businessPartnerId });
+  let report;
+  try {
+    report = await getBPUsageReport({ tenantId, businessPartnerId });
+  } catch (error) {
+    if (isSchemaMismatchError(error, ["businesspartnerpracticeentitlement", "centerpracticeallocation", "studentpracticeassignment"])) {
+      report = {
+        PRACTICE: { featureKey: "PRACTICE", isEnabled: false, purchasedSeats: 0, allocatedSeats: 0, assignedStudents: 0, unallocatedSeats: 0, centerCount: 0, centers: [] },
+        ABACUS_PRACTICE: { featureKey: "ABACUS_PRACTICE", isEnabled: false, purchasedSeats: 0, allocatedSeats: 0, assignedStudents: 0, unallocatedSeats: 0, centerCount: 0, centers: [] }
+      };
+    } else {
+      throw error;
+    }
+  }
 
   return res.apiSuccess("Practice usage report loaded", {
     businessPartner: { id: bp.id, name: bp.name },

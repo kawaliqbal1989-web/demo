@@ -194,21 +194,21 @@ async function canAuthenticateUser(user) {
 const login = asyncHandler(async (req, res) => {
   const { tenantCode = "DEFAULT", username, password } = req.body;
 
-  // const tenant = await prisma.tenant.findUnique({
-  //   where: { code: tenantCode },
-  //   select: { id: true, code: true }
-  // });
+  const tenant = await prisma.tenant.findUnique({
+    where: { code: tenantCode },
+    select: { id: true, code: true }
+  });
 
-  // if (!tenant || !username || !password) {
-  //   await recordAudit({
-  //     tenantId: tenant?.id || "tenant_default",
-  //     action: "LOGIN_ATTEMPT",
-  //     entityType: "AUTH",
-  //     metadata: { username, tenantCode, success: false, reason: "invalid_credentials_input" }
-  //   });
+  if (!tenant || !username || !password) {
+    await recordAudit({
+      tenantId: tenant?.id || "tenant_default",
+      action: "LOGIN_ATTEMPT",
+      entityType: "AUTH",
+      metadata: { username, tenantCode, success: false, reason: "invalid_credentials_input" }
+    });
 
-  //   return res.apiError(401, "Invalid credentials", "INVALID_CREDENTIALS");
-  // }
+    return res.apiError(401, "Invalid credentials", "INVALID_CREDENTIALS");
+  }
 
   const user = await prisma.authUser.findFirst({
     where: {

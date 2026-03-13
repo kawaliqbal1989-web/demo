@@ -24,6 +24,7 @@ const PROJECT_ROOT = resolve(__dirname, "..");
 /* ── Migration sequence (same as release-management.controller.js) ── */
 const MIGRATION_SEQUENCE = [
   // Wave 1: Foundation
+  { wave: "wave1", file: "migration_tenant_table_lowercase.sql", phase: 0, order: 0 },
   { wave: "wave1", file: "migration_hierarchical_identity.sql", phase: 1, order: 1 },
   { wave: "wave1", file: "migration_pagination_indexes.sql", phase: 3, order: 2 },
   { wave: "wave1", file: "migration_practice_feature_entitlements.sql", phase: 4, order: 3 },

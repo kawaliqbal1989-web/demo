@@ -61,6 +61,7 @@ const handleGetDeployInfo = asyncHandler(async (_req, res) => {
 /* ── Migration Sequence Info ── */
 const MIGRATION_SEQUENCE = [
   // Wave 1: Foundation
+  { wave: "wave1", file: "migration_tenant_table_lowercase.sql", phase: 0, order: 0, description: "Normalize Tenant table name to lowercase tenant" },
   { wave: "wave1", file: "migration_hierarchical_identity.sql", phase: 1, order: 1, description: "AuthUser.username + hierarchical identity" },
   { wave: "wave1", file: "migration_pagination_indexes.sql", phase: 3, order: 2, description: "Pagination performance indexes" },
   { wave: "wave1", file: "migration_practice_feature_entitlements.sql", phase: 4, order: 3, description: "Practice feature entitlement system" },

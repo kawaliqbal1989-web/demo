@@ -2,8 +2,7 @@ generator client {
   provider = "prisma-client-js"
 }
 
-datasource db {
-  provider          = "mysql"
+datasource d  provider          = "mysql"
   url               = env("DATABASE_URL")
   shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
@@ -297,7 +296,7 @@ enum Gender {
   OTHER
 }
 
-model tenant {
+model Tenant {
   id                               String                           @id @default(cuid())
   name                             String
   code                             String                           @unique
@@ -2192,4 +2191,52 @@ model StudentMilestone {
 
   @@unique([tenantId, studentId, key])
   @@index([tenantId, studentId, earnedAt])
+tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student     Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, studentId, createdAt])
+  @@index([tenantId, toolName, createdAt])
+}
+
+model AiCustomTool {
+  id           String   @id @default(cuid())
+  tenantId     String
+  studentId    String
+  toolName     String   @db.VarChar(50)
+  icon         String   @default("🔧") @db.VarChar(10)
+  title        String   @db.VarChar(100)
+  description  String   @db.VarChar(300)
+  systemPrompt String   @db.Text
+  placeholder  String   @default("Type your input here...") @db.VarChar(200)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student      Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, studentId])
+}
+
+model CertificateTemplate {
+  id                      String          @id @default(cuid())
+  tenantId                String
+  businessPartnerId       String          @unique
+  title                   String          @default("Certificate of Achievement")
+  signatoryName           String?
+  signatoryDesignation    String?
+  signatureImagePath      String?
+  signatureImageUrl       String?         @db.Text
+  affiliationLogoPath     String?
+  affiliationLogoUrl      String?         @db.Text
+  stampImagePath          String?
+  stampImageUrl           String?         @db.Text
+  backgroundImagePath     String?
+  backgroundImageUrl      String?         @db.Text
+  layout                  Json?
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  tenant                  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner         BusinessPartner @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
 }

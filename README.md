@@ -119,6 +119,13 @@ All use password: `Pass@123`, tenant code: `DEFAULT`
 - `franchise.manager@abacusweb.local` (`FRANCHISE`)
 - `center.manager@abacusweb.local` (`CENTER`)
 
+## Deployment
+
+| Guide | Description |
+|---|---|
+| [`DEPLOY_HOSTINGER.md`](./DEPLOY_HOSTINGER.md) | Hostinger VPS & shared hosting — terminal commands to upload/update backend, frontend, and database |
+| [`DEPLOY_GODADDY.md`](./DEPLOY_GODADDY.md) | GoDaddy cPanel deployment guide |
+
 ## Notes
 
 - Existing domain routes are globally protected after `/api/auth/*`.

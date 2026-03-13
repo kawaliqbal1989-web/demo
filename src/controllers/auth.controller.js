@@ -194,7 +194,7 @@ async function canAuthenticateUser(user) {
 const login = asyncHandler(async (req, res) => {
   const { tenantCode = "DEFAULT", username, password } = req.body;
 
-  const tenant = await prisma.tenant.findUnique({
+  const tenant = await prisma.Tenant.findUnique({
     where: { code: tenantCode },
     select: { id: true, code: true }
   });

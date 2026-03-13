@@ -210,7 +210,7 @@ const login = asyncHandler(async (req, res) => {
     return res.apiError(401, "Invalid credentials", "INVALID_CREDENTIALS");
   }
 
-  const user = await prisma.authuser.findFirst({
+  const user = await prisma.authUser.findFirst({
     where: {
       tenantId: tenant.id,
       username

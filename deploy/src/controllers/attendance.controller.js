@@ -76,7 +76,46 @@ async function ensureTeacherAssigned({ tenantId, teacherUserId, batchId }) {
     select: { batchId: true }
   });
 
-  return Boolean(assignment);
+  if (assignment) {
+    return true;
+  }
+
+  const enrollment = await prisma.enrollment.findFirst({
+    where: {
+      tenantId,
+      batchId,
+      status: "ACTIVE",
+      assignedTeacherUserId: teacherUserId
+    },
+    select: { id: true }
+  });
+
+  return Boolean(enrollment);
+}
+
+async function listTeacherAssignedBatchIds({ tenantId, teacherUserId, centerHierarchyNodeId }) {
+  const [assignments, enrollments] = await Promise.all([
+    prisma.batchTeacherAssignment.findMany({
+      where: { tenantId, teacherUserId },
+      select: { batchId: true }
+    }),
+    prisma.enrollment.findMany({
+      where: {
+        tenantId,
+        hierarchyNodeId: centerHierarchyNodeId,
+        status: "ACTIVE",
+        assignedTeacherUserId: teacherUserId
+      },
+      select: { batchId: true }
+    })
+  ]);
+
+  return Array.from(
+    new Set([
+      ...assignments.map((row) => row.batchId),
+      ...enrollments.map((row) => row.batchId)
+    ])
+  );
 }
 
 function isWithinEditWindow({ sessionDate, editWindowDays }) {
@@ -255,8 +294,29 @@ const listAttendanceSessions = asyncHandler(async (req, res) => {
   }
 
   if (req.auth.role === "TEACHER") {
-    // Teachers should only see their own sessions to prevent cross-teacher leakage.
-    where.createdByUserId = req.auth.userId;
+    if (where.batchId) {
+      const allowed = await ensureTeacherAssigned({
+        tenantId: req.auth.tenantId,
+        teacherUserId: req.auth.userId,
+        batchId: where.batchId
+      });
+
+      if (!allowed) {
+        return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
+      }
+    } else {
+      const assignedBatchIds = await listTeacherAssignedBatchIds({
+        tenantId: req.auth.tenantId,
+        teacherUserId: req.auth.userId,
+        centerHierarchyNodeId: req.auth.hierarchyNodeId
+      });
+
+      if (!assignedBatchIds.length) {
+        return res.apiSuccess("Attendance sessions fetched", { items: [], total: 0, limit, offset });
+      }
+
+      where.batchId = { in: assignedBatchIds };
+    }
   }
 
   const [total, items] = await Promise.all([

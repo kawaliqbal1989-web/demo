@@ -27,6 +27,12 @@ function normalizeAttendanceEntryStatus(value) {
   return null;
 }
 
+function normalizeAttendanceSessionStatus(value) {
+  const v = String(value || "").trim().toUpperCase();
+  if (["DRAFT", "PUBLISHED", "LOCKED", "CANCELLED"].includes(v)) return v;
+  return null;
+}
+
 function normalizeSubmissionStatus(value) {
   const v = String(value || "").trim().toUpperCase();
   if (["PENDING", "REVIEWED", "REJECTED"].includes(v)) return v;
@@ -106,6 +112,31 @@ async function ensureTeacherAssignedToBatch({ tenantId, teacherUserId, batchId }
   });
 
   return Boolean(enrollment);
+}
+
+async function listTeacherAssignedBatchIds({ tenantId, teacherUserId, centerHierarchyNodeId }) {
+  const [assignments, enrollments] = await Promise.all([
+    prisma.batchTeacherAssignment.findMany({
+      where: { tenantId, teacherUserId },
+      select: { batchId: true }
+    }),
+    prisma.enrollment.findMany({
+      where: {
+        tenantId,
+        hierarchyNodeId: centerHierarchyNodeId,
+        status: "ACTIVE",
+        assignedTeacherUserId: teacherUserId
+      },
+      select: { batchId: true }
+    })
+  ]);
+
+  return Array.from(
+    new Set([
+      ...assignments.map((row) => row.batchId),
+      ...enrollments.map((row) => row.batchId)
+    ])
+  );
 }
 
 async function loadCenterAttendanceConfig({ tenantId, centerHierarchyNodeId }) {
@@ -2255,8 +2286,7 @@ const listTeacherAttendanceSessions = asyncHandler(async (req, res) => {
 
   const where = {
     tenantId: req.auth.tenantId,
-    hierarchyNodeId: teacher.hierarchyNodeId,
-    createdByUserId: teacher.id
+    hierarchyNodeId: teacher.hierarchyNodeId
   };
 
   const batchId = req.query.batchId ? String(req.query.batchId) : "";
@@ -2266,6 +2296,23 @@ const listTeacherAttendanceSessions = asyncHandler(async (req, res) => {
       return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
     }
     where.batchId = batchId;
+  } else {
+    const assignedBatchIds = await listTeacherAssignedBatchIds({
+      tenantId: req.auth.tenantId,
+      teacherUserId: teacher.id,
+      centerHierarchyNodeId: teacher.hierarchyNodeId
+    });
+
+    if (!assignedBatchIds.length) {
+      return res.apiSuccess("Attendance sessions", {
+        items: [],
+        total: 0,
+        limit,
+        offset
+      });
+    }
+
+    where.batchId = { in: assignedBatchIds };
   }
 
   const date = req.query.date ? parseISODateOnly(req.query.date) : null;
@@ -2280,19 +2327,268 @@ const listTeacherAttendanceSessions = asyncHandler(async (req, res) => {
       take,
       skip,
       orderBy,
-      select: { id: true, batchId: true, date: true, status: true }
+      select: {
+        id: true,
+        batchId: true,
+        date: true,
+        status: true,
+        batch: { select: { name: true } }
+      }
     })
   ]);
 
   return res.apiSuccess(
     "Attendance sessions",
     {
-      items: items.map((s) => ({ sessionId: s.id, batchId: s.batchId, date: s.date, status: s.status })),
+      items: items.map((s) => ({
+        sessionId: s.id,
+        batchId: s.batchId,
+        batchName: s.batch?.name || null,
+        date: s.date,
+        status: s.status
+      })),
       total,
       limit,
       offset
     }
   );
+});
+
+const listTeacherBatchAttendanceHistory = asyncHandler(async (req, res) => {
+  const { take, skip, limit, offset } = parsePagination(req.query);
+  const batchId = String(req.query.batchId || "").trim();
+
+  if (!batchId) {
+    return res.apiError(400, "batchId is required", "VALIDATION_ERROR");
+  }
+
+  const teacher = await loadTeacherContext({ tenantId: req.auth.tenantId, teacherUserId: req.auth.userId });
+  if (!teacher?.hierarchyNodeId) {
+    return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
+  }
+
+  const allowed = await ensureTeacherAssignedToBatch({
+    tenantId: req.auth.tenantId,
+    teacherUserId: teacher.id,
+    batchId
+  });
+  if (!allowed) {
+    return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
+  }
+
+  const from = req.query.from ? parseISODateOnly(req.query.from) : null;
+  const to = req.query.to ? parseISODateOnly(req.query.to) : null;
+  const sessionStatus = normalizeAttendanceSessionStatus(req.query.sessionStatus);
+
+  const sessionWhere = {
+    tenantId: req.auth.tenantId,
+    hierarchyNodeId: teacher.hierarchyNodeId,
+    batchId,
+    ...(sessionStatus ? { status: sessionStatus } : {}),
+    ...(from || to
+      ? {
+          date: {
+            ...(from ? { gte: from } : {}),
+            ...(to ? { lte: to } : {})
+          }
+        }
+      : {})
+  };
+
+  const [total, sessions, groupedEntries, batch] = await Promise.all([
+    prisma.attendanceSession.count({ where: sessionWhere }),
+    prisma.attendanceSession.findMany({
+      where: sessionWhere,
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip,
+      take,
+      select: {
+        id: true,
+        date: true,
+        status: true
+      }
+    }),
+    prisma.attendanceEntry.groupBy({
+      by: ["sessionId", "status"],
+      where: {
+        tenantId: req.auth.tenantId,
+        session: sessionWhere
+      },
+      _count: { _all: true }
+    }),
+    prisma.batch.findFirst({
+      where: {
+        id: batchId,
+        tenantId: req.auth.tenantId,
+        hierarchyNodeId: teacher.hierarchyNodeId
+      },
+      select: { id: true, name: true }
+    })
+  ]);
+
+  const countsBySession = new Map();
+  for (const row of groupedEntries) {
+    if (!countsBySession.has(row.sessionId)) {
+      countsBySession.set(row.sessionId, { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0, total: 0 });
+    }
+
+    const bucket = countsBySession.get(row.sessionId);
+    const count = Number(row?._count?._all || 0);
+    bucket.total += count;
+    if (row.status === "PRESENT") bucket.PRESENT += count;
+    else if (row.status === "ABSENT") bucket.ABSENT += count;
+    else if (row.status === "LATE") bucket.LATE += count;
+    else if (row.status === "EXCUSED") bucket.EXCUSED += count;
+  }
+
+  const items = sessions.map((session) => {
+    const counts = countsBySession.get(session.id) || { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0, total: 0 };
+    const attendanceRate = counts.total ? Math.round((counts.PRESENT / counts.total) * 1000) / 10 : 0;
+    return {
+      sessionId: session.id,
+      date: session.date,
+      sessionStatus: session.status,
+      totalStudents: counts.total,
+      presentCount: counts.PRESENT,
+      absentCount: counts.ABSENT,
+      lateCount: counts.LATE,
+      excusedCount: counts.EXCUSED,
+      attendanceRate
+    };
+  });
+
+  return res.apiSuccess("Batch attendance history", {
+    batch: batch ? { id: batch.id, name: batch.name } : { id: batchId, name: null },
+    filters: {
+      from: from ? from.toISOString().slice(0, 10) : null,
+      to: to ? to.toISOString().slice(0, 10) : null,
+      sessionStatus: sessionStatus || null
+    },
+    items,
+    total,
+    limit,
+    offset
+  });
+});
+
+const exportTeacherBatchAttendanceHistoryCsv = asyncHandler(async (req, res) => {
+  const { take, skip } = parsePagination(req.query);
+  const safeTake = Math.min(take, 5000);
+  const batchId = String(req.query.batchId || "").trim();
+
+  if (!batchId) {
+    return res.apiError(400, "batchId is required", "VALIDATION_ERROR");
+  }
+
+  const teacher = await loadTeacherContext({ tenantId: req.auth.tenantId, teacherUserId: req.auth.userId });
+  if (!teacher?.hierarchyNodeId) {
+    return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
+  }
+
+  const allowed = await ensureTeacherAssignedToBatch({
+    tenantId: req.auth.tenantId,
+    teacherUserId: teacher.id,
+    batchId
+  });
+  if (!allowed) {
+    return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
+  }
+
+  const from = req.query.from ? parseISODateOnly(req.query.from) : null;
+  const to = req.query.to ? parseISODateOnly(req.query.to) : null;
+  const sessionStatus = normalizeAttendanceSessionStatus(req.query.sessionStatus);
+
+  const sessionWhere = {
+    tenantId: req.auth.tenantId,
+    hierarchyNodeId: teacher.hierarchyNodeId,
+    batchId,
+    ...(sessionStatus ? { status: sessionStatus } : {}),
+    ...(from || to
+      ? {
+          date: {
+            ...(from ? { gte: from } : {}),
+            ...(to ? { lte: to } : {})
+          }
+        }
+      : {})
+  };
+
+  const sessions = await prisma.attendanceSession.findMany({
+    where: sessionWhere,
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    skip,
+    take: safeTake,
+    select: {
+      id: true,
+      date: true,
+      status: true,
+      batch: { select: { name: true } }
+    }
+  });
+
+  const sessionIds = sessions.map((row) => row.id);
+  const groupedEntries = sessionIds.length
+    ? await prisma.attendanceEntry.groupBy({
+        by: ["sessionId", "status"],
+        where: {
+          tenantId: req.auth.tenantId,
+          sessionId: { in: sessionIds }
+        },
+        _count: { _all: true }
+      })
+    : [];
+
+  const countsBySession = new Map();
+  for (const row of groupedEntries) {
+    if (!countsBySession.has(row.sessionId)) {
+      countsBySession.set(row.sessionId, { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0, total: 0 });
+    }
+
+    const bucket = countsBySession.get(row.sessionId);
+    const count = Number(row?._count?._all || 0);
+    bucket.total += count;
+    if (row.status === "PRESENT") bucket.PRESENT += count;
+    else if (row.status === "ABSENT") bucket.ABSENT += count;
+    else if (row.status === "LATE") bucket.LATE += count;
+    else if (row.status === "EXCUSED") bucket.EXCUSED += count;
+  }
+
+  const csv = toCsv({
+    headers: [
+      "sessionId",
+      "batchId",
+      "batchName",
+      "date",
+      "sessionStatus",
+      "totalStudents",
+      "presentCount",
+      "absentCount",
+      "lateCount",
+      "excusedCount",
+      "attendanceRate"
+    ],
+    rows: sessions.map((session) => {
+      const counts = countsBySession.get(session.id) || { PRESENT: 0, ABSENT: 0, LATE: 0, EXCUSED: 0, total: 0 };
+      const attendanceRate = counts.total ? Math.round((counts.PRESENT / counts.total) * 1000) / 10 : 0;
+      return [
+        session.id,
+        batchId,
+        session.batch?.name || "",
+        session.date?.toISOString?.().slice(0, 10) || "",
+        session.status,
+        counts.total,
+        counts.PRESENT,
+        counts.ABSENT,
+        counts.LATE,
+        counts.EXCUSED,
+        attendanceRate
+      ];
+    })
+  });
+
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename=teacher_batch_attendance_${batchId}.csv`);
+  return res.status(200).send(csv);
 });
 
 const getTeacherAttendanceSession = asyncHandler(async (req, res) => {
@@ -2307,8 +2603,7 @@ const getTeacherAttendanceSession = asyncHandler(async (req, res) => {
     where: {
       id: String(sessionId),
       tenantId: req.auth.tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId,
-      createdByUserId: teacher.id
+      hierarchyNodeId: teacher.hierarchyNodeId
     },
     select: {
       id: true,
@@ -2330,6 +2625,15 @@ const getTeacherAttendanceSession = asyncHandler(async (req, res) => {
 
   if (!session) {
     return res.apiError(404, "Attendance session not found", "SESSION_NOT_FOUND");
+  }
+
+  const allowed = await ensureTeacherAssignedToBatch({
+    tenantId: req.auth.tenantId,
+    teacherUserId: teacher.id,
+    batchId: session.batchId
+  });
+  if (!allowed) {
+    return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
 
   const studentIds = session.entries.map((entry) => entry.studentId).filter(Boolean);
@@ -2414,14 +2718,22 @@ const updateTeacherAttendanceEntries = asyncHandler(async (req, res) => {
     where: {
       id: String(sessionId),
       tenantId: req.auth.tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId,
-      createdByUserId: teacher.id
+      hierarchyNodeId: teacher.hierarchyNodeId
     },
-    select: { id: true, date: true, status: true, version: true }
+    select: { id: true, batchId: true, date: true, status: true, version: true }
   });
 
   if (!session) {
     return res.apiError(404, "Attendance session not found", "SESSION_NOT_FOUND");
+  }
+
+  const allowed = await ensureTeacherAssignedToBatch({
+    tenantId: req.auth.tenantId,
+    teacherUserId: teacher.id,
+    batchId: session.batchId
+  });
+  if (!allowed) {
+    return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
 
   const config = await loadCenterAttendanceConfig({ tenantId: req.auth.tenantId, centerHierarchyNodeId: teacher.hierarchyNodeId });
@@ -2533,14 +2845,22 @@ const publishTeacherAttendanceSession = asyncHandler(async (req, res) => {
     where: {
       id: String(sessionId),
       tenantId: req.auth.tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId,
-      createdByUserId: teacher.id
+      hierarchyNodeId: teacher.hierarchyNodeId
     },
-    select: { id: true, status: true }
+    select: { id: true, batchId: true, status: true }
   });
 
   if (!session) {
     return res.apiError(404, "Attendance session not found", "SESSION_NOT_FOUND");
+  }
+
+  const allowed = await ensureTeacherAssignedToBatch({
+    tenantId: req.auth.tenantId,
+    teacherUserId: teacher.id,
+    batchId: session.batchId
+  });
+  if (!allowed) {
+    return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
 
   const entriesCount = await prisma.attendanceEntry.count({
@@ -2941,6 +3261,8 @@ export {
   deleteTeacherNote,
   createTeacherAttendanceSession,
   listTeacherAttendanceSessions,
+  listTeacherBatchAttendanceHistory,
+  exportTeacherBatchAttendanceHistoryCsv,
   getTeacherAttendanceSession,
   updateTeacherAttendanceEntries,
   publishTeacherAttendanceSession,

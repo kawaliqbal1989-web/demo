@@ -296,6 +296,101 @@ function getCsvField(row, keys = []) {
   return "";
 }
 
+const importCsvExpectedHeaders = new Set([
+  "admissionno",
+  "firstname",
+  "lastname",
+  "gender",
+  "dateofbirth",
+  "guardianname",
+  "guardianphone",
+  "guardianemail",
+  "email",
+  "phoneprimary",
+  "phonesecondary",
+  "address",
+  "state",
+  "district",
+  "tehsil",
+  "levelname",
+  "levelrank",
+  "batchname",
+  "teacheremail",
+  "startdate",
+  "totalfeeamount",
+  "admissionfeeamount",
+  "feeconcessionamount",
+  "isactive"
+]);
+
+function scoreImportedCsvRows(rows) {
+  if (!Array.isArray(rows) || !rows.length) return -1;
+
+  const firstRow = rows[0] || {};
+  const normalizedKeys = Object.keys(firstRow)
+    .map((key) => normalizeCsvHeaderKey(key))
+    .filter(Boolean);
+
+  if (!normalizedKeys.length) return -1;
+
+  const uniqueKeys = new Set(normalizedKeys);
+  let expectedMatches = 0;
+  for (const key of uniqueKeys) {
+    if (importCsvExpectedHeaders.has(key)) {
+      expectedMatches += 1;
+    }
+  }
+
+  return expectedMatches * 100 + uniqueKeys.size;
+}
+
+function parseImportCsvRows(fileBuffer) {
+  const delimiters = [",", ";", "\t", "|"];
+  const buffer = Buffer.isBuffer(fileBuffer)
+    ? fileBuffer
+    : Buffer.from(String(fileBuffer || ""), "utf8");
+
+  const utf8Text = buffer.toString("utf-8");
+  const parseTexts = [utf8Text];
+
+  const hasUtf16LeBom = buffer.length >= 2 && buffer[0] === 0xFF && buffer[1] === 0xFE;
+  const hasUtf16BeBom = buffer.length >= 2 && buffer[0] === 0xFE && buffer[1] === 0xFF;
+  if (hasUtf16LeBom || hasUtf16BeBom || utf8Text.includes("\u0000")) {
+    parseTexts.push(buffer.toString("utf16le"));
+  }
+
+  let bestRows = [];
+  let bestScore = -1;
+
+  for (const text of parseTexts) {
+    if (!String(text || "").trim()) continue;
+
+    for (const delimiter of delimiters) {
+      let rows;
+      try {
+        rows = parseCsv(text, {
+          columns: true,
+          skip_empty_lines: true,
+          trim: true,
+          bom: true,
+          delimiter,
+          relax_column_count: true
+        });
+      } catch {
+        continue;
+      }
+
+      const score = scoreImportedCsvRows(rows);
+      if (score > bestScore) {
+        bestScore = score;
+        bestRows = rows;
+      }
+    }
+  }
+
+  return Array.isArray(bestRows) ? bestRows : [];
+}
+
 function parseOptionalCsvDate(value, label) {
   const text = String(value || "").trim();
   if (!text) return null;
@@ -2545,12 +2640,7 @@ const bulkImportStudentsCsv = asyncHandler(async (req, res) => {
     return res.apiError(400, "No CSV file uploaded", "FILE_REQUIRED");
   }
 
-  const parsedRows = parseCsv(req.file.buffer.toString("utf-8"), {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
-    bom: true
-  });
+  const parsedRows = parseImportCsvRows(req.file.buffer);
 
   if (!Array.isArray(parsedRows) || !parsedRows.length) {
     return res.apiError(400, "CSV must have a header row and at least one data row", "CSV_EMPTY");

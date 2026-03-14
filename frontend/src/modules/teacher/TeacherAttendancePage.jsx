@@ -3,13 +3,17 @@ import { Link } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { downloadBlob } from "../../utils/downloadBlob";
 import { getApiErrorCode, getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { ATTENDANCE_STATUS_COLORS } from "../../utils/attendance";
 import {
   createAttendanceSession,
   getAttendanceSession,
+  getBatchAttendanceHistory,
   listAttendanceSessions,
+  getBatchRoster,
   listMyBatches,
+  exportBatchAttendanceHistoryCsv,
   publishAttendanceSession,
   updateAttendanceEntries
 } from "../../services/teacherPortalService";
@@ -20,6 +24,13 @@ function todayISO() {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function toIsoDateOnly(value) {
+  if (!value) return "";
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
 }
 
 const ENTRY_STATUSES = ["PRESENT", "ABSENT", "LATE", "EXCUSED"];
@@ -50,8 +61,23 @@ function TeacherAttendancePage() {
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
 
+  const [historyFrom, setHistoryFrom] = useState("");
+  const [historyTo, setHistoryTo] = useState("");
+  const [historySessionStatus, setHistorySessionStatus] = useState("");
+  const [historyLimit, setHistoryLimit] = useState(10);
+  const [historyOffset, setHistoryOffset] = useState(0);
+
   const [session, setSession] = useState(null);
   const [localStatuses, setLocalStatuses] = useState({});
+
+  const [quickStudents, setQuickStudents] = useState([]);
+  const [loadingQuickStudents, setLoadingQuickStudents] = useState(false);
+
+  const [historyItems, setHistoryItems] = useState([]);
+  const [historyTotal, setHistoryTotal] = useState(0);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyExporting, setHistoryExporting] = useState(false);
+  const [historyError, setHistoryError] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [loadingSession, setLoadingSession] = useState(false);
@@ -90,6 +116,10 @@ function TeacherAttendancePage() {
   }, [search, batchId, date, limit]);
 
   useEffect(() => {
+    setHistoryOffset(0);
+  }, [batchId, historyFrom, historyTo, historySessionStatus, historyLimit]);
+
+  useEffect(() => {
     if (offset >= filteredEntries.length && filteredEntries.length > 0) {
       setOffset(Math.max(0, Math.floor((filteredEntries.length - 1) / limit) * limit));
     }
@@ -109,6 +139,57 @@ function TeacherAttendancePage() {
       setError(getFriendlyErrorMessage(err) || "Failed to load batches.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadQuickStudents = async (nextBatchId) => {
+    if (!nextBatchId) {
+      setQuickStudents([]);
+      return;
+    }
+
+    setLoadingQuickStudents(true);
+    try {
+      const response = await getBatchRoster(nextBatchId);
+      const data = response?.data || response || [];
+      const items = Array.isArray(data) ? data : [];
+      setQuickStudents(items);
+    } catch {
+      setQuickStudents([]);
+    } finally {
+      setLoadingQuickStudents(false);
+    }
+  };
+
+  const loadBatchHistory = async (nextBatchId = batchId) => {
+    if (!nextBatchId) {
+      setHistoryItems([]);
+      setHistoryTotal(0);
+      setHistoryError("");
+      return;
+    }
+
+    setHistoryLoading(true);
+    setHistoryError("");
+
+    try {
+      const response = await getBatchAttendanceHistory({
+        batchId: nextBatchId,
+        from: historyFrom || undefined,
+        to: historyTo || undefined,
+        sessionStatus: historySessionStatus || undefined,
+        limit: historyLimit,
+        offset: historyOffset
+      });
+      const data = response?.data || response || {};
+      setHistoryItems(Array.isArray(data.items) ? data.items : []);
+      setHistoryTotal(Number(data.total || 0));
+    } catch (err) {
+      setHistoryItems([]);
+      setHistoryTotal(0);
+      setHistoryError(getFriendlyErrorMessage(err) || "Failed to load batch history.");
+    } finally {
+      setHistoryLoading(false);
     }
   };
 
@@ -152,6 +233,16 @@ function TeacherAttendancePage() {
     void findOrClearSession({ nextBatchId: batchId, nextDate: date });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId, date]);
+
+  useEffect(() => {
+    void loadQuickStudents(batchId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchId]);
+
+  useEffect(() => {
+    void loadBatchHistory(batchId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchId, historyFrom, historyTo, historySessionStatus, historyLimit, historyOffset]);
 
   const onCreateSession = async () => {
     if (!batchId || !date) return;
@@ -247,6 +338,28 @@ function TeacherAttendancePage() {
 
   const [publishConfirmOpen, setPublishConfirmOpen] = useState(false);
 
+  const onExportBatchHistory = async () => {
+    if (!batchId) return;
+
+    setHistoryExporting(true);
+    setHistoryError("");
+    try {
+      const response = await exportBatchAttendanceHistoryCsv({
+        batchId,
+        from: historyFrom || undefined,
+        to: historyTo || undefined,
+        sessionStatus: historySessionStatus || undefined,
+        limit: 5000,
+        offset: 0
+      });
+      downloadBlob(response.data, `teacher_batch_attendance_${batchId}.csv`);
+    } catch (err) {
+      setHistoryError(getFriendlyErrorMessage(err) || "Failed to export batch history CSV.");
+    } finally {
+      setHistoryExporting(false);
+    }
+  };
+
   const onPublish = async () => {
     if (!session) return;
     setPublishConfirmOpen(false);
@@ -310,6 +423,157 @@ function TeacherAttendancePage() {
             Date
             <input className="input" value={date} onChange={(e) => setDate(e.target.value)} placeholder="YYYY-MM-DD" />
           </label>
+        </div>
+
+        <div style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Quick student-wise history access</div>
+          {!batchId ? (
+            <div style={{ color: "var(--color-text-muted)" }}>Select a batch to open student attendance history quickly.</div>
+          ) : loadingQuickStudents ? (
+            <div style={{ color: "var(--color-text-muted)" }}>Loading students…</div>
+          ) : quickStudents.length ? (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {quickStudents.slice(0, 16).map((student) => (
+                <Link
+                  key={student.studentId}
+                  className="button secondary"
+                  style={{ width: "auto" }}
+                  to={`/teacher/students/${student.studentId}/attendance`}
+                >
+                  {student.fullName || "Student"}
+                </Link>
+              ))}
+              {quickStudents.length > 16 ? (
+                <span style={{ alignSelf: "center", fontSize: 12, color: "var(--color-text-muted)" }}>
+                  +{quickStudents.length - 16} more students
+                </span>
+              ) : null}
+            </div>
+          ) : (
+            <div style={{ color: "var(--color-text-muted)" }}>No students found for this batch.</div>
+          )}
+        </div>
+
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontWeight: 700 }}>Batch Attendance History</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Open any previous session or export summary CSV</div>
+            </div>
+            <button
+              className="button secondary"
+              style={{ width: "auto" }}
+              disabled={!batchId || historyExporting}
+              onClick={() => void onExportBatchHistory()}
+            >
+              {historyExporting ? "Exporting..." : "Export CSV"}
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
+            <label>
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>From</span>
+              <input className="input" type="date" value={historyFrom} onChange={(e) => setHistoryFrom(e.target.value)} />
+            </label>
+            <label>
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>To</span>
+              <input className="input" type="date" value={historyTo} onChange={(e) => setHistoryTo(e.target.value)} />
+            </label>
+            <label>
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Session status</span>
+              <select className="select" value={historySessionStatus} onChange={(e) => setHistorySessionStatus(e.target.value)}>
+                <option value="">All</option>
+                <option value="DRAFT">DRAFT</option>
+                <option value="PUBLISHED">PUBLISHED</option>
+                <option value="LOCKED">LOCKED</option>
+                <option value="CANCELLED">CANCELLED</option>
+              </select>
+            </label>
+            <label>
+              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Rows</span>
+              <select className="select" value={historyLimit} onChange={(e) => setHistoryLimit(parseInt(e.target.value, 10) || 10)}>
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </label>
+            {(historyFrom || historyTo || historySessionStatus) ? (
+              <button
+                className="button secondary"
+                style={{ width: "auto" }}
+                onClick={() => {
+                  setHistoryFrom("");
+                  setHistoryTo("");
+                  setHistorySessionStatus("");
+                }}
+              >
+                Clear
+              </button>
+            ) : null}
+          </div>
+
+          {historyError ? <p className="error" style={{ margin: 0 }}>{historyError}</p> : null}
+
+          {!batchId ? (
+            <div style={{ color: "var(--color-text-muted)" }}>Select a batch to view history.</div>
+          ) : historyLoading ? (
+            <div style={{ color: "var(--color-text-muted)" }}>Loading history…</div>
+          ) : historyItems.length === 0 ? (
+            <div style={{ color: "var(--color-text-muted)" }}>No attendance sessions found for these filters.</div>
+          ) : (
+            <>
+              <DataTable
+                columns={[
+                  {
+                    key: "date",
+                    header: "Date",
+                    render: (row) => (row.date ? new Date(row.date).toLocaleDateString() : "—")
+                  },
+                  { key: "sessionStatus", header: "Session" },
+                  { key: "totalStudents", header: "Students" },
+                  { key: "presentCount", header: "Present" },
+                  { key: "absentCount", header: "Absent" },
+                  { key: "lateCount", header: "Late" },
+                  { key: "excusedCount", header: "Excused" },
+                  {
+                    key: "attendanceRate",
+                    header: "Rate",
+                    render: (row) => `${row.attendanceRate || 0}%`
+                  },
+                  {
+                    key: "open",
+                    header: "Open",
+                    render: (row) => (
+                      <button
+                        className="button secondary"
+                        style={{ width: "auto" }}
+                        onClick={() => {
+                          const sessionDate = toIsoDateOnly(row.date);
+                          if (!sessionDate) return;
+                          setDate(sessionDate);
+                        }}
+                      >
+                        Open Session
+                      </button>
+                    )
+                  }
+                ]}
+                rows={historyItems}
+                keyField="sessionId"
+              />
+
+              <PaginationBar
+                limit={historyLimit}
+                offset={historyOffset}
+                count={historyItems.length}
+                total={historyTotal}
+                onChange={(next) => {
+                  setHistoryLimit(next.limit);
+                  setHistoryOffset(next.offset);
+                }}
+              />
+            </>
+          )}
         </div>
 
         {!batchId ? (

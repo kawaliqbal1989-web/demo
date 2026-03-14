@@ -206,6 +206,34 @@ async function publishAttendanceSession(sessionId) {
   return response.data;
 }
 
+async function getBatchAttendanceHistory({ batchId, from, to, sessionStatus, limit = 20, offset = 0 } = {}) {
+  const response = await apiClient.get("/teacher/attendance/history", {
+    params: {
+      batchId: batchId || undefined,
+      from: from || undefined,
+      to: to || undefined,
+      sessionStatus: sessionStatus || undefined,
+      limit,
+      offset
+    }
+  });
+  return response.data;
+}
+
+async function exportBatchAttendanceHistoryCsv({ batchId, from, to, sessionStatus, limit = 5000, offset = 0 } = {}) {
+  return apiClient.get("/teacher/attendance/history/export.csv", {
+    params: {
+      batchId: batchId || undefined,
+      from: from || undefined,
+      to: to || undefined,
+      sessionStatus: sessionStatus || undefined,
+      limit,
+      offset
+    },
+    responseType: "blob"
+  });
+}
+
 // ── Analytics ────────────────────────────────────────────────────────
 
 async function getAnalyticsAttendance(params = {}) {
@@ -318,6 +346,8 @@ export {
   getAttendanceSession,
   updateAttendanceEntries,
   publishAttendanceSession,
+  getBatchAttendanceHistory,
+  exportBatchAttendanceHistoryCsv,
   getAnalyticsAttendance,
   exportAnalyticsAttendanceCsv,
   getAnalyticsWorksheets,

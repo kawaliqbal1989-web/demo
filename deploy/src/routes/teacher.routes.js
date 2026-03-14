@@ -34,6 +34,8 @@ import {
   deleteTeacherNote,
   createTeacherAttendanceSession,
   listTeacherAttendanceSessions,
+  listTeacherBatchAttendanceHistory,
+  exportTeacherBatchAttendanceHistoryCsv,
   getTeacherAttendanceSession,
   updateTeacherAttendanceEntries,
   publishTeacherAttendanceSession,
@@ -135,6 +137,8 @@ teacherRouter.post(
   auditAction("TEACHER_ATTENDANCE_CREATE_SESSION", "ATTENDANCE_SESSION"),
   createTeacherAttendanceSession
 );
+teacherRouter.get("/attendance/history/export.csv", exportTeacherBatchAttendanceHistoryCsv);
+teacherRouter.get("/attendance/history", listTeacherBatchAttendanceHistory);
 teacherRouter.get("/attendance/sessions", listTeacherAttendanceSessions);
 teacherRouter.get("/attendance/sessions/:sessionId", getTeacherAttendanceSession);
 teacherRouter.put(

@@ -5,6 +5,7 @@ import { recordAudit } from "../utils/audit.js";
 import { generatePartnerCode } from "../utils/partner-code.js";
 import { parsePagination } from "../utils/pagination.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+import { buildUploadUrl } from "../utils/request-url.js";
 import {
   cascadeSetBusinessPartnerActiveState,
   resolveBusinessPartnerHierarchyNodeIds
@@ -329,7 +330,7 @@ const uploadBusinessPartnerLogo = asyncHandler(async (req, res) => {
     return res.apiError(400, "file is required", "FILE_REQUIRED");
   }
 
-  const url = `${req.protocol}://${req.get("host")}/uploads/business-partner-logos/${file.filename}`;
+  const url = buildUploadUrl(req, `/uploads/business-partner-logos/${file.filename}`);
 
   const updated = await prisma.businessPartner.update({
     where: { id: existing.id },

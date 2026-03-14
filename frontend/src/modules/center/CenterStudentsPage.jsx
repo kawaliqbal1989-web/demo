@@ -28,8 +28,8 @@ import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
 import { listCatalogCourses } from "../../services/catalogService";
 import { listLedger } from "../../services/ledgerService";
-import { baseURL } from "../../services/apiClient";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 import {
   FEE_SCHEDULE_OPTIONS,
   formatFeeScheduleTarget
@@ -171,14 +171,7 @@ function CenterStudentsPage() {
   const [editInfo, setEditInfo] = useState("");
 
   const resolvePhotoUrl = (value) => {
-    const text = String(value || "").trim();
-    if (!text) return "";
-    if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
-    const apiOrigin = String(baseURL || "").replace(/\/api\/?$/, "");
-    if (text.startsWith("/")) {
-      return `${apiOrigin}${text}`;
-    }
-    return `${apiOrigin}/${text}`;
+    return resolveAssetUrl(value);
   };
 
   const load = async (next) => {

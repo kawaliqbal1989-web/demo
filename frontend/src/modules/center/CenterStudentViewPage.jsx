@@ -4,7 +4,7 @@ import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getStudent, getStudentPerformanceSummary, getStudentPromotionStatus, confirmStudentPromotion, assignStudentCourse } from "../../services/studentsService";
 import { listCenterAvailableCourses } from "../../services/centerService";
-import { baseURL } from "../../services/apiClient";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 
 const photoFrameStyle = {
   display: "inline-flex",
@@ -41,14 +41,7 @@ function CenterStudentViewPage() {
   const [courseMsg, setCourseMsg] = useState("");
 
   const resolvePhotoUrl = (value) => {
-    const text = String(value || "").trim();
-    if (!text) return "";
-    if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
-    const apiOrigin = String(baseURL || "").replace(/\/api\/?$/, "");
-    if (text.startsWith("/")) {
-      return `${apiOrigin}${text}`;
-    }
-    return `${apiOrigin}/${text}`;
+    return resolveAssetUrl(value);
   };
 
   const load = async () => {

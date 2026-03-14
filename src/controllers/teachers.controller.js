@@ -3,6 +3,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { parsePagination } from "../utils/pagination.js";
 import { generateUsername } from "../utils/username-generator.js";
 import { hashPassword } from "../utils/password.js";
+import { buildUploadUrl } from "../utils/request-url.js";
 import crypto from "crypto";
 
 function generateTempPassword() {
@@ -653,7 +654,7 @@ const uploadTeacherPhoto = asyncHandler(async (req, res) => {
     return res.apiError(403, "Hierarchy scope denied", "HIERARCHY_SCOPE_DENIED");
   }
 
-  const url = `${req.protocol}://${req.get("host")}/uploads/teacher-photos/${file.filename}`;
+  const url = buildUploadUrl(req, `/uploads/teacher-photos/${file.filename}`);
 
   const profile = await prisma.teacherProfile.upsert({
     where: { authUserId: teacher.id },

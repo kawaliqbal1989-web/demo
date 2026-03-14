@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+import { buildUploadUrl } from "../utils/request-url.js";
 
 function buildDefaultCertificateTemplate() {
   return {
@@ -85,7 +86,7 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
       return res.apiError(400, "file is required", "FILE_REQUIRED");
     }
 
-    const url = `${req.protocol}://${req.get("host")}/uploads/${uploadSubDir}/${file.filename}`;
+    const url = buildUploadUrl(req, `/uploads/${uploadSubDir}/${file.filename}`);
 
     let template;
     try {

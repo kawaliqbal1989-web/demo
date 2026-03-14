@@ -4,9 +4,9 @@ import { DataTable } from "../../components/DataTable";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { PageHeader } from "../../components/PageHeader";
 import { createTeacher, listTeachers, resetTeacherPassword, shiftTeacherStudents, updateTeacher, uploadTeacherPhoto } from "../../services/teachersService";
-import { baseURL } from "../../services/apiClient";
 import { listStudents } from "../../services/studentsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 
 const photoFrameStyle = {
   display: "inline-flex",
@@ -121,14 +121,7 @@ function CenterTeachersPage() {
   };
 
   const resolvePhotoUrl = (value) => {
-    const text = String(value || "").trim();
-    if (!text) return "";
-    if (/^https?:\/\//i.test(text) || text.startsWith("data:")) return text;
-    const apiOrigin = String(baseURL || "").replace(/\/api\/?$/, "");
-    if (text.startsWith("/")) {
-      return `${apiOrigin}${text}`;
-    }
-    return `${apiOrigin}/${text}`;
+    return resolveAssetUrl(value);
   };
 
   const load = async ({ q: nextQ = q, status: nextStatus = statusFilter } = {}) => {

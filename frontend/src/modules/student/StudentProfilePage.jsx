@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LoadingState } from "../../components/LoadingState";
 import { getStudentMe, changeStudentPassword, updateStudentProfile } from "../../services/studentPortalService";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 
 function formatDate(d) {
   if (!d) return "—";
@@ -152,9 +153,9 @@ function StudentProfilePage() {
 
       {/* Profile photo + name */}
       <div className="card" style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-        {me.photoUrl ? (
+        {resolveAssetUrl(me.photoUrl) ? (
           <img
-            src={me.photoUrl}
+            src={resolveAssetUrl(me.photoUrl)}
             alt="Student photo"
             style={{ width: 128, height: 128, borderRadius: 16, objectFit: "cover", border: "1px solid var(--color-border)" }}
           />

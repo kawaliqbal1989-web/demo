@@ -15,8 +15,10 @@ import {
   validateInitialStudentLevel
 } from "../services/student-lifecycle.service.js";
 import { parsePagination } from "../utils/pagination.js";
+import { buildUploadUrl } from "../utils/request-url.js";
 import { recordEnrollmentTransaction } from "../services/financial-ledger.service.js";
 import { toCsv } from "../utils/csv.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 function parseIsoDateOnly(value) {
   if (!value) return null;
@@ -97,6 +99,10 @@ function normalizeAdmissionNo(value) {
   return trimmed.length ? trimmed : null;
 }
 
+function isSchemaDriftError(error) {
+  return isSchemaMismatchError(error);
+}
+
 function normalizeMoney(value) {
   if (value === undefined) return undefined;
   if (value === null || value === "") return null;
@@ -118,19 +124,102 @@ function normalizeConcessionAmount(value) {
 }
 
 async function getLevelFeeDefaults({ tx, tenantId, levelId }) {
-  return tx.level.findFirst({
-    where: {
-      id: String(levelId),
-      tenantId
-    },
-    select: {
-      id: true,
-      name: true,
-      rank: true,
-      defaultTotalFeeAmount: true,
-      defaultAdmissionFeeAmount: true
+  try {
+    return await tx.level.findFirst({
+      where: {
+        id: String(levelId),
+        tenantId
+      },
+      select: {
+        id: true,
+        name: true,
+        rank: true,
+        defaultTotalFeeAmount: true,
+        defaultAdmissionFeeAmount: true
+      }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["defaulttotalfeeamount", "defaultadmissionfeeamount"])) {
+      throw error;
     }
-  });
+
+    return tx.level.findFirst({
+      where: {
+        id: String(levelId),
+        tenantId
+      },
+      select: {
+        id: true,
+        name: true,
+        rank: true
+      }
+    });
+  }
+}
+
+function buildStudentCreateData({
+  tenantId,
+  admissionNo,
+  firstName,
+  lastName,
+  normalizedGender,
+  email,
+  dateOfBirth,
+  hierarchyNodeId,
+  resolvedLevelId,
+  guardianName,
+  guardianPhone,
+  guardianEmail,
+  phonePrimary,
+  phoneSecondary,
+  address,
+  state,
+  district,
+  tehsil,
+  normalizedTotalFeeAmount,
+  normalizedAdmissionFeeAmount,
+  levelDefaults,
+  resolvedCurrentTeacherUserId,
+  isActive,
+  compatibilityMode = false
+}) {
+  const data = {
+    tenantId,
+    admissionNo,
+    firstName,
+    lastName,
+    hierarchyNodeId,
+    levelId: resolvedLevelId,
+    ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {})
+  };
+
+  if (compatibilityMode) {
+    return data;
+  }
+
+  return {
+    ...data,
+    gender: normalizedGender || null,
+    email,
+    dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+    guardianName: guardianName ? String(guardianName) : null,
+    guardianPhone: guardianPhone ? String(guardianPhone) : null,
+    guardianEmail: guardianEmail ? String(guardianEmail) : null,
+    phonePrimary: phonePrimary ? String(phonePrimary) : null,
+    phoneSecondary: phoneSecondary ? String(phoneSecondary) : null,
+    address: address ? String(address) : null,
+    state: state ? String(state) : null,
+    district: district ? String(district) : null,
+    tehsil: tehsil ? String(tehsil) : null,
+    totalFeeAmount: normalizedTotalFeeAmount !== undefined
+      ? normalizedTotalFeeAmount
+      : (levelDefaults?.defaultTotalFeeAmount == null ? null : Number(levelDefaults.defaultTotalFeeAmount)),
+    admissionFeeAmount: normalizedAdmissionFeeAmount !== undefined
+      ? normalizedAdmissionFeeAmount
+      : (levelDefaults?.defaultAdmissionFeeAmount == null ? null : Number(levelDefaults.defaultAdmissionFeeAmount)),
+    feeConcessionAmount: 0,
+    currentTeacherUserId: resolvedCurrentTeacherUserId
+  };
 }
 
 function buildStudentFeeAmounts(levelDefaults, feeConcessionAmount) {
@@ -680,45 +769,77 @@ async function generateNextStudentCode({ tx, tenantId, prefix = "ST" }) {
     throw new Error("Invalid student code prefix");
   }
 
-  const startIndex = normalizedPrefix.length + 1; // MySQL SUBSTRING is 1-indexed
-  const regex = `^${normalizedPrefix}[0-9]+$`;
+  const collectCodeStats = (values, field) => {
+    let maxNum = 0;
+    let maxWidth = 0;
 
-  const toSafeNumber = (value) => {
-    if (value === null || value === undefined) return 0;
-    if (typeof value === "bigint") return Number(value);
-    const num = Number(value);
-    return Number.isFinite(num) ? num : 0;
+    for (const value of values) {
+      const candidate = String(value?.[field] || "").trim();
+      if (!candidate.startsWith(normalizedPrefix)) {
+        continue;
+      }
+
+      const digits = candidate.slice(normalizedPrefix.length);
+      if (!/^\d+$/.test(digits)) {
+        continue;
+      }
+
+      const numericValue = Number.parseInt(digits, 10);
+      if (!Number.isFinite(numericValue)) {
+        continue;
+      }
+
+      if (numericValue > maxNum) {
+        maxNum = numericValue;
+      }
+
+      if (digits.length > maxWidth) {
+        maxWidth = digits.length;
+      }
+    }
+
+    return { maxNum, maxWidth };
   };
 
-  const [studentAgg, userAgg] = await Promise.all([
-    tx.$queryRaw`
-      SELECT
-        MAX(CAST(SUBSTRING(admissionNo, ${startIndex}) AS UNSIGNED)) AS maxNum,
-        MAX(CHAR_LENGTH(SUBSTRING(admissionNo, ${startIndex}))) AS maxWidth
-      FROM Student
-      WHERE tenantId = ${tenantId}
-        AND admissionNo REGEXP ${regex}
-    `,
-    tx.$queryRaw`
-      SELECT
-        MAX(CAST(SUBSTRING(username, ${startIndex}) AS UNSIGNED)) AS maxNum,
-        MAX(CHAR_LENGTH(SUBSTRING(username, ${startIndex}))) AS maxWidth
-      FROM AuthUser
-      WHERE tenantId = ${tenantId}
-        AND username REGEXP ${regex}
-    `
+  const [students, users] = await Promise.all([
+    tx.student.findMany({
+      where: {
+        tenantId,
+        admissionNo: { startsWith: normalizedPrefix }
+      },
+      select: { admissionNo: true }
+    }).catch((error) => {
+      if (!isSchemaDriftError(error)) {
+        throw error;
+      }
+
+      return [];
+    }),
+    tx.authUser.findMany({
+      where: {
+        tenantId,
+        username: { startsWith: normalizedPrefix }
+      },
+      select: { username: true }
+    }).catch((error) => {
+      if (!isSchemaDriftError(error)) {
+        throw error;
+      }
+
+      return [];
+    })
   ]);
 
-  const studentRow = Array.isArray(studentAgg) ? studentAgg[0] : null;
-  const userRow = Array.isArray(userAgg) ? userAgg[0] : null;
+  const studentStats = collectCodeStats(students, "admissionNo");
+  const userStats = collectCodeStats(users, "username");
 
-  const maxNum = Math.max(toSafeNumber(studentRow?.maxNum), toSafeNumber(userRow?.maxNum));
+  const maxNum = Math.max(studentStats.maxNum, userStats.maxNum);
   const nextNum = maxNum + 1;
 
   const width = Math.max(
     4,
-    toSafeNumber(studentRow?.maxWidth),
-    toSafeNumber(userRow?.maxWidth),
+    studentStats.maxWidth,
+    userStats.maxWidth,
     String(nextNum).length
   );
 
@@ -1349,6 +1470,7 @@ const createStudent = asyncHandler(async (req, res) => {
     let finalAdmissionNo = shouldAutoGenerateAdmissionNo
       ? await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" })
       : requestedAdmissionNo;
+    let compatibilityMode = false;
 
     // If client did not send loginPassword, default to the final admissionNo.
     const tempPassword = shouldCreateLogin ? String(loginPassword || finalAdmissionNo || "").trim() : null;
@@ -1362,38 +1484,44 @@ const createStudent = asyncHandler(async (req, res) => {
       try {
         // eslint-disable-next-line no-await-in-loop
         student = await tx.student.create({
-          data: {
+          data: buildStudentCreateData({
             tenantId: req.auth.tenantId,
             admissionNo: finalAdmissionNo,
             firstName,
             lastName,
-            gender: normalizedGender || null,
+            normalizedGender,
             email,
-            dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+            dateOfBirth,
             hierarchyNodeId,
-            levelId: resolvedLevelId,
-            guardianName: guardianName ? String(guardianName) : null,
-            guardianPhone: guardianPhone ? String(guardianPhone) : null,
-            guardianEmail: guardianEmail ? String(guardianEmail) : null,
-            phonePrimary: phonePrimary ? String(phonePrimary) : null,
-            phoneSecondary: phoneSecondary ? String(phoneSecondary) : null,
-            address: address ? String(address) : null,
-            state: state ? String(state) : null,
-            district: district ? String(district) : null,
-            tehsil: tehsil ? String(tehsil) : null,
-            totalFeeAmount: normalizedTotalFeeAmount !== undefined
-              ? normalizedTotalFeeAmount
-              : (levelDefaults?.defaultTotalFeeAmount == null ? null : Number(levelDefaults.defaultTotalFeeAmount)),
-            admissionFeeAmount: normalizedAdmissionFeeAmount !== undefined
-              ? normalizedAdmissionFeeAmount
-              : (levelDefaults?.defaultAdmissionFeeAmount == null ? null : Number(levelDefaults.defaultAdmissionFeeAmount)),
-            feeConcessionAmount: 0,
-            currentTeacherUserId: resolvedCurrentTeacherUserId,
-            ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {})
-          }
+            resolvedLevelId,
+            guardianName,
+            guardianPhone,
+            guardianEmail,
+            phonePrimary,
+            phoneSecondary,
+            address,
+            state,
+            district,
+            tehsil,
+            normalizedTotalFeeAmount,
+            normalizedAdmissionFeeAmount,
+            levelDefaults,
+            resolvedCurrentTeacherUserId,
+            isActive,
+            compatibilityMode
+          })
         });
         break;
       } catch (err) {
+        if (isSchemaMismatchError(err, ["student", "feeconcessionamount", "currentteacheruserid"])) {
+          if (!compatibilityMode) {
+            compatibilityMode = true;
+            continue;
+          }
+
+          throw makeApiError(503, "Student admission storage is unavailable until database migrations are applied", "STUDENT_SCHEMA_MISSING");
+        }
+
         if (!isUniqueConstraintError(err)) {
           throw err;
         }
@@ -1418,38 +1546,39 @@ const createStudent = asyncHandler(async (req, res) => {
       const fallbackAdmissionNo = `${String(finalAdmissionNo || "ST").slice(0, 16)}${Date.now()}${Math.floor(Math.random() * 10000)}`;
       try {
         student = await tx.student.create({
-          data: {
+          data: buildStudentCreateData({
             tenantId: req.auth.tenantId,
             admissionNo: fallbackAdmissionNo,
             firstName,
             lastName,
-            gender: normalizedGender || null,
+            normalizedGender,
             email,
-            dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+            dateOfBirth,
             hierarchyNodeId,
-            levelId: resolvedLevelId,
-            guardianName: guardianName ? String(guardianName) : null,
-            guardianPhone: guardianPhone ? String(guardianPhone) : null,
-            phonePrimary: phonePrimary ? String(phonePrimary) : null,
-            phoneSecondary: phoneSecondary ? String(phoneSecondary) : null,
-            address: address ? String(address) : null,
-            state: state ? String(state) : null,
-            district: district ? String(district) : null,
-            tehsil: tehsil ? String(tehsil) : null,
-            totalFeeAmount: normalizedTotalFeeAmount !== undefined
-              ? normalizedTotalFeeAmount
-              : (levelDefaults?.defaultTotalFeeAmount == null ? null : Number(levelDefaults.defaultTotalFeeAmount)),
-            admissionFeeAmount: normalizedAdmissionFeeAmount !== undefined
-              ? normalizedAdmissionFeeAmount
-              : (levelDefaults?.defaultAdmissionFeeAmount == null ? null : Number(levelDefaults.defaultAdmissionFeeAmount)),
-            feeConcessionAmount: 0,
-            currentTeacherUserId: resolvedCurrentTeacherUserId,
-            ...(isActive !== undefined ? { isActive: Boolean(isActive) } : {})
-          }
+            resolvedLevelId,
+            guardianName,
+            guardianPhone,
+            guardianEmail,
+            phonePrimary,
+            phoneSecondary,
+            address,
+            state,
+            district,
+            tehsil,
+            normalizedTotalFeeAmount,
+            normalizedAdmissionFeeAmount,
+            levelDefaults,
+            resolvedCurrentTeacherUserId,
+            isActive,
+            compatibilityMode: true
+          })
         });
       } catch (err) {
         if (isStudentEmailUniqueCollision(err)) {
           throw makeApiError(409, "Student email already exists", "STUDENT_EMAIL_EXISTS");
+        }
+        if (isSchemaMismatchError(err, ["student", "feeconcessionamount", "currentteacheruserid"])) {
+          throw makeApiError(503, "Student admission storage is unavailable until database migrations are applied", "STUDENT_SCHEMA_MISSING");
         }
         throw makeApiError(503, "Unable to allocate a unique student code. Please retry.", "STUDENT_CODE_GENERATION_FAILED");
       }
@@ -1485,13 +1614,19 @@ const createStudent = asyncHandler(async (req, res) => {
       }
     }
 
-    await recordEnrollmentTransaction({
-      tx,
-      tenantId: req.auth.tenantId,
-      studentId: student.id,
-      actorUserId: req.auth.userId,
-      grossAmount: enrollmentFeeAmount ?? 0
-    });
+    try {
+      await recordEnrollmentTransaction({
+        tx,
+        tenantId: req.auth.tenantId,
+        studentId: student.id,
+        actorUserId: req.auth.userId,
+        grossAmount: enrollmentFeeAmount ?? 0
+      });
+    } catch (error) {
+      if (!isSchemaMismatchError(error, ["financialtransaction", "studentfeeinstallment", "settlement"])) {
+        throw error;
+      }
+    }
 
     return { student, createdLogin, tempPassword };
   });
@@ -1706,7 +1841,7 @@ const uploadStudentPhoto = asyncHandler(async (req, res) => {
     return res.apiError(400, "file is required", "FILE_REQUIRED");
   }
 
-  const url = `${req.protocol}://${req.get("host")}/uploads/student-photos/${file.filename}`;
+  const url = buildUploadUrl(req, `/uploads/student-photos/${file.filename}`);
 
   const updated = await prisma.student.update({
     where: { id },

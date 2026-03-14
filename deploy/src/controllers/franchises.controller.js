@@ -4,6 +4,7 @@ import { parsePagination } from "../utils/pagination.js";
 import { hashPassword } from "../utils/password.js";
 import { generateUsername } from "../utils/username-generator.js";
 import { recordAudit } from "../utils/audit.js";
+import { buildUploadUrl } from "../utils/request-url.js";
 
 function normalizeHierarchyType(type) {
   if (!type) {
@@ -488,7 +489,7 @@ const uploadFranchiseLogo = asyncHandler(async (req, res) => {
     return res.apiError(400, "file is required", "FILE_REQUIRED");
   }
 
-  const url = `${req.protocol}://${req.get("host")}/uploads/franchise-logos/${file.filename}`;
+  const url = buildUploadUrl(req, `/uploads/franchise-logos/${file.filename}`);
 
   const updated = await prisma.franchiseProfile.update({
     where: { id: existing.id },

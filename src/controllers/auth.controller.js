@@ -10,6 +10,64 @@ import {
 import { recordAudit } from "../utils/audit.js";
 import { getRoleCapabilities } from "../utils/capabilities.js";
 
+function mergeNameParts(firstName, lastName) {
+  return `${String(firstName || "").trim()} ${String(lastName || "").trim()}`.trim();
+}
+
+async function resolveDisplayName({ tenantId, userId, role, studentId }) {
+  if (role === "TEACHER") {
+    const profile = await prisma.teacherProfile.findFirst({
+      where: {
+        tenantId,
+        authUserId: userId,
+        isActive: true
+      },
+      select: {
+        fullName: true
+      }
+    });
+    return profile?.fullName || null;
+  }
+
+  if (role === "CENTER") {
+    const profile = await prisma.centerProfile.findFirst({
+      where: {
+        tenantId,
+        authUserId: userId,
+        isActive: true
+      },
+      select: {
+        displayName: true,
+        name: true
+      }
+    });
+    return profile?.displayName || profile?.name || null;
+  }
+
+  if (role === "STUDENT") {
+    const resolvedStudentId = studentId || null;
+    if (!resolvedStudentId) {
+      return null;
+    }
+
+    const student = await prisma.student.findFirst({
+      where: {
+        tenantId,
+        id: resolvedStudentId,
+        isActive: true
+      },
+      select: {
+        firstName: true,
+        lastName: true
+      }
+    });
+
+    return mergeNameParts(student?.firstName, student?.lastName) || null;
+  }
+
+  return null;
+}
+
 async function isHierarchyPathActive({ tenantId, hierarchyNodeId }) {
   if (!hierarchyNodeId) {
     return true;
@@ -323,6 +381,13 @@ const login = asyncHandler(async (req, res) => {
     metadata: { username, tenantCode, success: true }
   });
 
+  const displayName = await resolveDisplayName({
+    tenantId: user.tenantId,
+    userId: user.id,
+    role: user.role,
+    studentId: user.studentId
+  });
+
   return res.apiSuccess("Login successful", {
     access_token: accessToken,
     refresh_token: refresh.token,
@@ -334,6 +399,7 @@ const login = asyncHandler(async (req, res) => {
       tenant_id: user.tenantId,
       hierarchy_node_id: user.hierarchyNodeId,
       must_change_password: user.mustChangePassword,
+      displayName,
       capabilities: getRoleCapabilities(user.role)
     }
   });
@@ -352,6 +418,7 @@ const me = asyncHandler(async (req, res) => {
       role: true,
       tenantId: true,
       hierarchyNodeId: true,
+      studentId: true,
       mustChangePassword: true
     }
   });
@@ -359,6 +426,13 @@ const me = asyncHandler(async (req, res) => {
   if (!user) {
     return res.apiError(404, "User not found", "USER_NOT_FOUND");
   }
+
+  const displayName = await resolveDisplayName({
+    tenantId: user.tenantId,
+    userId: user.id,
+    role: user.role,
+    studentId: user.studentId
+  });
 
   return res.apiSuccess("Session loaded", {
     user: {
@@ -368,6 +442,7 @@ const me = asyncHandler(async (req, res) => {
       tenant_id: user.tenantId,
       hierarchy_node_id: user.hierarchyNodeId,
       must_change_password: user.mustChangePassword,
+      displayName,
       capabilities: getRoleCapabilities(user.role)
     }
   });

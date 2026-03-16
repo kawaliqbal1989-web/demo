@@ -231,7 +231,7 @@ function AuthProvider({ children }) {
   }, [navigate, logout, refreshSession]);
 
   useLayoutEffect(() => {
-    if (!apiReady || !isAuthenticated || capabilities || requiresPasswordChange) {
+    if (!apiReady || !isAuthenticated || requiresPasswordChange || (capabilities && displayName)) {
       return;
     }
 
@@ -260,7 +260,7 @@ function AuthProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [apiReady, isAuthenticated, capabilities, requiresPasswordChange]);
+  }, [apiReady, isAuthenticated, capabilities, displayName, requiresPasswordChange]);
 
   useLayoutEffect(() => {
     if (!apiReady || !isAuthenticated || requiresPasswordChange) {

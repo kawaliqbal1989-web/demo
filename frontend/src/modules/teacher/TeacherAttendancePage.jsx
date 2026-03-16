@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
+import { InputDialog } from "../../components/InputDialog";
 import { downloadBlob } from "../../utils/downloadBlob";
 import { getApiErrorCode, getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { ATTENDANCE_STATUS_COLORS } from "../../utils/attendance";
@@ -84,6 +85,7 @@ function TeacherAttendancePage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [bulkNoteOpen, setBulkNoteOpen] = useState(false);
 
   const entries = useMemo(() => session?.entries || [], [session]);
   const filteredEntries = useMemo(() => {
@@ -285,6 +287,14 @@ function TeacherAttendancePage() {
     const next = { ...localStatuses };
     for (const e of entries) {
       next[e.studentId] = { status, note: next[e.studentId]?.note || "" };
+    }
+    setLocalStatuses(next);
+  };
+
+  const setNoteForAll = (note) => {
+    const next = { ...localStatuses };
+    for (const e of entries) {
+      next[e.studentId] = { status: next[e.studentId]?.status || e.status, note };
     }
     setLocalStatuses(next);
   };
@@ -605,6 +615,9 @@ function TeacherAttendancePage() {
                 <button className="button secondary" style={{ width: "auto" }} disabled={!canEdit} onClick={() => setAll("ABSENT")}>
                   Mark all absent
                 </button>
+                <button className="button secondary" style={{ width: "auto" }} disabled={!canEdit} onClick={() => setBulkNoteOpen(true)}>
+                  Note all student
+                </button>
                 <button className="button" style={{ width: "auto" }} disabled={!canEdit || saving} onClick={() => void onSave()}>
                   {saving ? "Saving..." : "Save draft"}
                 </button>
@@ -621,6 +634,21 @@ function TeacherAttendancePage() {
               confirmLabel="Publish"
               onConfirm={onPublish}
               onCancel={() => setPublishConfirmOpen(false)}
+            />
+
+            <InputDialog
+              open={bulkNoteOpen}
+              title="Note all student"
+              message="Apply the same note to every student in this session. Leave it blank to clear all existing notes."
+              inputLabel="Attendance note"
+              inputPlaceholder="Enter a note for all students"
+              defaultValue=""
+              confirmLabel="Apply note"
+              onConfirm={(value) => {
+                setNoteForAll(value);
+                setBulkNoteOpen(false);
+              }}
+              onCancel={() => setBulkNoteOpen(false)}
             />
 
             <div className="card" style={{ display: "grid", gap: 8 }}>

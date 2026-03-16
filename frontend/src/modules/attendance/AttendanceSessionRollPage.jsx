@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
 import { LoadingState } from "../../components/LoadingState";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import {
   getAttendanceSession,
+  listAttendanceSessions,
   lockAttendanceSession,
   publishAttendanceSession,
   requestAttendanceCorrection,
@@ -56,7 +57,19 @@ function getEntryFullName(entry) {
   return [firstName, lastName].filter(Boolean).join(" ").trim();
 }
 
+function toIsoDateOnly(value) {
+  if (!value) return "";
+  const asDate = value instanceof Date ? value : new Date(value);
+  if (!Number.isNaN(asDate.getTime())) {
+    return asDate.toISOString().slice(0, 10);
+  }
+
+  const asString = String(value);
+  return asString.length >= 10 ? asString.slice(0, 10) : "";
+}
+
 function AttendanceSessionRollPage() {
+  const navigate = useNavigate();
   const { id } = useParams();
   const { role } = useAuth();
 
@@ -72,10 +85,20 @@ function AttendanceSessionRollPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
+  const [selectedDate, setSelectedDate] = useState("");
+  const [previousSession, setPreviousSession] = useState(null);
+  const [nextSession, setNextSession] = useState(null);
+  const [loadingNeighbors, setLoadingNeighbors] = useState(false);
+  const [resolvingDateNavigation, setResolvingDateNavigation] = useState(false);
+  const [pendingNavigation, setPendingNavigation] = useState(null);
+  const [navigationConfirmOpen, setNavigationConfirmOpen] = useState(false);
 
   const [queue, setQueue] = useState(() => loadQueue());
 
   const entries = useMemo(() => session?.entries || [], [session]);
+  const currentSessionDate = useMemo(() => toIsoDateOnly(session?.date), [session?.date]);
+  const hasUnsavedChanges = useMemo(() => hasAttendanceChanges(entries, localStatuses), [entries, localStatuses]);
+  const navigationBusy = loading || saving || loadingNeighbors || resolvingDateNavigation;
   const filteredEntries = useMemo(() => {
     const query = search.trim().toLowerCase();
     return entries.filter((entry) => {
@@ -118,6 +141,7 @@ function AttendanceSessionRollPage() {
       setSession(data.data);
       hydrateLocal(data.data);
     } catch (err) {
+      setSession(null);
       setError(getFriendlyErrorMessage(err) || "Failed to load session.");
     } finally {
       setLoading(false);
@@ -137,6 +161,65 @@ function AttendanceSessionRollPage() {
       setOffset(Math.max(0, Math.floor((filteredEntries.length - 1) / limit) * limit));
     }
   }, [filteredEntries.length, limit, offset]);
+
+  useEffect(() => {
+    setSelectedDate(currentSessionDate);
+  }, [currentSessionDate, session?.id]);
+
+  useEffect(() => {
+    if (!session?.id || !session?.batchId || !currentSessionDate) {
+      setPreviousSession(null);
+      setNextSession(null);
+      return;
+    }
+
+    let active = true;
+
+    const loadNeighborSessions = async () => {
+      setLoadingNeighbors(true);
+      try {
+        const response = await listAttendanceSessions({ limit: 500, offset: 0, batchId: session.batchId });
+        const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+
+        let previous = null;
+        let next = null;
+
+        for (const item of items) {
+          if (!item?.id || item.id === session.id) continue;
+
+          const itemDate = toIsoDateOnly(item.date);
+          if (!itemDate) continue;
+
+          if (itemDate < currentSessionDate && (!previous || itemDate > toIsoDateOnly(previous.date))) {
+            previous = item;
+          }
+
+          if (itemDate > currentSessionDate && (!next || itemDate < toIsoDateOnly(next.date))) {
+            next = item;
+          }
+        }
+
+        if (!active) return;
+
+        setPreviousSession(previous);
+        setNextSession(next);
+      } catch {
+        if (!active) return;
+        setPreviousSession(null);
+        setNextSession(null);
+      } finally {
+        if (active) {
+          setLoadingNeighbors(false);
+        }
+      }
+    };
+
+    void loadNeighborSessions();
+
+    return () => {
+      active = false;
+    };
+  }, [currentSessionDate, session?.batchId, session?.id]);
 
   const enqueueIfOffline = (payload) => {
     const next = [...queue, payload];
@@ -185,6 +268,72 @@ function AttendanceSessionRollPage() {
   const canLock = role !== "TEACHER" && session?.status === "PUBLISHED";
   const canCancel = role !== "TEACHER" && session?.status !== "CANCELLED";
   const canReopen = session?.status === "LOCKED" || session?.status === "CANCELLED";
+
+  const closeNavigationConfirm = () => {
+    setNavigationConfirmOpen(false);
+    setPendingNavigation(null);
+  };
+
+  const performNavigation = (target) => {
+    if (!target?.id || target.id === id) return;
+    setNavigationConfirmOpen(false);
+    setPendingNavigation(null);
+    setError("");
+    setInfo("");
+    navigate(`/attendance/sessions/${target.id}`);
+  };
+
+  const requestNavigation = (target) => {
+    if (!target?.id || loading || saving || loadingNeighbors) return;
+    if (target.id === id) {
+      setInfo("This attendance session is already open.");
+      return;
+    }
+
+    if (hasUnsavedChanges) {
+      setPendingNavigation(target);
+      setNavigationConfirmOpen(true);
+      return;
+    }
+
+    performNavigation(target);
+  };
+
+  const onOpenSelectedDate = async () => {
+    if (!session?.batchId) return;
+
+    const nextDate = toIsoDateOnly(selectedDate);
+    if (!nextDate) {
+      setError("Select a valid attendance date.");
+      return;
+    }
+
+    if (nextDate === currentSessionDate) {
+      setInfo("This attendance session is already open.");
+      return;
+    }
+
+    setResolvingDateNavigation(true);
+    setError("");
+    setInfo("");
+
+    try {
+      const response = await listAttendanceSessions({ limit: 10, offset: 0, batchId: session.batchId, from: nextDate, to: nextDate });
+      const items = Array.isArray(response?.data?.items) ? response.data.items : [];
+      const target = items.find((item) => toIsoDateOnly(item?.date) === nextDate);
+
+      if (!target?.id) {
+        setError(`No attendance session found for ${nextDate}.`);
+        return;
+      }
+
+      requestNavigation({ id: target.id, date: nextDate });
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to open attendance date.");
+    } finally {
+      setResolvingDateNavigation(false);
+    }
+  };
 
   const onSaveDraft = async () => {
     if (!session || !canEditEntries) return;
@@ -374,7 +523,7 @@ function AttendanceSessionRollPage() {
           <div>
             <h2 style={{ margin: 0 }}>Roll / Attendance</h2>
             <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-              Batch: {session?.batch?.name || ""} • Date: {String(session?.date || "").slice(0, 10)} • Status: {session.status} • Version: {session.version}
+              Batch: {session?.batch?.name || ""} • Date: {currentSessionDate} • Status: {session.status} • Version: {session.version}
             </div>
             {!canEditEntries ? (
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
@@ -386,6 +535,51 @@ function AttendanceSessionRollPage() {
             <button className="button secondary" style={{ width: "auto" }} disabled={!canEditEntries} onClick={() => setAll("PRESENT")}>Mark all present</button>
             <button className="button secondary" style={{ width: "auto" }} disabled={!canEditEntries} onClick={() => setAll("ABSENT")}>Mark all absent</button>
           </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
+          <button
+            className="button secondary"
+            style={{ width: "auto" }}
+            disabled={!previousSession || navigationBusy}
+            onClick={() => requestNavigation({ id: previousSession.id, date: toIsoDateOnly(previousSession.date) })}
+          >
+            Back date
+          </button>
+
+          <label style={{ display: "grid", gap: 4, minWidth: 180 }}>
+            <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Open attendance date</span>
+            <input
+              className="input"
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+            />
+          </label>
+
+          <button
+            className="button secondary"
+            style={{ width: "auto" }}
+            disabled={!selectedDate || navigationBusy}
+            onClick={() => void onOpenSelectedDate()}
+          >
+            {resolvingDateNavigation ? "Opening..." : "Open"}
+          </button>
+
+          <button
+            className="button secondary"
+            style={{ width: "auto" }}
+            disabled={!nextSession || navigationBusy}
+            onClick={() => requestNavigation({ id: nextSession.id, date: toIsoDateOnly(nextSession.date) })}
+          >
+            Next date
+          </button>
+        </div>
+
+        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+          {loadingNeighbors
+            ? "Loading nearby attendance dates..."
+            : `Previous: ${toIsoDateOnly(previousSession?.date) || "—"} • Next: ${toIsoDateOnly(nextSession?.date) || "—"}`}
         </div>
 
         {queue.some((q) => q.sessionId === id) ? (
@@ -433,6 +627,15 @@ function AttendanceSessionRollPage() {
         confirmLabel="Cancel Session"
         onConfirm={onCancel}
         onCancel={() => setCancelConfirmOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={navigationConfirmOpen}
+        title="Discard unsaved changes?"
+        message={`You have unsaved attendance changes. Continue to ${pendingNavigation?.date || "the selected date"} without saving?`}
+        confirmLabel="Discard and continue"
+        onConfirm={() => performNavigation(pendingNavigation)}
+        onCancel={closeNavigationConfirm}
       />
 
       <div className="card" style={{ display: "grid", gap: 8 }}>

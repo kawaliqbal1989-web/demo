@@ -13,6 +13,9 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { VirtualAbacus } from "../../components/VirtualAbacus";
 import { generateWorksheetResultPdf } from "../../utils/pdfExport";
 
+const QUESTION_FONT_MIN_PX = 12;
+const QUESTION_FONT_MAX_PX = 28;
+
 function draftKey(attemptId) {
   return `student_attempt_draft_${attemptId}`;
 }
@@ -183,7 +186,7 @@ function StudentWorksheetAttemptPage() {
       const raw = localStorage.getItem("student_ws_question_font_px");
       const n = Number(raw);
       if (!Number.isFinite(n)) return 16;
-      return Math.min(28, Math.max(12, Math.round(n)));
+          return Math.min(QUESTION_FONT_MAX_PX, Math.max(QUESTION_FONT_MIN_PX, Math.round(n)));
     } catch {
       return 16;
     }
@@ -997,6 +1000,14 @@ function StudentWorksheetAttemptPage() {
     ? `${submittedCorrect}/${submittedTotal}`
     : (scoreSoFar.totalWithKey ? `${scoreSoFar.correct}/${scoreSoFar.totalWithKey}` : null);
 
+    const decreaseQuestionFont = () => {
+      setQuestionFontPx((prev) => Math.max(QUESTION_FONT_MIN_PX, prev - 1));
+    };
+
+    const increaseQuestionFont = () => {
+      setQuestionFontPx((prev) => Math.min(QUESTION_FONT_MAX_PX, prev + 1));
+    };
+
   const isExamWorksheet = String(worksheet?.generationMode || "").toUpperCase() === "EXAM";
   const useExamPageStyling = isColumnSumGrid;
   const worksheetTitle = String(worksheet?.title || "Worksheet");
@@ -1113,34 +1124,56 @@ function StudentWorksheetAttemptPage() {
               )}
             </button>
 
-            {!useExamPageStyling ? (
-              <>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>Font</span>
-                  <input
-                    type="range"
-                    min={12}
-                    max={28}
-                    step={1}
-                    value={questionFontPx}
-                    onChange={(e) => setQuestionFontPx(Math.min(28, Math.max(12, Number(e.target.value) || 16)))}
-                    aria-label="Question font size"
-                    disabled={loading}
-                    style={{ width: 140 }}
-                  />
-                  <span className="muted" style={{ fontSize: 12, width: 32, textAlign: "right" }}>{questionFontPx}px</span>
-                </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>Font</span>
+              <button
+                className="button secondary"
+                type="button"
+                style={{ width: "auto", fontSize: 12, padding: "4px 8px" }}
+                onClick={decreaseQuestionFont}
+                disabled={loading || questionFontPx <= QUESTION_FONT_MIN_PX}
+                aria-label="Decrease question font size"
+                title="Decrease question font size"
+              >
+                A-
+              </button>
+              {!useExamPageStyling ? (
+                <input
+                  type="range"
+                  min={QUESTION_FONT_MIN_PX}
+                  max={QUESTION_FONT_MAX_PX}
+                  step={1}
+                  value={questionFontPx}
+                  onChange={(e) => setQuestionFontPx(Math.min(QUESTION_FONT_MAX_PX, Math.max(QUESTION_FONT_MIN_PX, Number(e.target.value) || 16)))}
+                  aria-label="Question font size"
+                  disabled={loading}
+                  style={{ width: 140 }}
+                />
+              ) : null}
+              <button
+                className="button secondary"
+                type="button"
+                style={{ width: "auto", fontSize: 12, padding: "4px 8px" }}
+                onClick={increaseQuestionFont}
+                disabled={loading || questionFontPx >= QUESTION_FONT_MAX_PX}
+                aria-label="Increase question font size"
+                title="Increase question font size"
+              >
+                A+
+              </button>
+              <span className="muted" style={{ fontSize: 12, width: 32, textAlign: "right" }}>{questionFontPx}px</span>
+            </div>
 
-                <button
-                  className={showAbacus ? "button" : "button secondary"}
-                  type="button"
-                  style={{ width: "auto", fontSize: 12, padding: "4px 10px" }}
-                  onClick={() => setShowAbacus((v) => !v)}
-                  title={showAbacus ? "Hide virtual abacus" : "Show virtual abacus"}
-                >
-                  🧮 {showAbacus ? "Hide Abacus" : "Abacus"}
-                </button>
-              </>
+            {!useExamPageStyling ? (
+              <button
+                className={showAbacus ? "button" : "button secondary"}
+                type="button"
+                style={{ width: "auto", fontSize: 12, padding: "4px 10px" }}
+                onClick={() => setShowAbacus((v) => !v)}
+                title={showAbacus ? "Hide virtual abacus" : "Show virtual abacus"}
+              >
+                🧮 {showAbacus ? "Hide Abacus" : "Abacus"}
+              </button>
             ) : null}
 
             <div>

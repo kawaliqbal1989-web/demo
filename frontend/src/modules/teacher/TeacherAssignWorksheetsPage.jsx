@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { getTeacherAssignWorksheets, saveTeacherAssignWorksheets, teacherDirectReassign } from "../../services/teacherPortalService";
+import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
 function StudentLabel({ student }) {
   const label = student?.fullName
@@ -156,6 +157,7 @@ function TeacherAssignWorksheetsPage() {
                   const isAssigned = assignedIds.has(w.worksheetId);
                   const wasPrev = previousAssignedIds.has(w.worksheetId) || Boolean(w.wasPreviouslyAssigned);
                   const hasAttempt = (w.attempt ?? 0) > 0;
+                  const canReassign = Boolean(w.isSubmitted);
                   return (
                     <tr key={w.worksheetId}>
                       <td>{w.number}</td>
@@ -181,7 +183,7 @@ function TeacherAssignWorksheetsPage() {
                         </label>
                       </td>
                       <td>
-                        {hasAttempt ? (
+                        {canReassign ? (
                           <button
                             className="button secondary"
                             style={{ width: "auto", fontSize: 12, padding: "4px 10px" }}
@@ -193,6 +195,15 @@ function TeacherAssignWorksheetsPage() {
                             }}
                           >
                             Reassign
+                          </button>
+                        ) : hasAttempt ? (
+                          <button
+                            className="button secondary"
+                            style={{ width: "auto", fontSize: 12, padding: "4px 10px" }}
+                            disabled
+                            title="Only submitted worksheets can be reassigned."
+                          >
+                            Submit first
                           </button>
                         ) : null}
                       </td>
@@ -218,8 +229,8 @@ function TeacherAssignWorksheetsPage() {
                 await saveTeacherAssignWorksheets(studentId, {
                   worksheetIds: Array.from(assignedIds)
                 });
-              } catch {
-                setError("Failed to save assignments.");
+              } catch (err) {
+                setError(getFriendlyErrorMessage(err) || "Failed to save assignments.");
               } finally {
                 setSaving(false);
               }
@@ -308,7 +319,7 @@ function TeacherAssignWorksheetsPage() {
                     setAssignedIds(new Set(existing));
                     setPreviousAssignedIds(new Set(previous));
                   } catch (err) {
-                    setError(err?.response?.data?.message || "Reassignment failed.");
+                    setError(getFriendlyErrorMessage(err) || "Reassignment failed.");
                   } finally {
                     setReassigning(false);
                   }

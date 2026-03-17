@@ -1,4 +1,16 @@
 import { prisma } from "../lib/prisma.js";
+import { normalizeStoredUploadUrl } from "../utils/request-url.js";
+
+function sanitizeBrandingPartner(partner) {
+  if (!partner) {
+    return null;
+  }
+
+  return {
+    ...partner,
+    logoUrl: normalizeStoredUploadUrl(partner.logoUrl)
+  };
+}
 
 async function resolvePartnerByHierarchyNode({ tenantId, hierarchyNodeId }) {
   let currentId = hierarchyNodeId || null;
@@ -22,7 +34,7 @@ async function resolvePartnerByHierarchyNode({ tenantId, hierarchyNodeId }) {
     });
 
     if (partner) {
-      return partner;
+      return sanitizeBrandingPartner(partner);
     }
 
     // eslint-disable-next-line no-await-in-loop
@@ -68,7 +80,7 @@ async function resolveBusinessPartnerBrandingForAuth({ auth }) {
     });
 
     if (byCode) {
-      return byCode;
+      return sanitizeBrandingPartner(byCode);
     }
   }
 
@@ -102,7 +114,7 @@ async function resolveBusinessPartnerBrandingForAuth({ auth }) {
       });
 
       if (partner) {
-        return partner;
+        return sanitizeBrandingPartner(partner);
       }
     }
   }
@@ -142,7 +154,7 @@ async function resolveBusinessPartnerBrandingForAuth({ auth }) {
       });
 
       if (partner) {
-        return partner;
+        return sanitizeBrandingPartner(partner);
       }
     }
   }

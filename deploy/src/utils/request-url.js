@@ -11,6 +11,14 @@ const httpsPreferredHosts = new Set([
   "api.abacuseducation.online"
 ]);
 
+function shouldUpgradeUploadUrl(url) {
+  if (!url || url.protocol !== "http:" || !url.pathname.startsWith("/uploads/")) {
+    return false;
+  }
+
+  return httpsPreferredHosts.has(normalizeHostName(url.host));
+}
+
 function normalizeHostName(host) {
   const value = String(host || "").trim();
   if (!value) {
@@ -60,4 +68,25 @@ function buildUploadUrl(req, uploadPath) {
   return origin ? `${origin}${path}` : path;
 }
 
-export { buildUploadUrl, getRequestOrigin };
+function normalizeStoredUploadUrl(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+
+  if (!/^https?:\/\//i.test(text)) {
+    return text;
+  }
+
+  try {
+    const url = new URL(text);
+    if (shouldUpgradeUploadUrl(url)) {
+      url.protocol = "https:";
+    }
+    return url.toString();
+  } catch {
+    return text;
+  }
+}
+
+export { buildUploadUrl, getRequestOrigin, normalizeStoredUploadUrl };

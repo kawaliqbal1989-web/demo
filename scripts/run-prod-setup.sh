@@ -42,11 +42,15 @@ else
   npx prisma generate
 fi
 
+# Repair reassignment table casing for Linux/MySQL environments
+echo "Repairing worksheet reassignment table (if needed)..."
+npm run reassignment:repair
+
 # Optional: seed DB (uncomment if running first-time)
 # echo "Seeding database (first-time only)..."
 # npx prisma db seed
 
-echo "Done. Start or restart the Node app in cPanel (startup file: src/server.js)."
+echo "Done. Start or restart the Node app with PM2/systemd (startup file: src/server.js)."
 
 echo "Health check endpoints: /health and /health/db"
 

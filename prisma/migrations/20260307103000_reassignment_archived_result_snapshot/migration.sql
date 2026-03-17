@@ -1,2 +1,2 @@
-ALTER TABLE `WorksheetReassignmentRequest`
+ALTER TABLE `worksheetreassignmentrequest`
 ADD COLUMN `archivedResultSnapshot` JSON NULL;

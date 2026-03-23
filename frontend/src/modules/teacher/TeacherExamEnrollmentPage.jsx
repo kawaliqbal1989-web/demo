@@ -23,6 +23,7 @@ function TeacherExamEnrollmentPage() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [enrolling, setEnrolling] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
 
   const enrolledStudentIds = useMemo(() => {
     const ids = new Set();
@@ -108,8 +109,6 @@ function TeacherExamEnrollmentPage() {
       setEnrolling(false);
     }
   };
-
-  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
 
   const submitToCenter = async () => {
     if (submitting) return;

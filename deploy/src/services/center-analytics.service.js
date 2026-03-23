@@ -433,9 +433,9 @@ async function getCompetitionAnalytics({ tenantId, centerId, competitionId, leve
 
   const totalRows = await prisma.$queryRaw(Prisma.sql`
     SELECT COUNT(*) AS total
-    FROM CompetitionEnrollment ce
-    JOIN Student s ON s.id = ce.studentId AND s.tenantId = ce.tenantId
-    JOIN Competition c ON c.id = ce.competitionId AND c.tenantId = ce.tenantId
+    FROM competitionenrollment ce
+    JOIN student s ON s.id = ce.studentId AND s.tenantId = ce.tenantId
+    JOIN competition c ON c.id = ce.competitionId AND c.tenantId = ce.tenantId
     WHERE ${where}
   `);
   const total = toSafe(totalRows?.[0]?.total);
@@ -453,10 +453,10 @@ async function getCompetitionAnalytics({ tenantId, centerId, competitionId, leve
       ce.\`rank\`,
       c.startsAt,
       c.endsAt
-    FROM CompetitionEnrollment ce
-    JOIN Student s ON s.id = ce.studentId AND s.tenantId = ce.tenantId
-    JOIN Competition c ON c.id = ce.competitionId AND c.tenantId = ce.tenantId
-    LEFT JOIN Level l ON l.id = c.levelId
+    FROM competitionenrollment ce
+    JOIN student s ON s.id = ce.studentId AND s.tenantId = ce.tenantId
+    JOIN competition c ON c.id = ce.competitionId AND c.tenantId = ce.tenantId
+    LEFT JOIN level l ON l.id = c.levelId
     WHERE ${where}
     ORDER BY ce.totalScore DESC, ce.\`rank\` ASC
     LIMIT ${limit} OFFSET ${offset}
@@ -468,9 +468,9 @@ async function getCompetitionAnalytics({ tenantId, centerId, competitionId, leve
       COUNT(DISTINCT c.id) AS totalCompetitions,
       COUNT(*) AS totalEnrolled,
       COALESCE(AVG(ce.totalScore), 0) AS avgScore
-    FROM CompetitionEnrollment ce
-    JOIN Student s ON s.id = ce.studentId AND s.tenantId = ce.tenantId
-    JOIN Competition c ON c.id = ce.competitionId AND c.tenantId = ce.tenantId
+    FROM competitionenrollment ce
+    JOIN student s ON s.id = ce.studentId AND s.tenantId = ce.tenantId
+    JOIN competition c ON c.id = ce.competitionId AND c.tenantId = ce.tenantId
     WHERE ${where}
   `);
 
@@ -514,13 +514,13 @@ async function getStudentProgressAnalytics({ tenantId, centerId, batchId, teache
 
   let batchFilter = Prisma.sql``;
   if (batchId) {
-    batchFilter = Prisma.sql`AND EXISTS (SELECT 1 FROM Enrollment en WHERE en.studentId = s.id AND en.tenantId = ${tenantId} AND en.batchId = ${batchId} AND en.status = 'ACTIVE')`;
+    batchFilter = Prisma.sql`AND EXISTS (SELECT 1 FROM enrollment en WHERE en.studentId = s.id AND en.tenantId = ${tenantId} AND en.batchId = ${batchId} AND en.status = 'ACTIVE')`;
   }
 
   const where = Prisma.sql`${Prisma.join(conditions, " AND ")} ${batchFilter}`;
 
   const totalRows = await prisma.$queryRaw(Prisma.sql`
-    SELECT COUNT(*) AS total FROM Student s WHERE ${where}
+    SELECT COUNT(*) AS total FROM student s WHERE ${where}
   `);
   const total = toSafe(totalRows?.[0]?.total);
 
@@ -537,11 +537,11 @@ async function getStudentProgressAnalytics({ tenantId, centerId, batchId, teache
         (SELECT MAX(slph.createdAt) FROM StudentLevelProgressionHistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}),
         s.createdAt
       )) AS daysAtCurrentLevel,
-      (SELECT COUNT(*) FROM WorksheetSubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS worksheetsDone,
-      (SELECT COALESCE(AVG(ws.score), 0) FROM WorksheetSubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS avgScore,
-      (SELECT COUNT(*) FROM StudentLevelProgressionHistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}) AS totalPromotions
-    FROM Student s
-    LEFT JOIN Level l ON l.id = s.levelId
+      (SELECT COUNT(*) FROM worksheetsubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS worksheetsDone,
+      (SELECT COALESCE(AVG(ws.score), 0) FROM worksheetsubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS avgScore,
+      (SELECT COUNT(*) FROM studentlevelprogressionhistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}) AS totalPromotions
+    FROM student s
+    LEFT JOIN level l ON l.id = s.levelId
     WHERE ${where}
     ORDER BY l.rank ASC, s.admissionNo ASC
     LIMIT ${limit} OFFSET ${offset}
@@ -552,16 +552,16 @@ async function getStudentProgressAnalytics({ tenantId, centerId, batchId, teache
     SELECT
       COUNT(*) AS totalStudents,
       COALESCE(AVG(l.rank), 0) AS avgLevel
-    FROM Student s
-    LEFT JOIN Level l ON l.id = s.levelId
+    FROM student s
+    LEFT JOIN level l ON l.id = s.levelId
     WHERE ${where}
   `);
 
   const now30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const promotedRows = await prisma.$queryRaw(Prisma.sql`
     SELECT COUNT(DISTINCT slph.studentId) AS cnt
-    FROM StudentLevelProgressionHistory slph
-    JOIN Student s ON s.id = slph.studentId AND s.tenantId = slph.tenantId
+    FROM studentlevelprogressionhistory slph
+    JOIN student s ON s.id = slph.studentId AND s.tenantId = slph.tenantId
     WHERE slph.tenantId = ${tenantId}
       AND s.hierarchyNodeId = ${centerId}
       AND slph.createdAt >= ${now30}

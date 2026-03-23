@@ -333,8 +333,8 @@ async function getExamAnalytics({ tenantId, centerId, examCycleId, levelId, from
 
   const totalRows = await prisma.$queryRaw(Prisma.sql`
     SELECT COUNT(DISTINCT ee.id) AS total
-    FROM ExamEnrollmentEntry ee
-    JOIN Student s ON s.id = ee.studentId AND s.tenantId = ee.tenantId
+    FROM examenrollmententry ee
+    JOIN student s ON s.id = ee.studentId AND s.tenantId = ee.tenantId
     WHERE ${where}
   `);
   const total = toSafe(totalRows?.[0]?.total);
@@ -352,18 +352,18 @@ async function getExamAnalytics({ tenantId, centerId, examCycleId, levelId, from
       ec.resultStatus,
       COALESCE(sub.avgScore, 0) AS avgScore,
       COALESCE(sub.totalAttempts, 0) AS totalAttempts
-    FROM ExamEnrollmentEntry ee
-    JOIN Student s ON s.id = ee.studentId AND s.tenantId = ee.tenantId
-    JOIN ExamCycle ec ON ec.id = ee.examCycleId
-    LEFT JOIN Level l ON l.id = ee.enrolledLevelId
+    FROM examenrollmententry ee
+    JOIN student s ON s.id = ee.studentId AND s.tenantId = ee.tenantId
+    JOIN examcycle ec ON ec.id = ee.examCycleId
+    LEFT JOIN level l ON l.id = ee.enrolledLevelId
     LEFT JOIN (
       SELECT
         ws2.studentId,
         w.examCycleId,
         AVG(ws2.score) AS avgScore,
         COUNT(ws2.id) AS totalAttempts
-      FROM WorksheetSubmission ws2
-      JOIN Worksheet w ON w.id = ws2.worksheetId AND w.tenantId = ws2.tenantId
+      FROM worksheetsubmission ws2
+      JOIN worksheet w ON w.id = ws2.worksheetId AND w.tenantId = ws2.tenantId
       WHERE w.examCycleId IS NOT NULL AND ws2.tenantId = ${tenantId}
       GROUP BY ws2.studentId, w.examCycleId
     ) sub ON sub.studentId = ee.studentId AND sub.examCycleId = ee.examCycleId
@@ -378,13 +378,13 @@ async function getExamAnalytics({ tenantId, centerId, examCycleId, levelId, from
       COUNT(DISTINCT ee.id) AS totalEnrolled,
       SUM(CASE WHEN ec.resultStatus = 'PUBLISHED' THEN 1 ELSE 0 END) AS resultsPublished,
       COALESCE(AVG(sub.avgScore), 0) AS avgScore
-    FROM ExamEnrollmentEntry ee
-    JOIN Student s ON s.id = ee.studentId AND s.tenantId = ee.tenantId
-    JOIN ExamCycle ec ON ec.id = ee.examCycleId
+    FROM examenrollmententry ee
+    JOIN student s ON s.id = ee.studentId AND s.tenantId = ee.tenantId
+    JOIN examcycle ec ON ec.id = ee.examCycleId
     LEFT JOIN (
       SELECT ws2.studentId, w.examCycleId, AVG(ws2.score) AS avgScore
-      FROM WorksheetSubmission ws2
-      JOIN Worksheet w ON w.id = ws2.worksheetId AND w.tenantId = ws2.tenantId
+      FROM worksheetsubmission ws2
+      JOIN worksheet w ON w.id = ws2.worksheetId AND w.tenantId = ws2.tenantId
       WHERE w.examCycleId IS NOT NULL AND ws2.tenantId = ${tenantId}
       GROUP BY ws2.studentId, w.examCycleId
     ) sub ON sub.studentId = ee.studentId AND sub.examCycleId = ee.examCycleId

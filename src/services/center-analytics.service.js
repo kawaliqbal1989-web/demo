@@ -244,7 +244,7 @@ async function getMockTestAnalytics({ tenantId, centerId, batchId, from, to, lim
 
   const totalRows = await prisma.$queryRaw(Prisma.sql`
     SELECT COUNT(DISTINCT mt.id) AS total
-    FROM MockTest mt
+    FROM mocktest mt
     WHERE ${where}
   `);
   const total = toSafe(totalRows?.[0]?.total);
@@ -261,9 +261,9 @@ async function getMockTestAnalytics({ tenantId, centerId, batchId, from, to, lim
       COALESCE(AVG(mtr.marks), 0) AS avgMarks,
       COALESCE(MAX(mtr.marks), 0) AS maxObtainedMarks,
       SUM(CASE WHEN mtr.marks >= (mt.maxMarks * 0.5) THEN 1 ELSE 0 END) AS passCount
-    FROM MockTest mt
-    LEFT JOIN MockTestResult mtr ON mtr.mockTestId = mt.id AND mtr.tenantId = mt.tenantId
-    LEFT JOIN Batch b ON b.id = mt.batchId
+    FROM mocktest mt
+    LEFT JOIN mocktestresult mtr ON mtr.mockTestId = mt.id AND mtr.tenantId = mt.tenantId
+    LEFT JOIN batch b ON b.id = mt.batchId
     WHERE ${where}
     GROUP BY mt.id, mt.title, mt.date, mt.maxMarks, mt.status, b.name
     ORDER BY mt.date DESC, mt.id DESC
@@ -278,8 +278,8 @@ async function getMockTestAnalytics({ tenantId, centerId, batchId, from, to, lim
       COUNT(DISTINCT mtr.studentId) AS totalStudentsTested,
       SUM(CASE WHEN mtr.marks >= (mt.maxMarks * 0.5) THEN 1 ELSE 0 END) AS totalPassed,
       COUNT(mtr.studentId) AS totalResults
-    FROM MockTest mt
-    LEFT JOIN MockTestResult mtr ON mtr.mockTestId = mt.id AND mtr.tenantId = mt.tenantId
+    FROM mocktest mt
+    LEFT JOIN mocktestresult mtr ON mtr.mockTestId = mt.id AND mtr.tenantId = mt.tenantId
     WHERE ${where}
   `);
 

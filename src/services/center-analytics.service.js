@@ -41,16 +41,16 @@ async function getAttendanceAnalytics({ tenantId, centerId, batchId, teacherUser
 
   let teacherJoin = Prisma.sql``;
   if (teacherUserId) {
-    teacherJoin = Prisma.sql`JOIN Enrollment enr ON enr.studentId = e.studentId AND enr.tenantId = ${tenantId} AND enr.hierarchyNodeId = ${centerId} AND enr.status = 'ACTIVE' AND enr.assignedTeacherUserId = ${teacherUserId}`;
+    teacherJoin = Prisma.sql`JOIN enrollment enr ON enr.studentId = e.studentId AND enr.tenantId = ${tenantId} AND enr.hierarchyNodeId = ${centerId} AND enr.status = 'ACTIVE' AND enr.assignedTeacherUserId = ${teacherUserId}`;
   }
 
   const where = Prisma.join(conditions, " AND ");
 
   const totalRows = await prisma.$queryRaw(Prisma.sql`
     SELECT COUNT(DISTINCT e.studentId) AS total
-    FROM AttendanceEntry e
-    JOIN AttendanceSession ses ON ses.id = e.sessionId AND ses.tenantId = e.tenantId
-    JOIN Student s ON s.id = e.studentId AND s.tenantId = e.tenantId
+    FROM attendanceentry e
+    JOIN attendancesession ses ON ses.id = e.sessionId AND ses.tenantId = e.tenantId
+    JOIN student s ON s.id = e.studentId AND s.tenantId = e.tenantId
     ${teacherJoin}
     WHERE ${where}
   `);
@@ -68,10 +68,10 @@ async function getAttendanceAnalytics({ tenantId, centerId, batchId, teacherUser
       SUM(CASE WHEN e.status = 'LATE' THEN 1 ELSE 0 END) AS lateCount,
       SUM(CASE WHEN e.status = 'EXCUSED' THEN 1 ELSE 0 END) AS excusedCount,
       b.name AS batchName
-    FROM AttendanceEntry e
-    JOIN AttendanceSession ses ON ses.id = e.sessionId AND ses.tenantId = e.tenantId
-    JOIN Student s ON s.id = e.studentId AND s.tenantId = e.tenantId
-    JOIN Batch b ON b.id = ses.batchId
+    FROM attendanceentry e
+    JOIN attendancesession ses ON ses.id = e.sessionId AND ses.tenantId = e.tenantId
+    JOIN student s ON s.id = e.studentId AND s.tenantId = e.tenantId
+    JOIN batch b ON b.id = ses.batchId
     ${teacherJoin}
     WHERE ${where}
     GROUP BY e.studentId, s.admissionNo, s.firstName, s.lastName, b.name
@@ -85,9 +85,9 @@ async function getAttendanceAnalytics({ tenantId, centerId, batchId, teacherUser
       COUNT(DISTINCT ses.id) AS totalSessions,
       SUM(CASE WHEN e.status IN ('PRESENT', 'LATE') THEN 1 ELSE 0 END) AS totalPresent,
       COUNT(*) AS totalEntries
-    FROM AttendanceEntry e
-    JOIN AttendanceSession ses ON ses.id = e.sessionId AND ses.tenantId = e.tenantId
-    JOIN Student s ON s.id = e.studentId AND s.tenantId = e.tenantId
+    FROM attendanceentry e
+    JOIN attendancesession ses ON ses.id = e.sessionId AND ses.tenantId = e.tenantId
+    JOIN student s ON s.id = e.studentId AND s.tenantId = e.tenantId
     ${teacherJoin}
     WHERE ${where}
   `);

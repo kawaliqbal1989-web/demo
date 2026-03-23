@@ -615,6 +615,12 @@ function TeacherAttendancePage() {
                 <button className="button secondary" style={{ width: "auto" }} disabled={!canEdit} onClick={() => setAll("ABSENT")}>
                   Mark all absent
                 </button>
+                <button className="button secondary" style={{ width: "auto" }} disabled={!canEdit} onClick={() => setAll("LATE")}>
+                  Mark all late
+                </button>
+                <button className="button secondary" style={{ width: "auto" }} disabled={!canEdit} onClick={() => setAll("EXCUSED")}>
+                  Mark all excused
+                </button>
                 <button className="button secondary" style={{ width: "auto" }} disabled={!canEdit} onClick={() => setBulkNoteOpen(true)}>
                   Note all student
                 </button>

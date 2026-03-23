@@ -534,7 +534,7 @@ async function getStudentProgressAnalytics({ tenantId, centerId, batchId, teache
       l.name AS levelName,
       l.rank AS levelRank,
       DATEDIFF(NOW(), COALESCE(
-        (SELECT MAX(slph.createdAt) FROM StudentLevelProgressionHistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}),
+        (SELECT MAX(slph.createdAt) FROM studentlevelprogressionhistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}),
         s.createdAt
       )) AS daysAtCurrentLevel,
       (SELECT COUNT(*) FROM worksheetsubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS worksheetsDone,

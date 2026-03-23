@@ -147,7 +147,7 @@ async function getWorksheetAnalytics({ tenantId, centerId, batchId, teacherUserI
 
   let batchFilter = Prisma.sql``;
   if (batchId) {
-    batchFilter = Prisma.sql`AND EXISTS (SELECT 1 FROM Enrollment en WHERE en.studentId = s.id AND en.tenantId = ${tenantId} AND en.batchId = ${batchId} AND en.status = 'ACTIVE')`;
+    batchFilter = Prisma.sql`AND EXISTS (SELECT 1 FROM enrollment en WHERE en.studentId = s.id AND en.tenantId = ${tenantId} AND en.batchId = ${batchId} AND en.status = 'ACTIVE')`;
   }
 
   let dateFilter = Prisma.sql``;
@@ -158,8 +158,8 @@ async function getWorksheetAnalytics({ tenantId, centerId, batchId, teacherUserI
 
   const totalRows = await prisma.$queryRaw(Prisma.sql`
     SELECT COUNT(DISTINCT s.id) AS total
-    FROM Student s
-    LEFT JOIN WorksheetAssignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
+    FROM student s
+    LEFT JOIN worksheetassignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
     WHERE ${where}
     AND wa.worksheetId IS NOT NULL
   `);
@@ -177,10 +177,10 @@ async function getWorksheetAnalytics({ tenantId, centerId, batchId, teacherUserI
       COALESCE(AVG(ws.score), 0) AS avgScore,
       COALESCE(MAX(ws.score), 0) AS bestScore,
       COALESCE(AVG(ws.completionTimeSeconds), 0) AS avgTime
-    FROM Student s
-    LEFT JOIN Level l ON l.id = s.levelId
-    LEFT JOIN WorksheetAssignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
-    LEFT JOIN WorksheetSubmission ws ON ws.studentId = s.id AND ws.worksheetId = wa.worksheetId AND ws.tenantId = ${tenantId}
+    FROM student s
+    LEFT JOIN level l ON l.id = s.levelId
+    LEFT JOIN worksheetassignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
+    LEFT JOIN worksheetsubmission ws ON ws.studentId = s.id AND ws.worksheetId = wa.worksheetId AND ws.tenantId = ${tenantId}
     WHERE ${where}
     AND wa.worksheetId IS NOT NULL
     GROUP BY s.id, s.admissionNo, s.firstName, s.lastName, l.name
@@ -195,9 +195,9 @@ async function getWorksheetAnalytics({ tenantId, centerId, batchId, teacherUserI
       COUNT(DISTINCT CASE WHEN ws.id IS NOT NULL THEN CONCAT(wa.studentId, '-', wa.worksheetId) END) AS totalCompleted,
       COALESCE(AVG(ws.score), 0) AS avgAccuracy,
       COALESCE(AVG(ws.completionTimeSeconds), 0) AS avgTime
-    FROM Student s
-    LEFT JOIN WorksheetAssignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
-    LEFT JOIN WorksheetSubmission ws ON ws.studentId = s.id AND ws.worksheetId = wa.worksheetId AND ws.tenantId = ${tenantId}
+    FROM student s
+    LEFT JOIN worksheetassignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
+    LEFT JOIN worksheetsubmission ws ON ws.studentId = s.id AND ws.worksheetId = wa.worksheetId AND ws.tenantId = ${tenantId}
     WHERE ${where}
     AND wa.worksheetId IS NOT NULL
   `);

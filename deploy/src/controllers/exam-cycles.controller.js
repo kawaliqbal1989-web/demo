@@ -233,6 +233,33 @@ function withinEnrollmentWindow(examCycle, now = new Date()) {
   return now.getTime() >= new Date(examCycle.enrollmentStartAt).getTime() && now.getTime() <= new Date(examCycle.enrollmentEndAt).getTime();
 }
 
+async function resolveTeacherCenterNodeId({ tenantId, teacherUserId, requestedNodeId }) {
+  if (requestedNodeId) {
+    return requestedNodeId;
+  }
+
+  const teacherUser = await prisma.authUser.findFirst({
+    where: { id: teacherUserId, tenantId },
+    select: { hierarchyNodeId: true }
+  });
+
+  if (teacherUser?.hierarchyNodeId) {
+    return teacherUser.hierarchyNodeId;
+  }
+
+  const recentEnrollment = await prisma.enrollment.findFirst({
+    where: {
+      tenantId,
+      assignedTeacherUserId: teacherUserId,
+      hierarchyNodeId: { not: null }
+    },
+    orderBy: { createdAt: "desc" },
+    select: { hierarchyNodeId: true }
+  });
+
+  return recentEnrollment?.hierarchyNodeId || null;
+}
+
 async function getOrCreateTeacherList({ tenantId, examCycleId, teacherUserId, centerNodeId }) {
   const scopeKey = `TEACHER:${teacherUserId}`;
 
@@ -263,7 +290,15 @@ async function getOrCreateTeacherList({ tenantId, examCycleId, teacherUserId, ce
 
 const getTeacherList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
-  const centerNodeId = req.auth.hierarchyNodeId;
+  const centerNodeId = await resolveTeacherCenterNodeId({
+    tenantId: req.auth.tenantId,
+    teacherUserId: req.auth.userId,
+    requestedNodeId: req.auth.hierarchyNodeId
+  });
+
+  if (!centerNodeId) {
+    return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
+  }
 
   const list = await getOrCreateTeacherList({
     tenantId: req.auth.tenantId,
@@ -300,7 +335,13 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
     return res.apiError(400, "studentIds[] is required", "VALIDATION_ERROR");
   }
 
-  if (!req.auth.hierarchyNodeId) {
+  const centerNodeId = await resolveTeacherCenterNodeId({
+    tenantId: req.auth.tenantId,
+    teacherUserId: req.auth.userId,
+    requestedNodeId: req.auth.hierarchyNodeId
+  });
+
+  if (!centerNodeId) {
     return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
   }
 
@@ -325,7 +366,7 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     examCycleId,
     teacherUserId: req.auth.userId,
-    centerNodeId: req.auth.hierarchyNodeId
+    centerNodeId
   });
 
   if (list.locked && list.status === "SUBMITTED_TO_CENTER") {
@@ -335,7 +376,7 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
   const activeEnrollments = await prisma.enrollment.findMany({
     where: {
       tenantId: req.auth.tenantId,
-      hierarchyNodeId: req.auth.hierarchyNodeId,
+      hierarchyNodeId: centerNodeId,
       status: "ACTIVE",
       assignedTeacherUserId: req.auth.userId,
       studentId: { in: studentIds }
@@ -425,7 +466,13 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
 const submitTeacherListToCenter = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
 
-  if (!req.auth.hierarchyNodeId) {
+  const centerNodeId = await resolveTeacherCenterNodeId({
+    tenantId: req.auth.tenantId,
+    teacherUserId: req.auth.userId,
+    requestedNodeId: req.auth.hierarchyNodeId
+  });
+
+  if (!centerNodeId) {
     return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
   }
 
@@ -450,7 +497,7 @@ const submitTeacherListToCenter = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     examCycleId,
     teacherUserId: req.auth.userId,
-    centerNodeId: req.auth.hierarchyNodeId
+    centerNodeId
   });
 
   const entriesCount = await prisma.examEnrollmentListItem.count({
@@ -493,7 +540,7 @@ const submitTeacherListToCenter = asyncHandler(async (req, res) => {
           tenantId: req.auth.tenantId,
           isActive: true,
           role: "CENTER",
-          hierarchyNodeId: req.auth.hierarchyNodeId
+          hierarchyNodeId: centerNodeId
         },
         select: { id: true },
         take: 500

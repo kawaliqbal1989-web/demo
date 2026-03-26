@@ -86,6 +86,18 @@ Node.js + Express + Prisma + MySQL backend with:
    npm run dev
    ```
 
+## Deployment Notes
+
+- Backend-only production updates: pull latest code and restart PM2. Root does not require `npm run build`.
+- Frontend production build lives in `frontend/` (`npm run build` there), and full packaging is available via:
+   ```bash
+   npm run release:prepare
+   ```
+- Post-deploy verification:
+   ```bash
+   npm run verify:deploy -- --base https://abacuseducation.online
+   ```
+
 ## Standard Response Shape
 
 All API responses follow:

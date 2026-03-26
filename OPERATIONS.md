@@ -2,6 +2,43 @@
 
 Operational runbook for AbacusWeb backend.
 
+## VPS Quick Deploy (Hostinger or Generic Debian)
+
+Use one of these two paths based on what changed.
+
+### A) Backend-Only Hotfix (No frontend changes)
+
+Run on server app directory:
+
+1. `git pull origin main`
+2. `npm ci --omit=dev` (skip if dependencies unchanged)
+3. `npm run prisma:deploy` (only if migrations were included)
+4. `pm2 restart all --update-env`
+5. `npm run verify:deploy -- --base https://abacuseducation.online`
+
+Important:
+- Root `package.json` intentionally has no `build` script.
+- For backend-only updates, do not run `npm run build` at repo root.
+
+### B) Full Release (Frontend and backend changes)
+
+Local or CI prepare step:
+
+1. `npm ci`
+2. `npm run release:prepare`
+
+Server apply step:
+
+1. Upload prepared `deploy/` artifact (or equivalent)
+2. `npm ci --omit=dev`
+3. `npm run prisma:deploy`
+4. `pm2 restart all --update-env`
+5. `npm run verify:deploy -- --base https://abacuseducation.online`
+
+Routing note:
+- In production, Express serves `frontend/dist` and falls back to `index.html` for non-API routes.
+- If Nginx is used, proxy app traffic to Node/PM2 so SPA deep links like `/teacher/exam-cycles/:id` resolve correctly.
+
 ## 1) Deployment Steps (Local -> Staging -> Production)
 
 ## Local

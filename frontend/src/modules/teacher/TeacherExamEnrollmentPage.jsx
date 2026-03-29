@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
@@ -51,7 +51,22 @@ function TeacherExamEnrollmentPage() {
     return status === "DRAFT";
   }, [list]);
 
-  const load = async () => {
+  const items = useMemo(() => {
+    return Array.isArray(list?.items) ? list.items : [];
+  }, [list]);
+
+  const listStatus = useMemo(() => String(list?.status || ""), [list]);
+
+  const load = useCallback(async () => {
+    if (!examCycleId) {
+      setList(null);
+      setMyStudents([]);
+      setSelectedIds(new Set());
+      setError("Missing exam cycle id.");
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -68,18 +83,15 @@ function TeacherExamEnrollmentPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [examCycleId]);
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [examCycleId]);
+  }, [load]);
 
   if (loading) {
     return <LoadingState label="Loading exam enrollment..." />;
   }
-
-  const items = Array.isArray(list?.items) ? list.items : [];
 
   const toggleSelect = (studentId) => {
     setSelectedIds((prev) => {
@@ -132,7 +144,7 @@ function TeacherExamEnrollmentPage() {
         <div>
           <h2 style={{ margin: 0 }}>Exam Enrollment</h2>
           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-            Status: <b>{list?.status || ""}</b> {list?.locked ? "(Locked)" : ""}
+            Status: <b>{listStatus}</b> {list?.locked ? "(Locked)" : ""}
           </div>
         </div>
         <button className="button secondary" type="button" onClick={() => navigate(-1)} style={{ width: "auto" }}>
@@ -198,7 +210,7 @@ function TeacherExamEnrollmentPage() {
             className="button"
             type="button"
             onClick={() => setSubmitConfirmOpen(true)}
-            disabled={submitting || items.length === 0 || String(list?.status || "") === "SUBMITTED_TO_CENTER"}
+            disabled={submitting || items.length === 0 || listStatus === "SUBMITTED_TO_CENTER"}
             style={{ width: "auto" }}
           >
             {submitting ? "Submitting..." : "Submit to Center"}

@@ -1067,7 +1067,11 @@ const listStudents = asyncHandler(async (req, res) => {
     });
   }
 
-  return res.apiSuccess("Students fetched", { items: data, total, limit, offset });
+  res.setHeader("X-Pagination-Limit", String(limit));
+  res.setHeader("X-Pagination-Offset", String(offset));
+  res.setHeader("X-Pagination-Total", String(total));
+
+  return res.apiSuccess("Students fetched", data);
 });
 
 const getStudent = asyncHandler(async (req, res) => {

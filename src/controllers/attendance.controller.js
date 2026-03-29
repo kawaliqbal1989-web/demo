@@ -958,7 +958,7 @@ const reviewAttendanceCorrectionRequest = asyncHandler(async (req, res) => {
     }
 
     if (operations.length) {
-      await tx.$transaction(operations);
+      await Promise.all(operations);
     }
 
     await tx.attendanceSession.update({

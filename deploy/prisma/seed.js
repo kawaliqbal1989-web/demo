@@ -231,6 +231,33 @@ async function main() {
     parentUserId: centerAuth.id
   });
 
+  const teacherOneAuth = await prisma.authUser.findFirstOrThrow({
+    where: {
+      tenantId: tenant.id,
+      email: "teacher.one@abacusweb.local"
+    },
+    select: { id: true }
+  });
+
+  await prisma.teacherProfile.upsert({
+    where: { authUserId: teacherOneAuth.id },
+    update: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      fullName: "Teacher One",
+      status: "ACTIVE",
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      authUserId: teacherOneAuth.id,
+      fullName: "Teacher One",
+      status: "ACTIVE",
+      isActive: true
+    }
+  });
+
   await prisma.superadmin.upsert({
     where: {
       tenantId_email: {

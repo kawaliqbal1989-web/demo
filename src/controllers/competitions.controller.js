@@ -172,13 +172,12 @@ const listCompetitions = asyncHandler(async (req, res) => {
     prisma.competition.count({ where })
   ]);
 
-  return res.apiSuccess("Competitions fetched", {
-    items,
-    total,
-    limit,
-    offset,
-    legacyResultStatus
-  });
+  res.setHeader("X-Pagination-Limit", String(limit));
+  res.setHeader("X-Pagination-Offset", String(offset));
+  res.setHeader("X-Pagination-Total", String(total));
+  res.setHeader("X-Legacy-Result-Status", legacyResultStatus ? "true" : "false");
+
+  return res.apiSuccess("Competitions fetched", items);
 });
 
 const getCompetitionDetail = asyncHandler(async (req, res) => {

@@ -47,7 +47,7 @@ async function upsertUser({
   hierarchyNodeId = null,
   parentUserId = null,
   studentId = null,
-  mustChangePassword = true
+  mustChangePassword = false
 }) {
   return prisma.authUser.upsert({
     where: {
@@ -229,6 +229,33 @@ async function main() {
     passwordHash,
     hierarchyNodeId: school.id,
     parentUserId: centerAuth.id
+  });
+
+  const teacherOneAuth = await prisma.authUser.findFirstOrThrow({
+    where: {
+      tenantId: tenant.id,
+      email: "teacher.one@abacusweb.local"
+    },
+    select: { id: true }
+  });
+
+  await prisma.teacherProfile.upsert({
+    where: { authUserId: teacherOneAuth.id },
+    update: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      fullName: "Teacher One",
+      status: "ACTIVE",
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      authUserId: teacherOneAuth.id,
+      fullName: "Teacher One",
+      status: "ACTIVE",
+      isActive: true
+    }
   });
 
   await prisma.superadmin.upsert({

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
@@ -19,7 +19,7 @@ function SuperadminExamResultsPage() {
   const [acting, setActing] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null); // "publish" | "unpublish" | null
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -31,12 +31,11 @@ function SuperadminExamResultsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [examCycleId]);
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [examCycleId]);
+  }, [load]);
 
   const canPublish = useMemo(() => resultStatus !== "PUBLISHED", [resultStatus]);
   const canUnpublish = useMemo(() => resultStatus === "PUBLISHED", [resultStatus]);
@@ -54,11 +53,15 @@ function SuperadminExamResultsPage() {
   const executeAction = async () => {
     const action = confirmAction;
     setConfirmAction(null);
+    if (!action) {
+      return;
+    }
     setActing(true);
     setError("");
     try {
       if (action === "publish") await publishExamResults(examCycleId);
       else await unpublishExamResults(examCycleId);
+      toast.success(action === "publish" ? "Results published." : "Results unpublished.");
       await load();
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || `Failed to ${action} results.`);
@@ -76,7 +79,7 @@ function SuperadminExamResultsPage() {
     }
   };
 
-  if (loading) {
+  if (loading && !rows.length) {
     return <LoadingState label="Loading exam results..." />;
   }
 
@@ -125,6 +128,7 @@ function SuperadminExamResultsPage() {
       <div className="card" style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 600 }}>Results</div>
         <DataTable
+          emptyMessage={error ? "Unable to load exam results. Use Refresh to retry." : resultStatus === "PUBLISHED" ? "No published results found." : "No exam results available yet."}
           columns={[
             { key: "admissionNo", header: "Student Code", render: (r) => r?.admissionNo || "" },
             { key: "name", header: "Student Name", render: (r) => r?.studentName || "" },

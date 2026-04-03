@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
@@ -6,10 +6,17 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { listExamCycles } from "../../services/examCyclesService";
 
 function formatDateTime(value) {
-  if (!value) return "";
+  if (!value) return "—";
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString();
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  });
+}
+
+function formatDateRange(startValue, endValue) {
+  return `${formatDateTime(startValue)} → ${formatDateTime(endValue)}`;
 }
 
 function SuperadminExamCyclesPage() {
@@ -21,26 +28,25 @@ function SuperadminExamCyclesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const load = async (next = { limit, offset }) => {
+  const load = useCallback(async ({ limit: nextLimit = 20, offset: nextOffset = 0 } = {}) => {
     setLoading(true);
     setError("");
     try {
-      const data = await listExamCycles(next);
+      const data = await listExamCycles({ limit: nextLimit, offset: nextOffset });
       setRows(data?.data?.items || []);
-      setLimit(data?.data?.limit ?? next.limit);
-      setOffset(data?.data?.offset ?? next.offset);
+      setLimit(data?.data?.limit ?? nextLimit);
+      setOffset(data?.data?.offset ?? nextOffset);
       setTotal(data?.data?.total ?? 0);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load exam cycles.");
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    void load({ limit, offset });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    void load({ limit: 20, offset: 0 });
+  }, [load]);
 
   if (loading && !rows.length) {
     return <LoadingState label="Loading exam cycles..." />;
@@ -67,8 +73,11 @@ function SuperadminExamCyclesPage() {
         <div style={{ color: "var(--muted)" }}>
           Total: {total}
         </div>
+        <div style={{ color: "var(--muted)" }}>
+          Showing: {rows.length}
+        </div>
         <div style={{ flex: 1 }} />
-        <button className="button secondary" type="button" onClick={() => void load({ limit, offset })} style={{ width: "auto" }}>
+        <button className="button secondary" type="button" onClick={() => void load({ limit, offset })} style={{ width: "auto" }} disabled={loading}>
           Refresh
         </button>
       </div>
@@ -80,13 +89,14 @@ function SuperadminExamCyclesPage() {
       ) : null}
 
       <DataTable
+        emptyMessage={error ? "Unable to load exam cycles. Use Refresh to retry." : "No exam cycles found."}
         columns={[
           { key: "code", header: "Code" },
           { key: "name", header: "Name" },
-          { key: "bpCode", header: "BP Code", render: (r) => r?.businessPartner?.code || "" },
-          { key: "bpName", header: "BP Name", render: (r) => r?.businessPartner?.name || "" },
-          { key: "enrollment", header: "Enrollment", render: (r) => `${formatDateTime(r.enrollmentStartAt)} → ${formatDateTime(r.enrollmentEndAt)}` },
-          { key: "exam", header: "Exam Window", render: (r) => `${formatDateTime(r.examStartsAt)} → ${formatDateTime(r.examEndsAt)}` },
+          { key: "bpCode", header: "BP Code", render: (r) => r?.businessPartner?.code || "Unassigned" },
+          { key: "bpName", header: "BP Name", render: (r) => r?.businessPartner?.name || "No business partner linked" },
+          { key: "enrollment", header: "Enrollment", render: (r) => formatDateRange(r.enrollmentStartAt, r.enrollmentEndAt) },
+          { key: "exam", header: "Exam Window", render: (r) => formatDateRange(r.examStartsAt, r.examEndsAt) },
           { key: "duration", header: "Duration", render: (r) => `${r.examDurationMinutes} min` },
           { key: "resultStatus", header: "Result" },
           {
@@ -112,6 +122,7 @@ function SuperadminExamCyclesPage() {
         limit={limit}
         offset={offset}
         count={rows.length}
+        total={total}
         onChange={(next) => {
           setLimit(next.limit);
           setOffset(next.offset);

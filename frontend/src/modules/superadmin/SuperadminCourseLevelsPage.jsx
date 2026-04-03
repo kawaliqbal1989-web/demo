@@ -3,9 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusBadge } from "../../components/StatusBadge";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getCourse } from "../../services/coursesService";
-import { createCourseLevel, listCourseLevels, updateCourseLevel } from "../../services/courseLevelsService";
+import { createCourseLevel, deleteCourseLevel, listCourseLevels, updateCourseLevel } from "../../services/courseLevelsService";
 
 function statusFromLevel(level) {
   return level?.isActive === false ? "INACTIVE" : "ACTIVE";
@@ -30,6 +31,9 @@ function SuperadminCourseLevelsPage() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [statusActionTarget, setStatusActionTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     levelNumber: "1",
     title: "",
@@ -148,6 +152,62 @@ function SuperadminCourseLevelsPage() {
     void load({ limit, offset: 0, status: nextStatus });
   };
 
+  const executeStatusAction = async () => {
+    const target = statusActionTarget;
+    setStatusActionTarget(null);
+    if (!target?.level) {
+      return;
+    }
+
+    try {
+      await updateCourseLevel({
+        courseId,
+        id: target.level.id,
+        status: target.action === "ACTIVATE" ? "ACTIVE" : "ARCHIVED"
+      });
+
+      if (editingId === target.level.id) {
+        setForm((prev) => ({
+          ...prev,
+          status: target.action === "ACTIVATE" ? "ACTIVE" : "INACTIVE"
+        }));
+      }
+
+      await load({ limit, offset, status: statusFilter });
+    } catch (err) {
+      setFormError(
+        getFriendlyErrorMessage(err) ||
+          (target.action === "ACTIVATE" ? "Failed to activate level." : "Failed to deactivate level.")
+      );
+    }
+  };
+
+  const executeDelete = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target?.id) {
+      return;
+    }
+
+    setDeleting(true);
+    setFormError("");
+    try {
+      await deleteCourseLevel({ courseId, id: target.id });
+      if (editingId === target.id) {
+        resetForm();
+      }
+
+      const shouldResetPage = rows.length === 1 && offset > 0;
+      const nextOffset = shouldResetPage ? Math.max(0, offset - limit) : offset;
+      setOffset(nextOffset);
+      await load({ limit, offset: nextOffset, status: statusFilter });
+    } catch (err) {
+      setFormError(getFriendlyErrorMessage(err) || "Failed to delete level.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <section style={{ display: "grid", gap: 12 }}>
       <div>
@@ -155,6 +215,25 @@ function SuperadminCourseLevelsPage() {
         <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
           Manage levels 1-15 for the selected course.
         </p>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <button
+          className="button secondary"
+          type="button"
+          style={{ width: "auto" }}
+          onClick={() => navigate("/superadmin/courses")}
+        >
+          Back to Courses
+        </button>
+        <button
+          className="button secondary"
+          type="button"
+          style={{ width: "auto" }}
+          onClick={() => void load({ limit, offset, status: statusFilter })}
+        >
+          Refresh
+        </button>
       </div>
 
       {error ? <div className="card"><p className="error">{error}</p></div> : null}
@@ -256,6 +335,49 @@ function SuperadminCourseLevelsPage() {
                 >
                   Engine
                 </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${r.levelNumber}/question-bank`)}
+                >
+                  Question Bank
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${r.levelNumber}/worksheets`)}
+                >
+                  Worksheets
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => setStatusActionTarget({ level: r, action: "ACTIVATE" })}
+                  disabled={r?.isActive === true}
+                >
+                  Activate
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => setStatusActionTarget({ level: r, action: "DEACTIVATE" })}
+                  disabled={r?.isActive === false}
+                >
+                  Deactivate
+                </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => setDeleteTarget(r)}
+                  disabled={deleting}
+                >
+                  Delete
+                </button>
               </div>
             )
           }
@@ -273,6 +395,28 @@ function SuperadminCourseLevelsPage() {
           setOffset(next.offset);
           void load({ ...next, status: statusFilter });
         }}
+      />
+
+      <ConfirmDialog
+        open={!!statusActionTarget}
+        title={statusActionTarget?.action === "ACTIVATE" ? "Activate Level" : "Deactivate Level"}
+        message={`${statusActionTarget?.action === "ACTIVATE" ? "Activate" : "Deactivate"} Level ${statusActionTarget?.level?.levelNumber || ""} ${statusActionTarget?.level?.title ? `(${statusActionTarget.level.title})` : ""}?`}
+        confirmLabel={statusActionTarget?.action === "ACTIVATE" ? "Activate" : "Deactivate"}
+        onCancel={() => setStatusActionTarget(null)}
+        onConfirm={() => void executeStatusAction()}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Level"
+        message={`Delete Level ${deleteTarget?.levelNumber || ""} ${deleteTarget?.title ? `(${deleteTarget.title})` : ""}? This removes the course-level entry permanently.`}
+        confirmLabel={deleting ? "Deleting..." : "Delete Level"}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+          }
+        }}
+        onConfirm={() => void executeDelete()}
       />
     </section>
   );

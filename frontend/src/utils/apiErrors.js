@@ -19,16 +19,40 @@ const FRIENDLY_BY_CODE = {
   PRACTICE_NOT_STARTED: "Practice is not started yet.",
   FEATURE_NOT_ASSIGNED: "This feature is not enabled for your student account. Ask your center to assign it first.",
   PRACTICE_CLOSED: "Practice window is closed.",
+  ENROLLMENT_WINDOW_CLOSED: "Enrollment is closed for this exam cycle.",
   EXAM_NOT_LIVE: "Exam is not live yet.",
   EXAM_WINDOW_CLOSED: "Exam window is closed.",
   EXAM_DEVICE_LOCKED: "This exam attempt is locked to another device/session.",
+  EXAM_CYCLE_NOT_FOUND: "This exam cycle was not found. Refresh and try again.",
+  EXAM_CODE_CONFLICT: "Could not generate a unique exam code. Please try again.",
+  EXAM_LIST_EMPTY: "This enrollment list has no students yet.",
+  EXAM_LIST_ITEM_NOT_FOUND: "That entry is no longer in the combined list. Refresh and try again.",
+  EXAM_LIST_NOT_FOUND: "This enrollment list was not found. Refresh and try again.",
+  EXAM_LIST_TYPE_CONFLICT: "This action is not allowed for the current list type.",
+  EXAM_WORKSHEET_SELECTION_REQUIRED: "Select exam worksheets before approving this list.",
+  EXAM_WORKSHEET_SELECTION_MISSING: "No exam worksheet selection was saved for this request.",
+  EXAM_WORKSHEET_SELECTION_INCOMPLETE: "Select an exam worksheet for every requested level before approving.",
+  EXAM_WORKSHEET_SELECTION_LEVEL_INVALID: "One or more worksheet selections reference an invalid level.",
+  EXAM_WORKSHEET_NOT_FOUND: "A selected exam worksheet was not found.",
+  EXAM_WORKSHEET_LEVEL_MISMATCH: "A selected exam worksheet does not match the requested level.",
+  EXAM_WORKSHEET_SOURCE_INVALID: "Select a base worksheet, not an exam-cycle worksheet.",
+  EXAM_WORKSHEET_NOT_PUBLISHED: "Selected exam worksheets must be published before approval.",
+  EXAM_WORKSHEET_QUESTIONS_MISSING: "A selected exam worksheet has no questions.",
   ENROLLMENT_EXISTS: "This student is already enrolled in this batch.",
   TEACHER_HAS_ACTIVE_STUDENTS: "Cannot suspend teacher while active assigned students exist. Shift or unassign them first.",
-  INVALID_TARGET_TEACHER: "Please choose an active teacher from the same center."
+  INVALID_TARGET_TEACHER: "Please choose an active teacher from the same center.",
+  TEACHER_STUDENT_FORBIDDEN: "One or more selected students are not assigned to this teacher.",
+  CENTER_SCOPE_REQUIRED: "Your account is missing a center scope for this action.",
+  DUPLICATE_ENROLLMENT: "One or more selected students are already enrolled in this exam cycle.",
+  HIERARCHY_SCOPE_DENIED: "You do not have access to this exam-cycle data.",
+  WORKFLOW_ROLE_FORBIDDEN: "Your role cannot perform this exam workflow action.",
+  REJECT_REMARK_REQUIRED: "Please provide a remark before rejecting this enrollment list.",
+  RESULTS_NOT_PUBLISHED: "Results are not published yet for this exam cycle."
   ,DUPLICATE_PENDING: "A reassignment request is already pending for this worksheet."
   ,NO_SUBMISSION: "You can request reassignment only after submitting this worksheet."
   ,SWAP_WORKSHEET_REQUIRED: "Please choose a replacement worksheet for a swap request."
   ,NEW_WORKSHEET_NOT_FOUND: "The selected replacement worksheet was not found."
+  ,COURSE_DELETE_BLOCKED: "This course cannot be deleted while it is linked to partner access or student records. Remove those links first."
 };
 
 function getApiErrorCode(error) {

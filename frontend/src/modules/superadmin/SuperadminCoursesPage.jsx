@@ -6,7 +6,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
-import { archiveCourse, createCourse, listCourses, updateCourse } from "../../services/coursesService";
+import { archiveCourse, createCourse, deleteCourse, listCourses, updateCourse } from "../../services/coursesService";
 
 function statusFromCourse(course) {
   return course?.isActive === false ? "INACTIVE" : "ACTIVE";
@@ -28,6 +28,8 @@ function SuperadminCoursesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [statusActionTarget, setStatusActionTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     code: "ABACUS_ONLINE",
     name: "",
@@ -163,6 +165,32 @@ function SuperadminCoursesPage() {
 
   const handleRefresh = () => {
     void load({ limit, offset, q, status: statusFilter });
+  };
+
+  const executeDelete = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target?.id) {
+      return;
+    }
+
+    setDeleting(true);
+    setFormError("");
+    try {
+      await deleteCourse(target.id);
+      if (editingId === target.id) {
+        resetForm();
+      }
+
+      const shouldResetPage = rows.length === 1 && offset > 0;
+      const nextOffset = shouldResetPage ? Math.max(0, offset - limit) : offset;
+      setOffset(nextOffset);
+      await load({ limit, offset: nextOffset, q, status: statusFilter });
+    } catch (err) {
+      setFormError(getFriendlyErrorMessage(err) || "Failed to delete course.");
+    } finally {
+      setDeleting(false);
+    }
   };
 
   return (
@@ -302,6 +330,15 @@ function SuperadminCoursesPage() {
                 >
                   Deactivate
                 </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => setDeleteTarget(r)}
+                  disabled={deleting}
+                >
+                  Delete
+                </button>
               </div>
             )
           }
@@ -328,6 +365,19 @@ function SuperadminCoursesPage() {
         confirmLabel={statusActionTarget?.action === "ACTIVATE" ? "Activate" : "Deactivate"}
         onCancel={() => setStatusActionTarget(null)}
         onConfirm={() => void executeStatusAction()}
+      />
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Course"
+        message={`Delete course "${deleteTarget?.name || ""}" permanently? This removes its course-level setup and cannot be undone.`}
+        confirmLabel={deleting ? "Deleting..." : "Delete Course"}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+          }
+        }}
+        onConfirm={() => void executeDelete()}
       />
     </section>
   );

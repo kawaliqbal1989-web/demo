@@ -1,4 +1,4 @@
-import { createContext, useCallback, useLayoutEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   clearStoredTokens,
@@ -42,6 +42,12 @@ import { clearStoredBranding, getStoredBranding, setStoredBranding } from "./ses
 
 const AuthContext = createContext(null);
 
+const BRANDING_ENABLED_ROLES = new Set(["BP", "FRANCHISE", "CENTER", "TEACHER", "STUDENT"]);
+
+function canFetchBrandingForRole(role) {
+  return BRANDING_ENABLED_ROLES.has(role);
+}
+
 function AuthProvider({ children }) {
   const navigate = useNavigate();
   const [accessToken, setAccessToken] = useState(() => getStoredAccessToken());
@@ -54,6 +60,9 @@ function AuthProvider({ children }) {
   const [displayName, setDisplayName] = useState(null);
   const [loading, setLoading] = useState(false);
   const [apiReady, setApiReady] = useState(false);
+  const [authBootstrapStatus, setAuthBootstrapStatus] = useState(() =>
+    getStoredAccessToken() || getStoredRefreshToken() ? "loading" : "ready"
+  );
 
   const role = useMemo(() => getRoleFromToken(accessToken), [accessToken]);
   const tenantId = useMemo(() => getTenantFromToken(accessToken), [accessToken]);
@@ -63,6 +72,7 @@ function AuthProvider({ children }) {
 
   const isAuthenticated = Boolean(accessToken && refreshTokenValue && !isTokenExpired(accessToken));
   const requiresPasswordChange = Boolean(mustChangePassword || getStoredMustChangePassword());
+  const authBootstrapPending = authBootstrapStatus !== "ready";
 
   const applyTokens = ({ accessToken: nextAccess, refreshToken: nextRefresh }) => {
     setAccessToken(nextAccess);
@@ -70,8 +80,7 @@ function AuthProvider({ children }) {
     setStoredTokens({ accessToken: nextAccess, refreshToken: nextRefresh });
   };
 
-  const logout = useCallback(async () => {
-    await logoutRequest(getStoredAccessToken(), getStoredRefreshToken());
+  const clearSessionState = useCallback(() => {
     setAccessToken(null);
     setRefreshTokenValue(null);
     setMustChangePassword(false);
@@ -80,6 +89,7 @@ function AuthProvider({ children }) {
     setPartnerId(null);
     setBranding(null);
     setDisplayName(null);
+    setAuthBootstrapStatus("ready");
     clearStoredTokens();
     clearStoredMustChangePassword();
     clearStoredSubscriptionBlocked();
@@ -87,8 +97,13 @@ function AuthProvider({ children }) {
     clearStoredPartnerId();
     clearStoredFranchiseId();
     clearStoredBranding();
+  }, []);
+
+  const logout = useCallback(async () => {
+    await logoutRequest(getStoredAccessToken(), getStoredRefreshToken());
+    clearSessionState();
     navigate("/login", { replace: true });
-  }, [navigate]);
+  }, [clearSessionState, navigate]);
 
   const refreshSession = useCallback(async () => {
     const storedRefresh = getStoredRefreshToken();
@@ -102,29 +117,6 @@ function AuthProvider({ children }) {
       refreshToken: data.data.refresh_token
     });
   }, []);
-
-  const shouldFetchBranding = useCallback(() => {
-    const token = getStoredAccessToken();
-    if (!token) {
-      return false;
-    }
-
-    if (mustChangePassword || getStoredMustChangePassword()) {
-      return false;
-    }
-
-    const roleFromToken = getRoleFromToken(token);
-    const brandingEnabledRoles = ["BP", "FRANCHISE", "CENTER", "TEACHER", "STUDENT"];
-    if (!brandingEnabledRoles.includes(roleFromToken)) {
-      return false;
-    }
-
-    if (isTokenExpired(token)) {
-      return false;
-    }
-
-    return true;
-  }, [mustChangePassword]);
 
   const login = async ({ tenantCode, username, password }) => {
     setLoading(true);
@@ -146,6 +138,7 @@ function AuthProvider({ children }) {
       const mustChange = Boolean(data.data.user?.must_change_password);
       setMustChangePassword(mustChange);
       setStoredMustChangePassword(mustChange);
+      setAuthBootstrapStatus(mustChange ? "ready" : "loading");
 
       setSubscriptionBlocked(false);
       setStoredSubscriptionBlocked(false);
@@ -157,9 +150,7 @@ function AuthProvider({ children }) {
       setStoredPartnerId(null);
       setBranding(null);
       setStoredBranding(null);
-      if (nextRole !== "FRANCHISE" || mustChange) {
-        setStoredFranchiseId(null);
-      }
+      setStoredFranchiseId(null);
 
       return {
         mustChangePassword: mustChange,
@@ -170,7 +161,7 @@ function AuthProvider({ children }) {
     }
   };
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     setupApiInterceptors({
       getAccessToken: () => getStoredAccessToken(),
       refreshToken: refreshSession,
@@ -230,119 +221,121 @@ function AuthProvider({ children }) {
     setApiReady(true);
   }, [navigate, logout, refreshSession]);
 
-  useLayoutEffect(() => {
-    if (!apiReady || !isAuthenticated || requiresPasswordChange || (capabilities && displayName)) {
+  useEffect(() => {
+    if (!apiReady) {
+      return;
+    }
+
+    const storedAccessToken = getStoredAccessToken();
+    const storedRefreshToken = getStoredRefreshToken();
+
+    if (!storedAccessToken && !storedRefreshToken) {
+      setAuthBootstrapStatus("ready");
       return;
     }
 
     let cancelled = false;
-    void meRequest()
-      .then((data) => {
+
+    async function bootstrapSession() {
+      setAuthBootstrapStatus("loading");
+
+      if ((!storedAccessToken || isTokenExpired(storedAccessToken)) && storedRefreshToken) {
+        try {
+          await refreshSession();
+        } catch {
+          if (!cancelled) {
+            clearSessionState();
+          }
+        }
+        return;
+      }
+
+      if (!storedAccessToken || !storedRefreshToken || isTokenExpired(storedAccessToken)) {
+        if (!cancelled) {
+          clearSessionState();
+        }
+        return;
+      }
+
+      if (getStoredMustChangePassword()) {
+        if (!cancelled) {
+          setAuthBootstrapStatus("ready");
+        }
+        return;
+      }
+
+      const roleFromToken = getRoleFromToken(storedAccessToken);
+
+      try {
+        const [meData, scopedIdentity, brandingData] = await Promise.all([
+          meRequest({ _skipGlobalLoading: true, _suppressErrorLogging: true }),
+          roleFromToken === "BP"
+            ? getMyBusinessPartner({ _skipGlobalLoading: true, _suppressErrorLogging: true }).catch(() => null)
+            : roleFromToken === "FRANCHISE"
+              ? getMyFranchise({ _skipGlobalLoading: true, _suppressErrorLogging: true }).catch(() => null)
+              : Promise.resolve(null),
+          canFetchBrandingForRole(roleFromToken)
+            ? getMyBranding({ _skipGlobalLoading: true, _suppressErrorLogging: true }).catch(() => null)
+            : Promise.resolve(null)
+        ]);
+
         if (cancelled) {
           return;
         }
 
-        const caps = data.data?.user?.capabilities || null;
+        const caps = meData?.data?.user?.capabilities || null;
         setCapabilities(caps);
         setStoredCapabilities(caps);
 
-        const mustChange = Boolean(data.data?.user?.must_change_password);
+        const mustChange = Boolean(meData?.data?.user?.must_change_password);
         setMustChangePassword(mustChange);
         setStoredMustChangePassword(mustChange);
 
-        const disp = data.data?.user?.displayName || null;
+        const disp = meData?.data?.user?.displayName || null;
         setDisplayName(disp);
-      })
-      .catch(() => {
-        // Ignore; interceptor will handle token refresh or logout if needed.
-      });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [apiReady, isAuthenticated, capabilities, displayName, requiresPasswordChange]);
-
-  useLayoutEffect(() => {
-    if (!apiReady || !isAuthenticated || requiresPasswordChange) {
-      return;
-    }
-
-    if (role === "BP" && !partnerId) {
-      let cancelled = false;
-      void getMyBusinessPartner()
-        .then((mine) => {
-          if (cancelled) {
-            return;
-          }
-          const id = mine?.data?.id || null;
+        if (roleFromToken === "BP") {
+          const id = scopedIdentity?.data?.id || null;
           setPartnerId(id);
           setStoredPartnerId(id);
-        })
-        .catch(() => {
-          if (cancelled) {
-            return;
-          }
+          setStoredFranchiseId(null);
+        } else {
           setPartnerId(null);
           setStoredPartnerId(null);
-        });
 
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    if (role === "FRANCHISE" && !getStoredFranchiseId()) {
-      let cancelled = false;
-      void getMyFranchise()
-        .then((mine) => {
-          if (cancelled) {
-            return;
+          if (roleFromToken === "FRANCHISE") {
+            const id = scopedIdentity?.data?.franchiseProfileId || null;
+            setStoredFranchiseId(id);
+          } else {
+            setStoredFranchiseId(null);
           }
-          const id = mine?.data?.franchiseProfileId || null;
-          setStoredFranchiseId(id);
-        })
-        .catch(() => {
-          if (cancelled) {
-            return;
-          }
-          setStoredFranchiseId(null);
-        });
+        }
 
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    return undefined;
-  }, [apiReady, isAuthenticated, partnerId, requiresPasswordChange, role]);
-
-  useLayoutEffect(() => {
-    if (!apiReady || !isAuthenticated || requiresPasswordChange || branding || !shouldFetchBranding()) {
-      return;
-    }
-
-    let cancelled = false;
-    void getMyBranding()
-      .then((brandResp) => {
+        const nextBranding = brandingData?.data?.businessPartner || null;
+        setBranding(nextBranding);
+        setStoredBranding(nextBranding);
+      } catch (error) {
         if (cancelled) {
           return;
         }
-        const bp = brandResp?.data?.businessPartner || null;
-        setBranding(bp);
-        setStoredBranding(bp);
-      })
-      .catch(() => {
-        if (cancelled) {
+
+        if (error?.response?.status === 401) {
+          clearSessionState();
           return;
         }
-        setBranding(null);
-        setStoredBranding(null);
-      });
+      }
+
+      if (!cancelled) {
+        setAuthBootstrapStatus("ready");
+      }
+    }
+
+    void bootstrapSession();
 
     return () => {
       cancelled = true;
     };
-  }, [apiReady, isAuthenticated, branding, requiresPasswordChange, shouldFetchBranding]);
+  }, [apiReady, accessToken, refreshTokenValue, refreshSession, clearSessionState]);
 
   const value = {
     accessToken,
@@ -360,6 +353,8 @@ function AuthProvider({ children }) {
     userId,
     displayName,
     loading,
+    authBootstrapStatus,
+    authBootstrapPending,
     login,
     logout,
     refreshSession,

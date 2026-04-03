@@ -1489,16 +1489,8 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     )
   );
 
-  // Generate practice + exam worksheets immediately.
-  // Also open practice immediately from approval time (requirement: practice starts when superadmin approves).
-  const now = new Date();
-  await prisma.examCycle.update({
-    where: { id: examCycleId },
-    data: {
-      practiceStartAt: now
-    }
-  });
-
+  // Keep the configured practice schedule intact; approval only finalizes the list
+  // and assigns the selected exam worksheets for this cycle.
   const generation = await assignSelectedExamWorksheets({
     tenantId: req.auth.tenantId,
     examCycleId,

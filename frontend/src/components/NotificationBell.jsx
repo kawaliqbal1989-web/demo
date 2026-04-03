@@ -24,7 +24,7 @@ function timeAgo(dateStr) {
 }
 
 function NotificationBell() {
-  const { accessToken, isAuthenticated, mustChangePassword, refreshSession } = useAuth();
+  const { accessToken, isAuthenticated, mustChangePassword, refreshSession, authBootstrapPending } = useAuth();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -35,7 +35,7 @@ function NotificationBell() {
   const refreshInFlightRef = useRef(null);
 
   const fetchNotifications = useCallback(async () => {
-    if (!isAuthenticated || mustChangePassword || unauthorizedRef.current) {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword || unauthorizedRef.current) {
       return;
     }
 
@@ -70,10 +70,10 @@ function NotificationBell() {
     } finally {
       setLoading(false);
     }
-  }, [accessToken, isAuthenticated, mustChangePassword, refreshSession]);
+  }, [accessToken, authBootstrapPending, isAuthenticated, mustChangePassword, refreshSession]);
 
   useEffect(() => {
-    if (isAuthenticated && !mustChangePassword) {
+    if (!authBootstrapPending && isAuthenticated && !mustChangePassword) {
       unauthorizedRef.current = false;
       return;
     }
@@ -81,18 +81,20 @@ function NotificationBell() {
     setOpen(false);
     setItems([]);
     setUnreadCount(0);
-  }, [isAuthenticated, mustChangePassword]);
+    setHasCriticalUnread(false);
+    setLoading(false);
+  }, [authBootstrapPending, isAuthenticated, mustChangePassword]);
 
   // Poll unread count every 60s
   useEffect(() => {
-    if (!isAuthenticated || mustChangePassword) {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
       return;
     }
 
     fetchNotifications();
     const id = setInterval(fetchNotifications, 60000);
     return () => clearInterval(id);
-  }, [fetchNotifications, isAuthenticated, mustChangePassword]);
+  }, [authBootstrapPending, fetchNotifications, isAuthenticated, mustChangePassword]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -108,7 +110,7 @@ function NotificationBell() {
   }, [open]);
 
   const handleToggle = () => {
-    if (!isAuthenticated || mustChangePassword) {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
       return;
     }
 

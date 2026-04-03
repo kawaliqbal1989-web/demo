@@ -57,8 +57,8 @@ async function renewBusinessPartner({ id, extendDays = 30 }) {
   return response.data;
 }
 
-async function getMyBusinessPartner() {
-  const response = await apiClient.get("/business-partners/me");
+async function getMyBusinessPartner(config = {}) {
+  const response = await apiClient.get("/business-partners/me", config);
   return response.data;
 }
 

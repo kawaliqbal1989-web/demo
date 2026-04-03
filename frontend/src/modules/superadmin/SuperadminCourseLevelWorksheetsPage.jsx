@@ -5,6 +5,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PaginationBar } from "../../components/DataTable";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { formatWorksheetQuestionPrompt } from "../../utils/worksheetQuestions";
 import { getCourse } from "../../services/coursesService";
 import { listLevels } from "../../services/levelsService";
 import { getWorksheetTemplate, upsertWorksheetTemplate } from "../../services/worksheetTemplatesService";
@@ -23,12 +24,7 @@ import {
 } from "../../services/worksheetsService";
 
 function displayQuestion(question) {
-  const operation = String(question?.operation || "").toUpperCase();
-  const operands = question?.operands || {};
-  const left = operands?.a ?? operands?.x ?? "?";
-  const right = operands?.b ?? operands?.y ?? "?";
-  const sign = operation === "ADD" ? "+" : operation === "SUB" ? "-" : operation === "MUL" ? "×" : operation === "DIV" ? "÷" : operation;
-  return `${left} ${sign} ${right}`;
+  return formatWorksheetQuestionPrompt(question);
 }
 
 function SuperadminCourseLevelWorksheetsPage() {

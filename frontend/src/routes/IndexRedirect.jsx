@@ -1,6 +1,7 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { ROLES } from "../types/auth";
+import { LoadingState } from "../components/LoadingState";
 
 function getHomeForRole(role) {
   switch (role) {
@@ -22,7 +23,11 @@ function getHomeForRole(role) {
 }
 
 function IndexRedirect() {
-  const { role, isAuthenticated } = useAuth();
+  const { role, isAuthenticated, authBootstrapPending } = useAuth();
+
+  if (authBootstrapPending) {
+    return <LoadingState label="Loading session..." />;
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;

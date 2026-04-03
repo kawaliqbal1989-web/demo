@@ -1,7 +1,7 @@
 import { apiClient } from "./apiClient";
 
-async function getMyBranding() {
-  const response = await apiClient.get("/branding/me");
+async function getMyBranding(config = {}) {
+  const response = await apiClient.get("/branding/me", config);
   return response.data;
 }
 

@@ -1,6 +1,14 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const webBaseURL = process.env.E2E_BASE_URL || "http://localhost:5173";
+const backendPort = process.env.E2E_BACKEND_PORT || "4100";
+const frontendPort = process.env.E2E_FRONTEND_PORT || "4173";
+const apiBaseURL = process.env.E2E_API_BASE_URL || `http://localhost:${backendPort}`;
+const webBaseURL = process.env.E2E_BASE_URL || `http://localhost:${frontendPort}`;
+
+process.env.E2E_BACKEND_PORT = backendPort;
+process.env.E2E_FRONTEND_PORT = frontendPort;
+process.env.E2E_API_BASE_URL = apiBaseURL;
+process.env.E2E_BASE_URL = webBaseURL;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -26,14 +34,14 @@ export default defineConfig({
   webServer: [
     {
       command: "node scripts/e2e-start-backend.mjs",
-      url: "http://localhost:4000/health",
-      reuseExistingServer: !process.env.CI,
+      url: `${apiBaseURL}/health`.replace(/\/api$/, ""),
+      reuseExistingServer: false,
       timeout: 120_000
     },
     {
       command: "node scripts/e2e-start-frontend.mjs",
       url: webBaseURL,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000
     }
   ]

@@ -5,6 +5,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { formatWorksheetQuestionPrompt } from "../../utils/worksheetQuestions";
 import { getCourse } from "../../services/coursesService";
 import { listLevels } from "../../services/levelsService";
 import {
@@ -27,43 +28,8 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
-const OP_DISPLAY = { ADD: "+", SUB: "-", MUL: "×", DIV: "÷" };
-
 function renderExpression(question) {
-  const operation = String(question?.operation || "").toUpperCase();
-  const operands = question?.operands || {};
-  const terms = Array.isArray(operands?.terms)
-    ? operands.terms
-    : [operands?.a ?? operands?.x, operands?.b ?? operands?.y].filter((value) => Number.isFinite(Number(value)));
-  if (terms.length >= 2) {
-    if (operation === "MIX") {
-      const operators = Array.isArray(operands?.operators) ? operands.operators : [];
-      return terms
-        .map((term, index) => {
-          if (index === 0) return String(Number(term));
-          const op = operators[index] || "+";
-          return `${OP_DISPLAY[op] || op} ${Number(term)}`;
-        })
-        .join(" ");
-    }
-    if (operation === "ADD") {
-      return terms
-        .map((term, index) => {
-          const value = Number(term);
-          if (index === 0) {
-            return String(value);
-          }
-          return value < 0 ? `- ${Math.abs(value)}` : `+ ${value}`;
-        })
-        .join(" ");
-    }
-    const sign = operation === "SUB" ? "-" : operation === "MUL" ? "×" : operation === "DIV" ? "÷" : operation;
-    return terms.map((term) => String(Number(term))).join(` ${sign} `);
-  }
-  const left = operands?.a ?? operands?.x ?? "?";
-  const right = operands?.b ?? operands?.y ?? "?";
-  const sign = operation === "ADD" ? "+" : operation === "SUB" ? "-" : operation === "MUL" ? "×" : operation === "DIV" ? "÷" : operation;
-  return `${left} ${sign} ${right}`;
+  return formatWorksheetQuestionPrompt(question);
 }
 
 function computeCorrectAnswer(operation, terms, operators) {

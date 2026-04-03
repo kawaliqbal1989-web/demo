@@ -32,4 +32,9 @@ async function archiveCourse(id) {
   return response.data;
 }
 
-export { listCourses, createCourse, getCourse, updateCourse, archiveCourse };
+async function deleteCourse(id) {
+  const response = await apiClient.delete(`/courses/${id}`);
+  return response.data;
+}
+
+export { listCourses, createCourse, getCourse, updateCourse, archiveCourse, deleteCourse };

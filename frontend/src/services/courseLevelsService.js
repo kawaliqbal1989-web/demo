@@ -30,4 +30,9 @@ async function updateCourseLevel({ courseId, id, title, sortOrder, status }) {
   return response.data;
 }
 
-export { listCourseLevels, createCourseLevel, updateCourseLevel };
+async function deleteCourseLevel({ courseId, id }) {
+  const response = await apiClient.delete(`/courses/${courseId}/levels/${id}`);
+  return response.data;
+}
+
+export { listCourseLevels, createCourseLevel, updateCourseLevel, deleteCourseLevel };

@@ -13,6 +13,9 @@ test("SuperAdmin can approve exam request with worksheet selection", async ({ pa
   // Ensure auth state is established (IndexRedirect sends SUPERADMIN to dashboard).
   await page.waitForURL("**/superadmin/dashboard", { timeout: 30_000 });
 
+  await page.goto("/superadmin/exam-cycles");
+  await expect(page.getByRole("heading", { name: "Exam Cycles" })).toBeVisible();
+
   // Navigate directly to the approvals page for the cycle.
   await page.goto(`/superadmin/exam-cycles/${examCycleId}/pending`);
   await expect(page.getByRole("heading", { name: "Exam Enrollment Approvals" })).toBeVisible();
@@ -33,9 +36,11 @@ test("SuperAdmin can approve exam request with worksheet selection", async ({ pa
   // Choose the first real worksheet.
   await select.selectOption({ index: 1 });
 
-  // Approve.
-  page.once("dialog", (d) => d.accept());
+  // Approve via the modal confirmation used by the app.
   await page.getByRole("button", { name: "Confirm Approve" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Approve" }).click();
 
   // After approval, list should refresh and no longer show the same open form.
   await expect(page.getByText("Select one published exam worksheet per level in this request.")).toHaveCount(0);

@@ -16,6 +16,11 @@ import {
   getBPUsageReport
 } from "../services/practice-entitlement.service.js";
 
+const BUSINESS_PARTNER_WRITE_TRANSACTION_OPTIONS = {
+  maxWait: 5000,
+  timeout: 15000
+};
+
 function parseISODateOnly(value) {
   const text = String(value || "").trim();
   const dateOnly = text.includes("T") ? text.slice(0, 10) : text;
@@ -564,7 +569,7 @@ const updateBusinessPartner = asyncHandler(async (req, res) => {
     await tx.partnerLegacyProgram.deleteMany({ where: { businessPartnerId: existing.id } });
 
     return partner;
-  });
+  }, BUSINESS_PARTNER_WRITE_TRANSACTION_OPTIONS);
 
   await recordAudit({
     tenantId: existing.tenantId,

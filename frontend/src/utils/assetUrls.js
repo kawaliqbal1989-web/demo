@@ -7,7 +7,7 @@ function shouldUpgradeUploadUrlToHttps({ assetUrl, apiUrl }) {
     return false;
   }
 
-  if (apiUrl && assetUrl.host === apiUrl.host) {
+  if (apiUrl && apiUrl.protocol === "https:" && assetUrl.host === apiUrl.host) {
     return true;
   }
 
@@ -15,7 +15,7 @@ function shouldUpgradeUploadUrlToHttps({ assetUrl, apiUrl }) {
     return true;
   }
 
-  return typeof window !== "undefined" && window.location?.protocol === "https:";
+  return false;
 }
 
 function resolveAssetUrl(value) {

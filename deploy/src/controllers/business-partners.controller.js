@@ -318,8 +318,8 @@ const uploadBusinessPartnerLogo = asyncHandler(async (req, res) => {
 
   const existing = await prisma.businessPartner.findFirst({
     where: {
-      id,
-      ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
+      tenantId: req.auth.tenantId,
+      id
     },
     select: {
       id: true

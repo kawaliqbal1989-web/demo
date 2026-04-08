@@ -448,9 +448,9 @@ const deleteCourse = asyncHandler(async (req, res) => {
   ]);
 
   const blockers = {
-    partnerAccessCount,
+    studentCount: primaryStudentCount,
     assignedStudentCount,
-    primaryStudentCount
+    partnerAccessCount
   };
 
   if (partnerAccessCount > 0 || assignedStudentCount > 0 || primaryStudentCount > 0) {
@@ -459,17 +459,26 @@ const deleteCourse = asyncHandler(async (req, res) => {
 
   let deleted;
   try {
-    deleted = await prisma.course.delete({
-      where: { id: existing.id },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        description: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true
-      }
+    deleted = await prisma.$transaction(async (tx) => {
+      await tx.courseLevel.deleteMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          courseId: existing.id
+        }
+      });
+
+      return tx.course.delete({
+        where: { id: existing.id },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          description: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
     });
   } catch (error) {
     if (isForeignKeyConstraintError(error)) {
@@ -480,16 +489,25 @@ const deleteCourse = asyncHandler(async (req, res) => {
       throw error;
     }
 
-    deleted = await prisma.course.delete({
-      where: { id: existing.id },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true
-      }
+    deleted = await prisma.$transaction(async (tx) => {
+      await tx.courseLevel.deleteMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          courseId: existing.id
+        }
+      });
+
+      return tx.course.delete({
+        where: { id: existing.id },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      });
     });
 
     deleted = { ...deleted, description: null };
@@ -497,43 +515,6 @@ const deleteCourse = asyncHandler(async (req, res) => {
 
   res.locals.entityId = deleted.id;
   return res.apiSuccess("Course deleted", deleted);
-=======
-  if (partnerAccessCount > 0 || assignedStudentCount > 0 || primaryStudentCount > 0) {
-    return res.apiError(
-      409,
-      "Cannot delete course while it is linked to partner access or student records. Remove those links first.",
-      "COURSE_DELETE_BLOCKED"
-    );
-  }
-
-  await prisma.$transaction(async (tx) => {
-    await tx.student.updateMany({
-      where: {
-        tenantId: req.auth.tenantId,
-        courseId: existing.id
-      },
-      data: {
-        courseId: null
-      }
-    });
-
-    await tx.courseLevel.deleteMany({
-      where: {
-        tenantId: req.auth.tenantId,
-        courseId: existing.id
-      }
-    });
-
-    await tx.course.delete({
-      where: {
-        id: existing.id
-      }
-    });
-  });
-
-  res.locals.entityId = existing.id;
-  return res.apiSuccess("Course deleted", { id: existing.id, name: existing.name });
->>>>>>> 7a487dc82189d1b4081c6470405c49d2d169b8bc
 });
 
 const listCourseLevels = asyncHandler(async (req, res) => {
@@ -785,7 +766,6 @@ const deleteCourseLevel = asyncHandler(async (req, res) => {
         levelNumber: true,
         title: true
       }
->>>>>>> 7a487dc82189d1b4081c6470405c49d2d169b8bc
     });
   } catch (error) {
     if (!isSchemaMismatchError(error)) {

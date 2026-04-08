@@ -367,10 +367,6 @@ function SuperadminCourseLevelsPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto" }}
-                <button
-                  className="button secondary"
-                  type="button"
-                  style={{ width: "auto" }}
                   onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${r.levelNumber}/question-bank`)}
                 >
                   Question Bank
@@ -407,9 +403,6 @@ function SuperadminCourseLevelsPage() {
                   style={{ width: "auto" }}
                   onClick={() => setDeleteTarget(r)}
                   disabled={deleting}
-                >
-                  Delete
-                </button>
                 >
                   Delete
                 </button>
@@ -452,7 +445,6 @@ function SuperadminCourseLevelsPage() {
           }
         }}
         onConfirm={() => void executeDelete()}
-      />
       />
     </section>
   );

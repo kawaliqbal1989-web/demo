@@ -3,6 +3,8 @@ import {
   archiveCourse,
   createCourse,
   createCourseLevel,
+  deleteCourse,
+  deleteCourseLevel,
   getCourse,
   listCourseLevels,
   listCourses,
@@ -54,8 +56,8 @@ coursesRouter.post(
 coursesRouter.delete(
   "/:id",
   requireSuperadmin(),
-  auditAction("ARCHIVE_COURSE", "COURSE", (req) => req.params.id),
-  archiveCourse
+  auditAction("DELETE_COURSE", "COURSE", (req) => req.params.id),
+  deleteCourse
 );
 
 coursesRouter.get(
@@ -77,6 +79,13 @@ coursesRouter.patch(
   requireSuperadmin(),
   auditAction("UPDATE_COURSE_LEVEL", "COURSE_LEVEL", (req) => req.params.id),
   updateCourseLevel
+);
+
+coursesRouter.delete(
+  "/:courseId/levels/:id",
+  requireSuperadmin(),
+  auditAction("DELETE_COURSE_LEVEL", "COURSE_LEVEL", (req) => req.params.id),
+  deleteCourseLevel
 );
 
 export { coursesRouter };

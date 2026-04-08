@@ -3,8 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { ErrorState } from "../../components/ErrorState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { resolveAcademicLevelForCourseLevel } from "../../utils/courseLevelMapping";
 
 import { getCourse } from "../../services/coursesService";
+import { listCourseLevels } from "../../services/courseLevelsService";
 import { listLevels } from "../../services/levelsService";
 
 function SuperadminCourseLevelEnginePage() {
@@ -13,21 +15,35 @@ function SuperadminCourseLevelEnginePage() {
   const levelNumberInt = Number(levelNumber);
 
   const [course, setCourse] = useState(null);
-  const [levels, setLevels] = useState([]);
+  const [courseLevels, setCourseLevels] = useState([]);
+  const [academicLevels, setAcademicLevels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const level = useMemo(() => {
-    return levels.find((l) => Number(l.rank) === levelNumberInt) || null;
-  }, [levels, levelNumberInt]);
+  const courseLevel = useMemo(() => {
+    return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
+  }, [courseLevels, levelNumberInt]);
+
+  const academicLevel = useMemo(() => {
+    return resolveAcademicLevelForCourseLevel({
+      courseLevel,
+      academicLevels,
+      levelNumber: levelNumberInt
+    });
+  }, [academicLevels, courseLevel, levelNumberInt]);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [courseResp, levelsResp] = await Promise.all([getCourse(courseId), listLevels()]);
+      const [courseResp, courseLevelsResp, academicLevelsResp] = await Promise.all([
+        getCourse(courseId),
+        listCourseLevels({ courseId, limit: 100, offset: 0 }),
+        listLevels()
+      ]);
       setCourse(courseResp?.data || null);
-      setLevels(levelsResp?.data || []);
+      setCourseLevels(courseLevelsResp?.data?.items || []);
+      setAcademicLevels(academicLevelsResp?.data || []);
     } catch (e) {
       setError(getFriendlyErrorMessage(e) || "Failed to load course engine.");
     } finally {
@@ -55,7 +71,11 @@ function SuperadminCourseLevelEnginePage() {
     return <ErrorState title="Invalid level" message="Level number must be between 1 and 15." />;
   }
 
-  if (!level) {
+  if (!courseLevel) {
+    return <ErrorState title="Level not found" message="The course level could not be loaded." />;
+  }
+
+  if (!academicLevel) {
     return <ErrorState title="Level mapping missing" message="No academic level exists for this level number." />;
   }
 

@@ -37,6 +37,14 @@ async function meRequest() {
   return response.data;
 }
 
+async function changePasswordRequest({ currentPassword, newPassword }) {
+  const response = await apiClient.post("/auth/change-password", {
+    currentPassword,
+    newPassword
+  });
+  return response.data;
+}
+
 async function resetPasswordRequest({ targetUserId, newPassword, mustChangePassword = true }) {
   const response = await apiClient.post("/auth/reset-password", {
     targetUserId,
@@ -46,4 +54,4 @@ async function resetPasswordRequest({ targetUserId, newPassword, mustChangePassw
   return response.data;
 }
 
-export { loginRequest, refreshRequest, logoutRequest, meRequest, resetPasswordRequest };
+export { loginRequest, refreshRequest, logoutRequest, meRequest, changePasswordRequest, resetPasswordRequest };

@@ -3,6 +3,7 @@ import { MetricCard } from "../../components/MetricCard";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { ErrorState } from "../../components/ErrorState";
 import { PageHeader } from "../../components/PageHeader";
+import { ChangePasswordForm } from "../../components/ChangePasswordForm";
 import { InsightPanel } from "../../components/InsightCard";
 import { NetworkPulseCard, CenterRanking } from "../../components/LeadershipIntel";
 import { AutomationPanel } from "../../components/NotificationWidgets";
@@ -187,10 +188,36 @@ function CreateBusinessPartnerModal({ open, onClose, onCreated }) {
   );
 }
 
+function ChangePasswordModal({ open, onClose }) {
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="dash-modal" role="dialog" aria-modal="true" aria-label="Change password">
+      <div className="card dash-modal__panel">
+        <div className="dash-modal__header">
+          <h3 style={{ margin: 0 }}>Change Password</h3>
+          <button type="button" className="button secondary" style={{ width: "auto" }} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <ChangePasswordForm
+          style={{ display: "grid", gap: 12 }}
+          title={null}
+          description="Update your superadmin password. You will be signed out after the change."
+        />
+      </div>
+    </div>
+  );
+}
+
 function SuperadminDashboardInner() {
   const { capabilities } = useAuth();
   const { data, history, loading, error, lastUpdatedAt, fetchKpis } = useContext(SuperadminDashboardContext);
   const [createOpen, setCreateOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [insights, setInsights] = useState([]);
   const [insightsLoading, setInsightsLoading] = useState(true);
   const [networkPulse, setNetworkPulse] = useState(null);
@@ -248,15 +275,25 @@ function SuperadminDashboardInner() {
         title="Dashboard"
         subtitle={lastUpdatedAt ? `Last updated: ${lastUpdatedAt.toLocaleTimeString()}` : ""}
         actions={
-          <button
-            type="button"
-            className="button secondary"
-            style={{ width: "auto" }}
-            onClick={() => fetchKpis({ reason: "manual" })}
-            disabled={loading}
-          >
-            {loading ? "Refreshing..." : "Refresh"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="button secondary"
+              style={{ width: "auto" }}
+              onClick={() => setPasswordOpen(true)}
+            >
+              Change Password
+            </button>
+            <button
+              type="button"
+              className="button secondary"
+              style={{ width: "auto" }}
+              onClick={() => fetchKpis({ reason: "manual" })}
+              disabled={loading}
+            >
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+          </>
         }
       />
 
@@ -397,6 +434,8 @@ function SuperadminDashboardInner() {
           )}
         </div>
       </section>
+
+      <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
 
       <CreateBusinessPartnerModal
         open={createOpen}

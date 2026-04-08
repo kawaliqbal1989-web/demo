@@ -44,8 +44,7 @@ async function ensureTenantCourseCatalog(tenantId) {
     },
     update: {
       name: DEFAULT_COURSE_NAME,
-      description: DEFAULT_COURSE_DESCRIPTION,
-      isActive: true
+      description: DEFAULT_COURSE_DESCRIPTION
     },
     create: {
       tenantId,

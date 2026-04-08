@@ -6,9 +6,12 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PaginationBar } from "../../components/DataTable";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getCourse } from "../../services/coursesService";
+import { listCourseLevels } from "../../services/courseLevelsService";
 import { listLevels } from "../../services/levelsService";
 import { getWorksheetTemplate, upsertWorksheetTemplate } from "../../services/worksheetTemplatesService";
 import { listQuestionBank } from "../../services/questionBankService";
+import { resolveAcademicLevelForCourseLevel } from "../../utils/courseLevelMapping";
+import { formatWorksheetQuestionPreview } from "../../utils/worksheetQuestionPreview";
 import {
   addWorksheetQuestion,
   addWorksheetQuestionsBulk,
@@ -22,22 +25,14 @@ import {
   reorderWorksheetQuestions
 } from "../../services/worksheetsService";
 
-function displayQuestion(question) {
-  const operation = String(question?.operation || "").toUpperCase();
-  const operands = question?.operands || {};
-  const left = operands?.a ?? operands?.x ?? "?";
-  const right = operands?.b ?? operands?.y ?? "?";
-  const sign = operation === "ADD" ? "+" : operation === "SUB" ? "-" : operation === "MUL" ? "×" : operation === "DIV" ? "÷" : operation;
-  return `${left} ${sign} ${right}`;
-}
-
 function SuperadminCourseLevelWorksheetsPage() {
   const navigate = useNavigate();
   const { courseId, levelNumber } = useParams();
   const levelNumberInt = Number(levelNumber);
 
   const [course, setCourse] = useState(null);
-  const [levels, setLevels] = useState([]);
+  const [courseLevels, setCourseLevels] = useState([]);
+  const [academicLevels, setAcademicLevels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -95,17 +90,30 @@ function SuperadminCourseLevelWorksheetsPage() {
   const [dirtyOrder, setDirtyOrder] = useState(false);
   const dragIdRef = useRef(null);
 
-  const level = useMemo(() => {
-    return levels.find((item) => Number(item.rank) === levelNumberInt) || null;
-  }, [levels, levelNumberInt]);
+  const courseLevel = useMemo(() => {
+    return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
+  }, [courseLevels, levelNumberInt]);
+
+  const academicLevel = useMemo(() => {
+    return resolveAcademicLevelForCourseLevel({
+      courseLevel,
+      academicLevels,
+      levelNumber: levelNumberInt
+    });
+  }, [academicLevels, courseLevel, levelNumberInt]);
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [courseResp, levelsResp] = await Promise.all([getCourse(courseId), listLevels()]);
+      const [courseResp, courseLevelsResp, academicLevelsResp] = await Promise.all([
+        getCourse(courseId),
+        listCourseLevels({ courseId, limit: 100, offset: 0 }),
+        listLevels()
+      ]);
       setCourse(courseResp?.data || null);
-      setLevels(levelsResp?.data || []);
+      setCourseLevels(courseLevelsResp?.data?.items || []);
+      setAcademicLevels(academicLevelsResp?.data || []);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load course level context.");
     } finally {
@@ -202,13 +210,13 @@ function SuperadminCourseLevelWorksheetsPage() {
   }, [courseId, levelNumber]);
 
   useEffect(() => {
-    if (!level?.id) {
+    if (!academicLevel?.id) {
       return;
     }
-    void loadTemplate(level.id);
-    void loadBank(level.id);
-    void loadWorksheets(level.id, { offset: 0 });
-  }, [level?.id]);
+    void loadTemplate(academicLevel.id);
+    void loadBank(academicLevel.id);
+    void loadWorksheets(academicLevel.id, { offset: 0 });
+  }, [academicLevel?.id]);
 
   useEffect(() => {
     if (!selectedWorksheetId) {
@@ -239,8 +247,12 @@ function SuperadminCourseLevelWorksheetsPage() {
     return <ErrorState title="Failed to load" message={error} onRetry={load} />;
   }
 
-  if (!course || !level) {
+  if (!course || !courseLevel) {
     return <ErrorState title="Level not found" message="The course level could not be resolved." />;
+  }
+
+  if (!academicLevel) {
+    return <ErrorState title="Level mapping missing" message="No academic level exists for this level number." />;
   }
 
   const onSaveTemplate = async (event) => {
@@ -248,7 +260,7 @@ function SuperadminCourseLevelWorksheetsPage() {
     setTemplateSaving(true);
     setTemplateError("");
     try {
-      await upsertWorksheetTemplate(level.id, {
+      await upsertWorksheetTemplate(academicLevel.id, {
         name: templateForm.name,
         totalQuestions: Number(templateForm.totalQuestions),
         easyCount: Number(templateForm.easyCount),
@@ -257,7 +269,7 @@ function SuperadminCourseLevelWorksheetsPage() {
         timeLimitSeconds: Number(templateForm.timeLimitSeconds),
         isActive: Boolean(templateForm.isActive)
       });
-      await loadTemplate(level.id);
+      await loadTemplate(academicLevel.id);
     } catch (err) {
       setTemplateError(getFriendlyErrorMessage(err) || "Failed to save worksheet template.");
     } finally {
@@ -284,12 +296,12 @@ function SuperadminCourseLevelWorksheetsPage() {
         title: worksheetCreateForm.title.trim(),
         description: worksheetCreateForm.description.trim() || null,
         difficulty: worksheetCreateForm.difficulty,
-        levelId: level.id,
+        levelId: academicLevel.id,
         isPublished: false
       });
 
       setWorksheetCreateForm({ title: "", description: "", difficulty: "MEDIUM", isPublished: false });
-  await loadWorksheets(level.id, { offset: 0 });
+  await loadWorksheets(academicLevel.id, { offset: 0 });
     } catch (err) {
       setWorksheetsError(getFriendlyErrorMessage(err) || "Failed to create worksheet.");
     } finally {
@@ -308,7 +320,7 @@ function SuperadminCourseLevelWorksheetsPage() {
       await addWorksheetQuestion(selectedWorksheet.id, { questionBankId: questionAddBankId });
       setQuestionAddBankId("");
       await loadWorksheet(selectedWorksheet.id);
-      await loadWorksheets(level.id);
+      await loadWorksheets(academicLevel.id);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to add question.");
     } finally {
@@ -372,7 +384,7 @@ function SuperadminCourseLevelWorksheetsPage() {
       });
 
       await loadWorksheet(selectedWorksheet.id);
-      await loadWorksheets(level.id);
+      await loadWorksheets(academicLevel.id);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to update worksheet.");
     } finally {
@@ -391,7 +403,7 @@ function SuperadminCourseLevelWorksheetsPage() {
     try {
       const resp = await duplicateWorksheet(target.id);
       const createdId = resp?.data?.id || null;
-      await loadWorksheets(level.id, { offset: 0 });
+      await loadWorksheets(academicLevel.id, { offset: 0 });
       if (createdId) {
         setSelectedWorksheetId(createdId);
       }
@@ -411,7 +423,7 @@ function SuperadminCourseLevelWorksheetsPage() {
       await addWorksheetQuestionsBulk(selectedWorksheet.id, bulkQuestionIds);
       setBulkQuestionIds([]);
       await loadWorksheet(selectedWorksheet.id);
-      await loadWorksheets(level.id);
+      await loadWorksheets(academicLevel.id);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to add selected questions.");
     } finally {
@@ -545,7 +557,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               value={String(worksheetsLimit)}
               onChange={(event) => {
                 const nextLimit = Number(event.target.value);
-                void loadWorksheets(level.id, { limit: nextLimit, offset: 0 });
+                void loadWorksheets(academicLevel.id, { limit: nextLimit, offset: 0 });
               }}
             >
               <option value="10">10</option>
@@ -562,7 +574,7 @@ function SuperadminCourseLevelWorksheetsPage() {
             className="button secondary"
             type="button"
             style={{ width: "auto" }}
-            onClick={() => void loadWorksheets(level.id, { offset: 0 })}
+            onClick={() => void loadWorksheets(academicLevel.id, { offset: 0 })}
             disabled={worksheetsLoading}
           >
             {worksheetsLoading ? "Loading..." : "Apply Filters"}
@@ -575,7 +587,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               setWorksheetsQ("");
               setWorksheetsPublished("");
               setWorksheetsDifficulty("");
-              void loadWorksheets(level.id, { q: "", published: "", difficulty: "", offset: 0 });
+              void loadWorksheets(academicLevel.id, { q: "", published: "", difficulty: "", offset: 0 });
             }}
           >
             Reset Filters
@@ -639,7 +651,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               offset={worksheetsOffset}
               count={worksheets.length}
               onChange={(next) => {
-                void loadWorksheets(level.id, next);
+                void loadWorksheets(academicLevel.id, next);
               }}
             />
           </div>
@@ -827,12 +839,14 @@ function SuperadminCourseLevelWorksheetsPage() {
                           borderRadius: 10,
                           display: "flex",
                           justifyContent: "space-between",
-                          gap: 10
+                          gap: 10,
+                          alignItems: "flex-start",
+                          flexWrap: "wrap"
                         }}
                       >
-                        <div>
+                        <div style={{ minWidth: 0, flex: "1 1 280px" }}>
                           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>#{question.questionNumber}</div>
-                          <div style={{ fontWeight: 700 }}>{displayQuestion(question)}</div>
+                          <div style={{ fontWeight: 700, overflowWrap: "anywhere" }}>{formatWorksheetQuestionPreview(question)}</div>
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Drag</div>
@@ -855,7 +869,7 @@ function SuperadminCourseLevelWorksheetsPage() {
                   {(selectedWorksheet.questions || []).map((question) => (
                     <div key={question.id} style={{ display: "flex", gap: 10 }}>
                       <div style={{ width: 28, color: "var(--color-text-muted)" }}>{question.questionNumber}.</div>
-                      <div>{displayQuestion(question)}</div>
+                      <div style={{ overflowWrap: "anywhere" }}>{formatWorksheetQuestionPreview(question)}</div>
                     </div>
                   ))}
                 </div>
@@ -883,7 +897,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               setSelectedWorksheetId(null);
               setSelectedWorksheet(null);
             }
-            await loadWorksheets(level.id);
+            await loadWorksheets(academicLevel.id);
           } catch (err) {
             setWorksheetError(getFriendlyErrorMessage(err) || "Failed to delete worksheet.");
           }
@@ -906,7 +920,7 @@ function SuperadminCourseLevelWorksheetsPage() {
           try {
             await deleteWorksheetQuestion(selectedWorksheet.id, target.id);
             await loadWorksheet(selectedWorksheet.id);
-            await loadWorksheets(level.id);
+            await loadWorksheets(academicLevel.id);
           } catch (err) {
             setWorksheetError(getFriendlyErrorMessage(err) || "Failed to remove question.");
           }

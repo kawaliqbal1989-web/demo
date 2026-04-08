@@ -48,6 +48,37 @@ function isUniqueConstraintError(error) {
   return code === "P2002";
 }
 
+function isForeignKeyConstraintError(error) {
+  const code = error?.code ? String(error.code) : "";
+  return code === "P2003";
+}
+
+function formatDeleteBlockerLabel(count, singular) {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function buildCourseDeleteBlockedMessage(blockers) {
+  const parts = [];
+
+  if (blockers.studentCount > 0) {
+    parts.push(formatDeleteBlockerLabel(blockers.studentCount, "student profile"));
+  }
+
+  if (blockers.assignedStudentCount > 0) {
+    parts.push(formatDeleteBlockerLabel(blockers.assignedStudentCount, "student course assignment"));
+  }
+
+  if (blockers.partnerAccessCount > 0) {
+    parts.push(formatDeleteBlockerLabel(blockers.partnerAccessCount, "business partner access record"));
+  }
+
+  if (!parts.length) {
+    return "Course cannot be deleted because related records still exist.";
+  }
+
+  return `Course cannot be deleted while it is linked to ${parts.join(", ")}. Remove those links first.`;
+}
+
 const listCourses = asyncHandler(async (req, res) => {
   await ensureTenantCourseCatalog(req.auth?.tenantId);
 
@@ -378,6 +409,96 @@ const archiveCourse = asyncHandler(async (req, res) => {
   return res.apiSuccess("Course archived", updated);
 });
 
+const deleteCourse = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  const existing = await prisma.course.findFirst({
+    where: {
+      id,
+      tenantId: req.auth.tenantId
+    },
+    select: { id: true }
+  });
+
+  if (!existing) {
+    return res.apiError(404, "Course not found", "COURSE_NOT_FOUND");
+  }
+
+  const [studentCount, assignedStudentCount, partnerAccessCount] = await prisma.$transaction([
+    prisma.student.count({
+      where: {
+        tenantId: req.auth.tenantId,
+        courseId: existing.id
+      }
+    }),
+    prisma.studentAssignedCourse.count({
+      where: {
+        tenantId: req.auth.tenantId,
+        courseId: existing.id
+      }
+    }),
+    prisma.partnerCourseAccess.count({
+      where: {
+        courseId: existing.id,
+        businessPartner: {
+          tenantId: req.auth.tenantId
+        }
+      }
+    })
+  ]);
+
+  const blockers = {
+    studentCount,
+    assignedStudentCount,
+    partnerAccessCount
+  };
+
+  if (studentCount > 0 || assignedStudentCount > 0 || partnerAccessCount > 0) {
+    return res.apiError(409, buildCourseDeleteBlockedMessage(blockers), "COURSE_DELETE_BLOCKED");
+  }
+
+  let deleted;
+  try {
+    deleted = await prisma.course.delete({
+      where: { id: existing.id },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+  } catch (error) {
+    if (isForeignKeyConstraintError(error)) {
+      return res.apiError(409, "Course cannot be deleted because related records still exist.", "COURSE_DELETE_BLOCKED");
+    }
+
+    if (!isSchemaMismatchError(error)) {
+      throw error;
+    }
+
+    deleted = await prisma.course.delete({
+      where: { id: existing.id },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    deleted = { ...deleted, description: null };
+  }
+
+  res.locals.entityId = deleted.id;
+  return res.apiSuccess("Course deleted", deleted);
+});
+
 const listCourseLevels = asyncHandler(async (req, res) => {
   const { take, skip, limit, offset, orderBy } = parsePagination(req.query);
   const { courseId } = req.params;
@@ -610,13 +731,65 @@ const updateCourseLevel = asyncHandler(async (req, res) => {
   return res.apiSuccess("Course level updated", updated);
 });
 
+const deleteCourseLevel = asyncHandler(async (req, res) => {
+  const { courseId, id } = req.params;
+
+  let existing;
+  try {
+    existing = await prisma.courseLevel.findFirst({
+      where: {
+        id,
+        courseId,
+        tenantId: req.auth.tenantId
+      },
+      select: { id: true }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error)) {
+      throw error;
+    }
+
+    return res.apiError(
+      503,
+      "Course levels require a database migration. Apply Prisma migrations and restart the server.",
+      "MIGRATION_REQUIRED"
+    );
+  }
+
+  if (!existing) {
+    return res.apiError(404, "Course level not found", "COURSE_LEVEL_NOT_FOUND");
+  }
+
+  try {
+    await prisma.courseLevel.delete({ where: { id: existing.id } });
+  } catch (error) {
+    if (isForeignKeyConstraintError(error)) {
+      return res.apiError(409, "Cannot delete level: it is referenced by existing data", "LEVEL_IN_USE");
+    }
+
+    if (!isSchemaMismatchError(error)) {
+      throw error;
+    }
+
+    return res.apiError(
+      503,
+      "Course levels require a database migration. Apply Prisma migrations and restart the server.",
+      "MIGRATION_REQUIRED"
+    );
+  }
+
+  return res.apiSuccess("Course level deleted", { id: existing.id });
+});
+
 export {
   listCourses,
   createCourse,
   getCourse,
   updateCourse,
   archiveCourse,
+  deleteCourse,
   listCourseLevels,
   createCourseLevel,
-  updateCourseLevel
+  updateCourseLevel,
+  deleteCourseLevel
 };

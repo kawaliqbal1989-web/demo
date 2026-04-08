@@ -100,7 +100,19 @@ const getWorksheet = asyncHandler(async (req, res) => {
     include: {
       level: { select: { id: true, name: true, rank: true } },
       questions: {
-        orderBy: { questionNumber: "asc" }
+        orderBy: { questionNumber: "asc" },
+        include: {
+          questionBank: {
+            select: {
+              id: true,
+              prompt: true,
+              difficulty: true,
+              operands: true,
+              operation: true,
+              correctAnswer: true
+            }
+          }
+        }
       }
     }
   });

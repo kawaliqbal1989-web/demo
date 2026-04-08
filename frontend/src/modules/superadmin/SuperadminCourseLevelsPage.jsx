@@ -3,9 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusBadge } from "../../components/StatusBadge";
+import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getCourse } from "../../services/coursesService";
-import { createCourseLevel, listCourseLevels, updateCourseLevel } from "../../services/courseLevelsService";
+import { createCourseLevel, deleteCourseLevel, listCourseLevels, updateCourseLevel } from "../../services/courseLevelsService";
 
 function statusFromLevel(level) {
   return level?.isActive === false ? "INACTIVE" : "ACTIVE";
@@ -30,6 +31,8 @@ function SuperadminCourseLevelsPage() {
   const [editingId, setEditingId] = useState(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     levelNumber: "1",
     title: "",
@@ -140,6 +143,34 @@ function SuperadminCourseLevelsPage() {
       sortOrder: String(level.sortOrder),
       status: statusFromLevel(level)
     });
+  };
+
+  const handleToggleStatus = async (level) => {
+    try {
+      await updateCourseLevel({
+        courseId,
+        id: level.id,
+        status: level.isActive ? "ARCHIVED" : "ACTIVE"
+      });
+      await load({ limit, offset, status: statusFilter });
+    } catch (err) {
+      setFormError(getFriendlyErrorMessage(err) || "Failed to update level status.");
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteCourseLevel({ courseId, id: deleteTarget.id });
+      setDeleteTarget(null);
+      await load({ limit, offset, status: statusFilter });
+    } catch (err) {
+      setFormError(getFriendlyErrorMessage(err) || "Failed to delete level.");
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleStatusFilterChange = (nextStatus) => {
@@ -256,6 +287,22 @@ function SuperadminCourseLevelsPage() {
                 >
                   Engine
                 </button>
+                <button
+                  className="button secondary"
+                  type="button"
+                  style={{ width: "auto" }}
+                  onClick={() => void handleToggleStatus(r)}
+                >
+                  {r.isActive ? "Deactivate" : "Activate"}
+                </button>
+                <button
+                  className="button"
+                  type="button"
+                  style={{ width: "auto", background: "var(--color-text-danger)", borderColor: "var(--color-text-danger)" }}
+                  onClick={() => setDeleteTarget(r)}
+                >
+                  Delete
+                </button>
               </div>
             )
           }
@@ -273,6 +320,16 @@ function SuperadminCourseLevelsPage() {
           setOffset(next.offset);
           void load({ ...next, status: statusFilter });
         }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteTarget)}
+        title="Delete Level"
+        message={`Delete Level ${deleteTarget?.levelNumber} "${deleteTarget?.title}"? This cannot be undone.`}
+        confirmLabel={deleting ? "Deleting..." : "Delete"}
+        danger
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={() => void handleDelete()}
       />
     </section>
   );

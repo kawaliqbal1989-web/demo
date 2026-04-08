@@ -6,7 +6,7 @@ import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
-import { archiveCourse, createCourse, listCourses, updateCourse } from "../../services/coursesService";
+import { archiveCourse, createCourse, deleteCourse, listCourses, updateCourse } from "../../services/coursesService";
 
 function statusFromCourse(course) {
   return course?.isActive === false ? "INACTIVE" : "ACTIVE";
@@ -28,6 +28,7 @@ function SuperadminCoursesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [statusActionTarget, setStatusActionTarget] = useState(null);
+  const [deleteActionTarget, setDeleteActionTarget] = useState(null);
   const [form, setForm] = useState({
     code: "ABACUS_ONLINE",
     name: "",
@@ -142,10 +143,31 @@ function SuperadminCoursesPage() {
       }
       await load({ limit, offset, q, status: statusFilter });
     } catch (err) {
-      setFormError(
+      setError(
         getFriendlyErrorMessage(err) ||
           (action === "ACTIVATE" ? "Failed to activate course." : "Failed to deactivate course.")
       );
+    }
+  };
+
+  const executeDeleteAction = async () => {
+    const target = deleteActionTarget;
+    setDeleteActionTarget(null);
+    if (!target) {
+      return;
+    }
+
+    const nextOffset = rows.length === 1 && offset > 0 ? Math.max(0, offset - limit) : offset;
+
+    try {
+      await deleteCourse(target.id);
+      if (editingId === target.id) {
+        resetForm();
+      }
+      setOffset(nextOffset);
+      await load({ limit, offset: nextOffset, q, status: statusFilter });
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to delete course.");
     }
   };
 
@@ -272,7 +294,7 @@ function SuperadminCoursesPage() {
             key: "actions",
             header: "Actions",
             render: (r) => (
-              <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => handleEdit(r)}>
                   Edit
                 </button>
@@ -288,19 +310,17 @@ function SuperadminCoursesPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto" }}
-                  onClick={() => void handleActivate(r)}
-                  disabled={r?.isActive === true}
+                  onClick={() => void (r?.isActive === true ? handleDeactivate(r) : handleActivate(r))}
                 >
-                  Activate
+                  {r?.isActive === true ? "Deactivate" : "Activate"}
                 </button>
                 <button
                   className="button secondary"
                   type="button"
-                  style={{ width: "auto" }}
-                  onClick={() => void handleDeactivate(r)}
-                  disabled={r?.isActive === false}
+                  style={{ width: "auto", color: "var(--color-text-danger)" }}
+                  onClick={() => setDeleteActionTarget(r)}
                 >
-                  Deactivate
+                  Delete
                 </button>
               </div>
             )
@@ -328,6 +348,16 @@ function SuperadminCoursesPage() {
         confirmLabel={statusActionTarget?.action === "ACTIVATE" ? "Activate" : "Deactivate"}
         onCancel={() => setStatusActionTarget(null)}
         onConfirm={() => void executeStatusAction()}
+      />
+
+      <ConfirmDialog
+        open={Boolean(deleteActionTarget)}
+        title="Delete Course"
+        message={`Delete course "${deleteActionTarget?.name || ""}"? This permanently removes the course and its course levels. Courses still linked to students or business partners must be unlinked first.`}
+        confirmLabel="Delete"
+        danger
+        onCancel={() => setDeleteActionTarget(null)}
+        onConfirm={() => void executeDeleteAction()}
       />
     </section>
   );

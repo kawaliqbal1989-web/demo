@@ -5,6 +5,7 @@ function mapPrismaError(error) {
   const name = String(error?.name || "");
   const code = String(error?.code || "");
   const message = String(error?.message || "");
+  const isDatabaseUnavailableMessage = /Can\s*not\s*reach\s*database|ECONNREFUSED|Connection\s*refused|pool timeout:\s*failed to retrieve a connection from pool/i.test(message);
 
   // Prisma connection/auth issues often surface as initialization errors or P10xx codes.
   if (name.includes("PrismaClientInitializationError") || name.includes("PrismaClientRustPanicError")) {
@@ -15,7 +16,7 @@ function mapPrismaError(error) {
     };
   }
 
-  if (code.startsWith("P10") || /Can\s*not\s*reach\s*database|ECONNREFUSED|Connection\s*refused/i.test(message)) {
+  if (code.startsWith("P10") || isDatabaseUnavailableMessage) {
     return {
       statusCode: 503,
       errorCode: "DATABASE_UNAVAILABLE2",

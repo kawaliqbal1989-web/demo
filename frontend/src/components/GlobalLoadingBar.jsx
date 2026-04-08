@@ -8,11 +8,13 @@ function GlobalLoadingBar() {
     return subscribe((count) => setActive(count));
   }, []);
 
-  if (active <= 0) {
-    return null;
-  }
-
-  return <div className="global-loading-bar" aria-label="Loading" />;
+  return (
+    <div
+      className={`global-loading-bar ${active > 0 ? "global-loading-bar--active" : ""}`}
+      aria-hidden={active <= 0}
+      aria-label={active > 0 ? "Loading" : undefined}
+    />
+  );
 }
 
 export { GlobalLoadingBar };

@@ -2,40 +2,71 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+function normalizeEnvValue(value) {
+  if (value === undefined || value === null) {
+    return "";
+  }
+
+  const normalized = String(value).trim();
+  if (!normalized) {
+    return "";
+  }
+
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    return normalized.slice(1, -1).trim();
+  }
+
+  return normalized;
+}
+
 function requiredEnv(name) {
-  const value = process.env[`${name}`];
-  if (!value || !String(value).trim()) {
+  const value = normalizeEnvValue(process.env[`${name}`]);
+  if (!value) {
     throw new Error(`Missing required environment variable: ${name}`);
   }
 
-  return String(value).trim();
+  return value;
 }
 
-const nodeEnv = process.env.NODE_ENV || "development";
+function optionalEnv(name) {
+  const value = normalizeEnvValue(process.env[`${name}`]);
+  return value || undefined;
+}
+
+function envOrDefault(name, fallback) {
+  const value = normalizeEnvValue(process.env[`${name}`]);
+  return value || fallback;
+}
+
+const nodeEnv = envOrDefault("NODE_ENV", "development");
 const isProduction = nodeEnv === "production";
 
 const env = {
 
+  databaseUrl: requiredEnv("DATABASE_URL"),
   nodeEnv,
   isProduction,
-  port: Number(process.env.PORT || 4000),
-  jwtAccessSecret: process.env.JWT_ACCESS_SECRET,
-  jwtRefreshSecret: process.env.JWT_REFRESH_SECRET,
-  jwtIssuer: process.env.JWT_ISSUER,
-  jwtAudience: process.env.JWT_AUDIENCE,
-  jwtAccessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || "20m",
-  jwtRefreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || "7d",
-  requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "1mb",
-  authRateLimitWindowMs: Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS || 900000),
-  authRateLimitMax: Number(process.env.AUTH_RATE_LIMIT_MAX || 20),
-  corsAllowedOrigins: String(process.env.CORS_ALLOWED_ORIGINS || "")
+  port: Number(envOrDefault("PORT", "4000")),
+  jwtAccessSecret: requiredEnv("JWT_ACCESS_SECRET"),
+  jwtRefreshSecret: requiredEnv("JWT_REFRESH_SECRET"),
+  jwtIssuer: optionalEnv("JWT_ISSUER"),
+  jwtAudience: optionalEnv("JWT_AUDIENCE"),
+  jwtAccessExpiresIn: envOrDefault("JWT_ACCESS_EXPIRES_IN", "20m"),
+  jwtRefreshExpiresIn: envOrDefault("JWT_REFRESH_EXPIRES_IN", "7d"),
+  requestBodyLimit: envOrDefault("REQUEST_BODY_LIMIT", "1mb"),
+  authRateLimitWindowMs: Number(envOrDefault("AUTH_RATE_LIMIT_WINDOW_MS", "900000")),
+  authRateLimitMax: Number(envOrDefault("AUTH_RATE_LIMIT_MAX", "20")),
+  corsAllowedOrigins: envOrDefault("CORS_ALLOWED_ORIGINS", "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean) ,
-  kpiRateLimitWindowMs: Number(process.env.KPI_RATE_LIMIT_WINDOW_MS || 60000),
-  kpiRateLimitMax: Number(process.env.KPI_RATE_LIMIT_MAX || 120),
-  geminiApiKey: process.env.GEMINI_API_KEY || "",
-  aiDailyLimit: Number(process.env.AI_DAILY_LIMIT || 30)
+  kpiRateLimitWindowMs: Number(envOrDefault("KPI_RATE_LIMIT_WINDOW_MS", "60000")),
+  kpiRateLimitMax: Number(envOrDefault("KPI_RATE_LIMIT_MAX", "120")),
+  geminiApiKey: envOrDefault("GEMINI_API_KEY", ""),
+  aiDailyLimit: Number(envOrDefault("AI_DAILY_LIMIT", "30"))
 };
 
 // Validate numeric config values

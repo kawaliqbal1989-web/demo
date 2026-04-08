@@ -6,7 +6,10 @@ import { DataTable, PaginationBar } from "../../components/DataTable";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getCourse } from "../../services/coursesService";
+import { listCourseLevels } from "../../services/courseLevelsService";
 import { listLevels } from "../../services/levelsService";
+import { resolveAcademicLevelForCourseLevel } from "../../utils/courseLevelMapping";
+import { formatWorksheetQuestionPreview } from "../../utils/worksheetQuestionPreview";
 import {
   createQuestionBankEntry,
   updateQuestionBankEntry,
@@ -25,45 +28,6 @@ function downloadBlob(blob, filename) {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-const OP_DISPLAY = { ADD: "+", SUB: "-", MUL: "×", DIV: "÷" };
-
-function renderExpression(question) {
-  const operation = String(question?.operation || "").toUpperCase();
-  const operands = question?.operands || {};
-  const terms = Array.isArray(operands?.terms)
-    ? operands.terms
-    : [operands?.a ?? operands?.x, operands?.b ?? operands?.y].filter((value) => Number.isFinite(Number(value)));
-  if (terms.length >= 2) {
-    if (operation === "MIX") {
-      const operators = Array.isArray(operands?.operators) ? operands.operators : [];
-      return terms
-        .map((term, index) => {
-          if (index === 0) return String(Number(term));
-          const op = operators[index] || "+";
-          return `${OP_DISPLAY[op] || op} ${Number(term)}`;
-        })
-        .join(" ");
-    }
-    if (operation === "ADD") {
-      return terms
-        .map((term, index) => {
-          const value = Number(term);
-          if (index === 0) {
-            return String(value);
-          }
-          return value < 0 ? `- ${Math.abs(value)}` : `+ ${value}`;
-        })
-        .join(" ");
-    }
-    const sign = operation === "SUB" ? "-" : operation === "MUL" ? "×" : operation === "DIV" ? "÷" : operation;
-    return terms.map((term) => String(Number(term))).join(` ${sign} `);
-  }
-  const left = operands?.a ?? operands?.x ?? "?";
-  const right = operands?.b ?? operands?.y ?? "?";
-  const sign = operation === "ADD" ? "+" : operation === "SUB" ? "-" : operation === "MUL" ? "×" : operation === "DIV" ? "÷" : operation;
-  return `${left} ${sign} ${right}`;
 }
 
 function computeCorrectAnswer(operation, terms, operators) {
@@ -127,7 +91,8 @@ function SuperadminCourseLevelQuestionBankPage() {
   const levelNumberInt = Number(levelNumber);
 
   const [course, setCourse] = useState(null);
-  const [levels, setLevels] = useState([]);
+  const [courseLevels, setCourseLevels] = useState([]);
+  const [academicLevels, setAcademicLevels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -148,9 +113,17 @@ function SuperadminCourseLevelQuestionBankPage() {
   const [deleteQuestionTarget, setDeleteQuestionTarget] = useState(null);
   const [previewQuestionId, setPreviewQuestionId] = useState(null);
 
-  const level = useMemo(() => {
-    return levels.find((item) => Number(item.rank) === levelNumberInt) || null;
-  }, [levels, levelNumberInt]);
+  const courseLevel = useMemo(() => {
+    return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
+  }, [courseLevels, levelNumberInt]);
+
+  const academicLevel = useMemo(() => {
+    return resolveAcademicLevelForCourseLevel({
+      courseLevel,
+      academicLevels,
+      levelNumber: levelNumberInt
+    });
+  }, [academicLevels, courseLevel, levelNumberInt]);
 
   const visibleBankItems = useMemo(() => {
     return bankItems.slice(pageOffset, pageOffset + pageLimit);
@@ -172,9 +145,14 @@ function SuperadminCourseLevelQuestionBankPage() {
     setLoading(true);
     setError("");
     try {
-      const [courseResp, levelsResp] = await Promise.all([getCourse(courseId), listLevels()]);
+      const [courseResp, courseLevelsResp, academicLevelsResp] = await Promise.all([
+        getCourse(courseId),
+        listCourseLevels({ courseId, limit: 100, offset: 0 }),
+        listLevels()
+      ]);
       setCourse(courseResp?.data || null);
-      setLevels(levelsResp?.data || []);
+      setCourseLevels(courseLevelsResp?.data?.items || []);
+      setAcademicLevels(academicLevelsResp?.data || []);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load course level context.");
     } finally {
@@ -205,11 +183,11 @@ function SuperadminCourseLevelQuestionBankPage() {
   }, [courseId, levelNumber]);
 
   useEffect(() => {
-    if (!level?.id) {
+    if (!academicLevel?.id) {
       return;
     }
-    void loadBank(level.id);
-  }, [level?.id]);
+    void loadBank(academicLevel.id);
+  }, [academicLevel?.id]);
 
   if (loading) {
     return <LoadingState label="Loading question bank..." />;
@@ -219,8 +197,12 @@ function SuperadminCourseLevelQuestionBankPage() {
     return <ErrorState title="Failed to load" message={error} onRetry={load} />;
   }
 
-  if (!course || !level) {
+  if (!course || !courseLevel) {
     return <ErrorState title="Level not found" message="The course level could not be resolved." />;
+  }
+
+  if (!academicLevel) {
+    return <ErrorState title="Level mapping missing" message="No academic level exists for this level number." />;
   }
 
   const onCreateBankQuestion = async (event) => {
@@ -260,7 +242,7 @@ function SuperadminCourseLevelQuestionBankPage() {
       }
 
       const payload = {
-        levelId: level.id,
+        levelId: academicLevel.id,
         difficulty: "EASY",
         prompt,
         operation: bankCreateForm.operation,
@@ -276,7 +258,7 @@ function SuperadminCourseLevelQuestionBankPage() {
       }
 
       setBankCreateForm((prev) => ({ ...prev, prompt: "", numbers: ["", ""], operators: ["", "+"] }));
-      await loadBank(level.id);
+  await loadBank(academicLevel.id);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to create question.");
     } finally {
@@ -286,7 +268,7 @@ function SuperadminCourseLevelQuestionBankPage() {
 
   const onExportBank = async () => {
     try {
-      const blob = await exportQuestionBankCsv({ levelId: level.id });
+      const blob = await exportQuestionBankCsv({ levelId: academicLevel.id });
       downloadBlob(blob, `question-bank-level-${levelNumberInt}.csv`);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to export CSV.");
@@ -297,12 +279,63 @@ function SuperadminCourseLevelQuestionBankPage() {
     setBankError("");
     try {
       const text = await file.text();
-      const items = JSON.parse(text);
-      if (!Array.isArray(items)) {
-        throw new Error("Import file must be a JSON array");
+      const parsed = JSON.parse(text);
+
+      // Extract flat question array from various supported formats:
+      // 1. Flat array: [{ prompt, difficulty, operation/operationType, correctAnswer/answer, operands }]
+      // 2. Nested:     { level: { worksheets: [{ questions: [] }] } }
+      // 3. Nested:     { worksheets: [{ questions: [] }] }
+      let raw;
+      if (Array.isArray(parsed)) {
+        raw = parsed;
+      } else if (parsed?.level?.worksheets) {
+        raw = parsed.level.worksheets.flatMap((ws) => ws.questions || []);
+      } else if (parsed?.worksheets) {
+        raw = parsed.worksheets.flatMap((ws) => ws.questions || []);
+      } else {
+        throw new Error("Unrecognized import format. Expected a JSON array or { level: { worksheets: [...] } }.");
       }
-      await importQuestionBank({ levelId: level.id, items });
-      await loadBank(level.id);
+
+      if (!raw.length) {
+        throw new Error("Import file contains no questions.");
+      }
+
+      // Normalize field name variants and build operands from prompt when absent
+      const items = raw.map((item) => {
+        // difficulty: numeric (1→EASY, 2→MEDIUM, 3→HARD) or string
+        let difficulty = item.difficulty;
+        if (typeof difficulty === "number") {
+          difficulty = difficulty <= 1 ? "EASY" : difficulty === 2 ? "MEDIUM" : "HARD";
+        } else {
+          difficulty = String(difficulty || "EASY").trim().toUpperCase();
+        }
+
+        // operation: accept operationType, type, or operation
+        const operation = String(item.operation || item.operationType || item.type || "ADD").trim().toUpperCase();
+
+        // correctAnswer: accept answer or correctAnswer
+        const correctAnswer = item.correctAnswer ?? item.answer ?? 0;
+
+        // operands: construct { terms, operators } from prompt if not provided
+        let operands = item.operands;
+        if (!operands || typeof operands !== "object") {
+          const parts = String(item.prompt || "").split(" + ");
+          const terms = parts.map((p) => Number(p.trim())).filter((n) => !Number.isNaN(n));
+          const operators = terms.map((_, i) => (i === 0 ? "" : "+"));
+          operands = terms.length > 0 ? { terms, operators } : { terms: [], operators: [] };
+        }
+
+        return {
+          prompt: item.prompt,
+          difficulty,
+          operation,
+          correctAnswer: Number(correctAnswer),
+          operands
+        };
+      });
+
+      await importQuestionBank({ levelId: academicLevel.id, items });
+      await loadBank(academicLevel.id);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to import question bank.");
     }
@@ -401,7 +434,7 @@ function SuperadminCourseLevelQuestionBankPage() {
             className="button secondary"
             type="button"
             style={{ width: "auto" }}
-            onClick={() => void loadBank(level.id)}
+            onClick={() => void loadBank(academicLevel.id)}
             disabled={bankLoading}
           >
             {bankLoading ? "Loading..." : "Refresh"}
@@ -612,7 +645,7 @@ function SuperadminCourseLevelQuestionBankPage() {
                 <strong>Prompt:</strong> {previewQuestion.prompt || "—"}
               </div>
               <div style={{ fontSize: 13 }}>
-                <strong>Expression:</strong> {renderExpression(previewQuestion)}
+                <strong>Expression:</strong> {formatWorksheetQuestionPreview(previewQuestion)}
               </div>
               <div style={{ fontSize: 13 }}>
                 <strong>Operation:</strong> {String(previewQuestion.operation || "").toUpperCase() || "—"}
@@ -654,7 +687,7 @@ function SuperadminCourseLevelQuestionBankPage() {
             return;
           }
           await deleteQuestionBankEntry(target.id);
-          await loadBank(level.id);
+          await loadBank(academicLevel.id);
         }}
         onCancel={() => setDeleteQuestionTarget(null)}
       />

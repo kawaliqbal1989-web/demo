@@ -417,17 +417,19 @@ const deleteCourse = asyncHandler(async (req, res) => {
       id,
       tenantId: req.auth.tenantId
     },
-    select: { id: true }
+    select: {
+      id: true,
+      name: true
+    }
   });
 
   if (!existing) {
     return res.apiError(404, "Course not found", "COURSE_NOT_FOUND");
   }
 
-  const [studentCount, assignedStudentCount, partnerAccessCount] = await prisma.$transaction([
-    prisma.student.count({
+  const [partnerAccessCount, assignedStudentCount, primaryStudentCount] = await prisma.$transaction([
+    prisma.partnerCourseAccess.count({
       where: {
-        tenantId: req.auth.tenantId,
         courseId: existing.id
       }
     }),
@@ -437,23 +439,21 @@ const deleteCourse = asyncHandler(async (req, res) => {
         courseId: existing.id
       }
     }),
-    prisma.partnerCourseAccess.count({
+    prisma.student.count({
       where: {
-        courseId: existing.id,
-        businessPartner: {
-          tenantId: req.auth.tenantId
-        }
+        tenantId: req.auth.tenantId,
+        courseId: existing.id
       }
     })
   ]);
 
   const blockers = {
-    studentCount,
+    partnerAccessCount,
     assignedStudentCount,
-    partnerAccessCount
+    primaryStudentCount
   };
 
-  if (studentCount > 0 || assignedStudentCount > 0 || partnerAccessCount > 0) {
+  if (partnerAccessCount > 0 || assignedStudentCount > 0 || primaryStudentCount > 0) {
     return res.apiError(409, buildCourseDeleteBlockedMessage(blockers), "COURSE_DELETE_BLOCKED");
   }
 
@@ -497,6 +497,43 @@ const deleteCourse = asyncHandler(async (req, res) => {
 
   res.locals.entityId = deleted.id;
   return res.apiSuccess("Course deleted", deleted);
+=======
+  if (partnerAccessCount > 0 || assignedStudentCount > 0 || primaryStudentCount > 0) {
+    return res.apiError(
+      409,
+      "Cannot delete course while it is linked to partner access or student records. Remove those links first.",
+      "COURSE_DELETE_BLOCKED"
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.student.updateMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        courseId: existing.id
+      },
+      data: {
+        courseId: null
+      }
+    });
+
+    await tx.courseLevel.deleteMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        courseId: existing.id
+      }
+    });
+
+    await tx.course.delete({
+      where: {
+        id: existing.id
+      }
+    });
+  });
+
+  res.locals.entityId = existing.id;
+  return res.apiSuccess("Course deleted", { id: existing.id, name: existing.name });
+>>>>>>> 7a487dc82189d1b4081c6470405c49d2d169b8bc
 });
 
 const listCourseLevels = asyncHandler(async (req, res) => {
@@ -742,7 +779,13 @@ const deleteCourseLevel = asyncHandler(async (req, res) => {
         courseId,
         tenantId: req.auth.tenantId
       },
-      select: { id: true }
+      select: {
+        id: true,
+        courseId: true,
+        levelNumber: true,
+        title: true
+      }
+>>>>>>> 7a487dc82189d1b4081c6470405c49d2d169b8bc
     });
   } catch (error) {
     if (!isSchemaMismatchError(error)) {
@@ -760,25 +803,17 @@ const deleteCourseLevel = asyncHandler(async (req, res) => {
     return res.apiError(404, "Course level not found", "COURSE_LEVEL_NOT_FOUND");
   }
 
-  try {
-    await prisma.courseLevel.delete({ where: { id: existing.id } });
-  } catch (error) {
-    if (isForeignKeyConstraintError(error)) {
-      return res.apiError(409, "Cannot delete level: it is referenced by existing data", "LEVEL_IN_USE");
-    }
+  await prisma.courseLevel.delete({
+    where: { id: existing.id }
+  });
 
-    if (!isSchemaMismatchError(error)) {
-      throw error;
-    }
-
-    return res.apiError(
-      503,
-      "Course levels require a database migration. Apply Prisma migrations and restart the server.",
-      "MIGRATION_REQUIRED"
-    );
-  }
-
-  return res.apiSuccess("Course level deleted", { id: existing.id });
+  res.locals.entityId = existing.id;
+  return res.apiSuccess("Course level deleted", {
+    id: existing.id,
+    courseId: existing.courseId,
+    levelNumber: existing.levelNumber,
+    title: existing.title
+  });
 });
 
 export {

@@ -5,6 +5,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PaginationBar } from "../../components/DataTable";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { formatWorksheetQuestionPrompt } from "../../utils/worksheetQuestions";
 import { getCourse } from "../../services/coursesService";
 import { listCourseLevels } from "../../services/courseLevelsService";
 import { listLevels } from "../../services/levelsService";
@@ -25,6 +26,9 @@ import {
   reorderWorksheetQuestions
 } from "../../services/worksheetsService";
 
+function displayQuestion(question) {
+  return formatWorksheetQuestionPrompt(question);
+}
 function SuperadminCourseLevelWorksheetsPage() {
   const navigate = useNavigate();
   const { courseId, levelNumber } = useParams();

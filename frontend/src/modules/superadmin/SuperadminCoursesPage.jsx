@@ -28,7 +28,8 @@ function SuperadminCoursesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [statusActionTarget, setStatusActionTarget] = useState(null);
-  const [deleteActionTarget, setDeleteActionTarget] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     code: "ABACUS_ONLINE",
     name: "",
@@ -150,41 +151,30 @@ function SuperadminCoursesPage() {
     }
   };
 
-  const executeDeleteAction = async () => {
-    const target = deleteActionTarget;
-    setDeleteActionTarget(null);
-    if (!target) {
+  const executeDelete = async () => {
+    const target = deleteTarget;
+    setDeleteTarget(null);
+    if (!target?.id) {
       return;
     }
 
-    const nextOffset = rows.length === 1 && offset > 0 ? Math.max(0, offset - limit) : offset;
-
+    setDeleting(true);
+    setFormError("");
     try {
       await deleteCourse(target.id);
       if (editingId === target.id) {
         resetForm();
       }
+
+      const shouldResetPage = rows.length === 1 && offset > 0;
+      const nextOffset = shouldResetPage ? Math.max(0, offset - limit) : offset;
       setOffset(nextOffset);
       await load({ limit, offset: nextOffset, q, status: statusFilter });
     } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to delete course.");
+      setFormError(getFriendlyErrorMessage(err) || "Failed to delete course.");
+    } finally {
+      setDeleting(false);
     }
-  };
-
-  const handleSearch = (event) => {
-    event.preventDefault();
-    setOffset(0);
-    void load({ limit, offset: 0, q, status: statusFilter });
-  };
-
-  const handleStatusFilterChange = (nextStatus) => {
-    setStatusFilter(nextStatus);
-    setOffset(0);
-    void load({ limit, offset: 0, q, status: nextStatus });
-  };
-
-  const handleRefresh = () => {
-    void load({ limit, offset, q, status: statusFilter });
   };
 
   return (
@@ -318,7 +308,8 @@ function SuperadminCoursesPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto", color: "var(--color-text-danger)" }}
-                  onClick={() => setDeleteActionTarget(r)}
+                  onClick={() => setDeleteTarget(r)}
+                  disabled={deleting}
                 >
                   Delete
                 </button>
@@ -351,13 +342,17 @@ function SuperadminCoursesPage() {
       />
 
       <ConfirmDialog
-        open={Boolean(deleteActionTarget)}
+        open={!!deleteTarget}
         title="Delete Course"
-        message={`Delete course "${deleteActionTarget?.name || ""}"? This permanently removes the course and its course levels. Courses still linked to students or business partners must be unlinked first.`}
-        confirmLabel="Delete"
-        danger
-        onCancel={() => setDeleteActionTarget(null)}
-        onConfirm={() => void executeDeleteAction()}
+        message={`Delete course "${deleteTarget?.name || ""}" permanently? This removes its course-level setup and cannot be undone.`}
+        confirmLabel={deleting ? "Deleting..." : "Delete Course"}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+          }
+        }}
+        onConfirm={() => void executeDelete()}
+      />
       />
     </section>
   );

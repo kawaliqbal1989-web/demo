@@ -1,4 +1,7 @@
 import { authHeader, http, loginAs, prisma, randomId } from "../helpers/test-helpers.js";
+import { jest } from "@jest/globals";
+
+jest.setTimeout(60000);
 
 describe("EXAM MANAGEMENT WORKFLOW", () => {
   let saToken;
@@ -12,6 +15,99 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
   let teacher;
   let student;
   let baseExamWorksheet;
+
+  async function createExamCycleForWorkflow({ practiceStartAt } = {}) {
+    const now = Date.now();
+
+    const scheduledPracticeStart = practiceStartAt || new Date(now + 2 * 24 * 60 * 60 * 1000);
+    scheduledPracticeStart.setMilliseconds(0);
+
+    const examStartsAt = new Date(now + 10 * 24 * 60 * 60 * 1000);
+    examStartsAt.setMilliseconds(0);
+
+    const examEndsAt = new Date(now + 12 * 24 * 60 * 60 * 1000);
+    examEndsAt.setMilliseconds(0);
+
+    const response = await http
+      .post("/api/exam-cycles")
+      .set(authHeader(saToken))
+      .send({
+        businessPartnerId: partner.id,
+        name: `Exam ${randomId("cycle")}`,
+        enrollmentStartAt: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
+        enrollmentEndAt: new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString(),
+        practiceStartAt: scheduledPracticeStart.toISOString(),
+        examStartsAt: examStartsAt.toISOString(),
+        examEndsAt: examEndsAt.toISOString(),
+        examDurationMinutes: 45,
+        attemptLimit: 1
+      });
+
+    expect(response.status).toBe(201);
+
+    return {
+      examCycleId: response.body.data.id,
+      practiceStartAtIso: scheduledPracticeStart.toISOString()
+    };
+  }
+
+  async function moveExamCycleToSuperadmin(examCycleId) {
+    const enroll = await http
+      .post(`/api/exam-cycles/${examCycleId}/teacher-list/enroll`)
+      .set(authHeader(teacherToken))
+      .send({ studentIds: [student.id] });
+
+    expect([200, 201]).toContain(enroll.status);
+
+    const submitTeacher = await http
+      .post(`/api/exam-cycles/${examCycleId}/teacher-list/submit`)
+      .set(authHeader(teacherToken))
+      .send({});
+
+    expect(submitTeacher.status).toBe(200);
+    expect(submitTeacher.body.data.status).toBe("SUBMITTED_TO_CENTER");
+
+    const prepared = await http
+      .post(`/api/exam-cycles/${examCycleId}/center-list/prepare`)
+      .set(authHeader(centerToken))
+      .send({});
+
+    expect(prepared.status).toBe(200);
+
+    const submitCenter = await http
+      .post(`/api/exam-cycles/${examCycleId}/center-list/submit`)
+      .set(authHeader(centerToken))
+      .send({});
+
+    expect(submitCenter.status).toBe(200);
+    expect(submitCenter.body.data.status).toBe("SUBMITTED_TO_FRANCHISE");
+
+    const pendingFr = await http
+      .get(`/api/exam-cycles/${examCycleId}/enrollment-lists/pending`)
+      .set(authHeader(franchiseToken));
+
+    expect(pendingFr.status).toBe(200);
+    expect(Array.isArray(pendingFr.body.data)).toBe(true);
+    const listId = pendingFr.body.data[0].id;
+
+    const frForward = await http
+      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/forward`)
+      .set(authHeader(franchiseToken))
+      .send({});
+
+    expect(frForward.status).toBe(200);
+    expect(frForward.body.data.status).toBe("SUBMITTED_TO_BUSINESS_PARTNER");
+
+    const bpForward = await http
+      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/forward`)
+      .set(authHeader(bpToken))
+      .send({});
+
+    expect(bpForward.status).toBe(200);
+    expect(bpForward.body.data.status).toBe("SUBMITTED_TO_SUPERADMIN");
+
+    return { listId };
+  }
 
   beforeAll(async () => {
     const [saLogin, bpLogin, frLogin, ceLogin, teLogin] = await Promise.all([
@@ -144,83 +240,8 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
   });
 
   test("End-to-end list approval + worksheet assignment", async () => {
-    const now = Date.now();
-
-    const create = await http
-      .post("/api/exam-cycles")
-      .set(authHeader(saToken))
-      .send({
-        businessPartnerId: partner.id,
-        name: `Exam ${randomId("cycle")}`,
-        enrollmentStartAt: new Date(now - 24 * 60 * 60 * 1000).toISOString(),
-        enrollmentEndAt: new Date(now + 5 * 24 * 60 * 60 * 1000).toISOString(),
-        practiceStartAt: new Date(now).toISOString(),
-        examStartsAt: new Date(now + 10 * 24 * 60 * 60 * 1000).toISOString(),
-        examEndsAt: new Date(now + 12 * 24 * 60 * 60 * 1000).toISOString(),
-        examDurationMinutes: 45,
-        attemptLimit: 1
-      });
-
-    expect(create.status).toBe(201);
-    const examCycleId = create.body.data.id;
-
-    // Teacher enrolls and submits to center
-    const enroll = await http
-      .post(`/api/exam-cycles/${examCycleId}/teacher-list/enroll`)
-      .set(authHeader(teacherToken))
-      .send({ studentIds: [student.id] });
-
-    expect([200, 201]).toContain(enroll.status);
-
-    const submitTeacher = await http
-      .post(`/api/exam-cycles/${examCycleId}/teacher-list/submit`)
-      .set(authHeader(teacherToken))
-      .send({});
-
-    expect(submitTeacher.status).toBe(200);
-    expect(submitTeacher.body.data.status).toBe("SUBMITTED_TO_CENTER");
-
-    // Center prepares and submits combined list
-    const prepared = await http
-      .post(`/api/exam-cycles/${examCycleId}/center-list/prepare`)
-      .set(authHeader(centerToken))
-      .send({});
-
-    expect(prepared.status).toBe(200);
-
-    const submitCenter = await http
-      .post(`/api/exam-cycles/${examCycleId}/center-list/submit`)
-      .set(authHeader(centerToken))
-      .send({});
-
-    expect(submitCenter.status).toBe(200);
-    expect(submitCenter.body.data.status).toBe("SUBMITTED_TO_FRANCHISE");
-
-    // Franchise sees pending and forwards
-    const pendingFr = await http
-      .get(`/api/exam-cycles/${examCycleId}/enrollment-lists/pending`)
-      .set(authHeader(franchiseToken));
-
-    expect(pendingFr.status).toBe(200);
-    expect(Array.isArray(pendingFr.body.data)).toBe(true);
-    const listId = pendingFr.body.data[0].id;
-
-    const frForward = await http
-      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/forward`)
-      .set(authHeader(franchiseToken))
-      .send({});
-
-    expect(frForward.status).toBe(200);
-    expect(frForward.body.data.status).toBe("SUBMITTED_TO_BUSINESS_PARTNER");
-
-    // BP forwards
-    const bpForward = await http
-      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/forward`)
-      .set(authHeader(bpToken))
-      .send({});
-
-    expect(bpForward.status).toBe(200);
-    expect(bpForward.body.data.status).toBe("SUBMITTED_TO_SUPERADMIN");
+    const { examCycleId, practiceStartAtIso } = await createExamCycleForWorkflow();
+    const { listId } = await moveExamCycleToSuperadmin(examCycleId);
 
     // Superadmin approves
     const approve = await http
@@ -238,6 +259,13 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
     expect(approve.status).toBe(200);
     expect(approve.body.data.list.status).toBe("APPROVED");
     expect(approve.body.data.worksheets.createdCount).toBeGreaterThanOrEqual(1);
+
+    const approvedCycle = await prisma.examCycle.findUniqueOrThrow({
+      where: { id: examCycleId },
+      select: { practiceStartAt: true }
+    });
+
+    expect(approvedCycle.practiceStartAt.toISOString()).toBe(practiceStartAtIso);
 
     // Only EXAM worksheets should exist with examCycleId for this student.
     const ws = await prisma.worksheet.findMany({
@@ -279,5 +307,42 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
 
     expect(resultsAfter.status).toBe(200);
     expect(resultsAfter.body.data.status).toBe("PUBLISHED");
+  });
+
+  test("Superadmin approval rejects incomplete worksheet selections", async () => {
+    const { examCycleId } = await createExamCycleForWorkflow();
+    const { listId } = await moveExamCycleToSuperadmin(examCycleId);
+
+    const approve = await http
+      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/approve`)
+      .set(authHeader(saToken))
+      .send({
+        selections: [
+          {
+            levelId: `missing-${randomId("level")}`,
+            worksheetId: baseExamWorksheet.id
+          }
+        ]
+      });
+
+    expect(approve.status).toBe(409);
+    expect(approve.body.error_code).toBe("EXAM_WORKSHEET_SELECTION_INCOMPLETE");
+
+    const list = await prisma.examEnrollmentList.findUniqueOrThrow({
+      where: { id: listId },
+      select: { status: true }
+    });
+
+    expect(list.status).toBe("SUBMITTED_TO_SUPERADMIN");
+
+    const assignedExamWorksheets = await prisma.worksheet.count({
+      where: {
+        tenantId: tenant.id,
+        examCycleId,
+        generationMode: "EXAM"
+      }
+    });
+
+    expect(assignedExamWorksheets).toBe(0);
   });
 });

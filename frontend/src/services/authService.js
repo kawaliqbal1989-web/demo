@@ -32,8 +32,8 @@ async function logoutRequest(accessToken, refreshToken) {
   }
 }
 
-async function meRequest() {
-  const response = await apiClient.get("/auth/me");
+async function meRequest(config = {}) {
+  const response = await apiClient.get("/auth/me", config);
   return response.data;
 }
 

@@ -34,20 +34,18 @@ if (env.isProduction) {
 app.use(helmet());
 app.use(
   cors({
-    // origin: (origin, callback) => {
-    //   if (!origin) {
-    //     return callback(null, true);
-    //   }
+    origin: (origin, callback) => {
+      if (!origin) {
+        return callback(null, true);
+      }
 
-    //   if (!env.isProduction) {
-    //     const ok = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin);
-    //     return callback(null, ok);
-    //   }
+      if (!env.isProduction) {
+        const ok = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin);
+        return callback(null, ok);
+      }
 
-    //   return callback(null, productionCorsAllowedOrigins.has(origin));
-    // },
-
-    origin: defaultAllowedOrigins,
+      return callback(null, productionCorsAllowedOrigins.has(origin));
+    },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [
       "Content-Type",

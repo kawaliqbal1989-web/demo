@@ -9,7 +9,11 @@ export async function apiLogin(username: string, password = "Pass@123") {
     data: { tenantCode: "DEFAULT", username, password }
   });
   const body = await res.json();
-  expect(body.success).toBeTruthy();
+  if (!body?.success) {
+    throw new Error(
+      `Login failed for ${username}: ${res.status()} ${body?.error_code || ""} ${body?.message || ""}`.trim()
+    );
+  }
   const token = body.data?.access_token as string;
   expect(token).toBeTruthy();
   return { ctx, token };

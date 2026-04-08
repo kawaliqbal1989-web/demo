@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
@@ -32,6 +32,7 @@ function SuperadminExamPendingListsPage() {
   const [rows, setRows] = useState([]);
   const [actingId, setActingId] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [loadingApprovalId, setLoadingApprovalId] = useState(null);
   const [levelBreakdownByListId, setLevelBreakdownByListId] = useState({});
   const [worksheetsByLevelId, setWorksheetsByLevelId] = useState({});
   const [selectionByListId, setSelectionByListId] = useState({});
@@ -39,7 +40,7 @@ function SuperadminExamPendingListsPage() {
   const [approveListId, setApproveListId] = useState(null);
   const [rejectListId, setRejectListId] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
@@ -50,16 +51,13 @@ function SuperadminExamPendingListsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [examCycleId]);
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [examCycleId]);
+  }, [load]);
 
-  const canAct = useMemo(() => {
-    return (listId) => actingId === null || actingId === listId;
-  }, [actingId]);
+  const canAct = (listId) => actingId === null || actingId === listId;
 
   const openApprovalForm = async (listId) => {
     if (!listId || !canAct(listId)) return;
@@ -72,27 +70,43 @@ function SuperadminExamPendingListsPage() {
     setError("");
 
     if (!levelBreakdownByListId[listId]) {
+      setLoadingApprovalId(listId);
       try {
         const resp = await getEnrollmentListLevelBreakdown(examCycleId, listId);
         const breakdown = resp?.data || [];
         setLevelBreakdownByListId((prev) => ({ ...prev, [listId]: breakdown }));
 
         // Ensure we have worksheet choices cached for each level.
-        for (const item of breakdown) {
-          const levelId = item?.levelId;
-          if (!levelId || worksheetsByLevelId[levelId]) {
-            continue;
-          }
-          const wsResp = await listWorksheets({ levelId, limit: 200, offset: 0, published: true });
-          const ws = Array.isArray(wsResp?.data) ? wsResp.data : [];
-          const eligible = ws
-            .filter((w) => !w?.examCycleId)
-            .filter((w) => (w?.questionCount ?? 0) > 0);
+        const missingLevelIds = Array.from(new Set(breakdown.map((item) => item?.levelId).filter(Boolean))).filter(
+          (levelId) => !worksheetsByLevelId[levelId]
+        );
 
-          setWorksheetsByLevelId((prev) => ({ ...prev, [levelId]: eligible }));
+        if (missingLevelIds.length) {
+          const worksheetResults = await Promise.all(
+            missingLevelIds.map(async (levelId) => {
+              const wsResp = await listWorksheets({ levelId, limit: 200, offset: 0, published: true });
+              const ws = Array.isArray(wsResp?.data) ? wsResp.data : [];
+              const eligible = ws
+                .filter((w) => !w?.examCycleId)
+                .filter((w) => (w?.questionCount ?? 0) > 0);
+              return [levelId, eligible];
+            })
+          );
+
+          setWorksheetsByLevelId((prev) => {
+            const next = { ...prev };
+            for (const [levelId, eligible] of worksheetResults) {
+              if (!next[levelId]) {
+                next[levelId] = eligible;
+              }
+            }
+            return next;
+          });
         }
       } catch (err) {
         setError(getFriendlyErrorMessage(err) || "Failed to load worksheet options.");
+      } finally {
+        setLoadingApprovalId((prev) => (prev === listId ? null : prev));
       }
     }
   };
@@ -109,6 +123,7 @@ function SuperadminExamPendingListsPage() {
 
   const doConfirmApprove = async (listId) => {
     if (!listId || !canAct(listId)) return;
+    if (loadingApprovalId === listId) return;
     const breakdown = levelBreakdownByListId[listId] || [];
     const sel = selectionByListId[listId] || {};
 
@@ -179,7 +194,7 @@ function SuperadminExamPendingListsPage() {
     }
   };
 
-  if (loading) {
+  if (loading && !rows.length) {
     return <LoadingState label="Loading pending lists..." />;
   }
 
@@ -198,7 +213,7 @@ function SuperadminExamPendingListsPage() {
       <div className="card" style={{ display: "flex", gap: 12, alignItems: "center" }}>
         <div style={{ color: "var(--muted)" }}>Count: {rows.length}</div>
         <div style={{ flex: 1 }} />
-        <button className="button secondary" type="button" onClick={() => void load()} style={{ width: "auto" }}>
+        <button className="button secondary" type="button" onClick={() => void load()} style={{ width: "auto" }} disabled={loading}>
           Refresh
         </button>
       </div>
@@ -210,11 +225,12 @@ function SuperadminExamPendingListsPage() {
       ) : null}
 
       <DataTable
+        emptyMessage={error ? "Unable to load pending lists. Use Refresh to retry." : "No pending combined lists."}
         columns={[
           {
             key: "center",
             header: "Center",
-            render: (r) => r?.centerNode ? `${r.centerNode.name} (${r.centerNode.code || r.centerNode.id})` : ""
+            render: (r) => r?.centerNode ? `${r.centerNode.name} (${r.centerNode.code || r.centerNode.id})` : "Unknown center"
           },
           { key: "entries", header: "Entries", render: (r) => String(r?.entriesCount ?? "") },
           { key: "status", header: "Status", render: (r) => r?.status || "" },
@@ -233,10 +249,10 @@ function SuperadminExamPendingListsPage() {
                     className="button"
                     type="button"
                     onClick={() => void openApprovalForm(r.id)}
-                    disabled={actingId === r.id}
+                    disabled={actingId === r.id || loadingApprovalId === r.id}
                     style={{ width: "auto" }}
                   >
-                    {editingId === r.id ? "Close" : "Approve"}
+                    {loadingApprovalId === r.id ? "Loading..." : editingId === r.id ? "Close" : "Approve"}
                   </button>
                   <button
                     className="button secondary"
@@ -254,6 +270,16 @@ function SuperadminExamPendingListsPage() {
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
                       Select one published exam worksheet per level in this request.
                     </div>
+
+                    {loadingApprovalId === r.id && !(levelBreakdownByListId[r.id] || []).length ? (
+                      <LoadingState label="Loading worksheet options..." />
+                    ) : null}
+
+                    {!loadingApprovalId && !(levelBreakdownByListId[r.id] || []).length ? (
+                      <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
+                        No level breakdown is available for this request.
+                      </p>
+                    ) : null}
 
                     {(levelBreakdownByListId[r.id] || []).map((b) => {
                       const levelId = b.levelId;
@@ -294,7 +320,7 @@ function SuperadminExamPendingListsPage() {
                         className="button"
                         type="button"
                         onClick={() => void doConfirmApprove(r.id)}
-                        disabled={actingId === r.id}
+                        disabled={actingId === r.id || loadingApprovalId === r.id || !(levelBreakdownByListId[r.id] || []).length}
                         style={{ width: "auto" }}
                       >
                         {actingId === r.id ? "Working..." : "Confirm Approve"}

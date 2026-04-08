@@ -1,9 +1,14 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { LoadingState } from "../components/LoadingState";
 
 function RoleRoute({ allowedRoles = [], requireTenantScope = true }) {
   const location = useLocation();
-  const { role, tenantId } = useAuth();
+  const { role, tenantId, authBootstrapPending } = useAuth();
+
+  if (authBootstrapPending) {
+    return <LoadingState label="Loading session..." />;
+  }
 
   if (!allowedRoles.includes(role)) {
     return <Navigate to="/unauthorized" replace />;

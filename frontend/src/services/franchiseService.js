@@ -1,7 +1,7 @@
 import { apiClient } from "./apiClient";
 
-async function getMyFranchise() {
-  const res = await apiClient.get("/franchise/me");
+async function getMyFranchise(config = {}) {
+  const res = await apiClient.get("/franchise/me", config);
   return res.data;
 }
 

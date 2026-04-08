@@ -5,6 +5,7 @@ import { ErrorState } from "../../components/ErrorState";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { formatWorksheetQuestionPrompt } from "../../utils/worksheetQuestions";
 import { getCourse } from "../../services/coursesService";
 import { listCourseLevels } from "../../services/courseLevelsService";
 import { listLevels } from "../../services/levelsService";
@@ -30,6 +31,9 @@ function downloadBlob(blob, filename) {
   URL.revokeObjectURL(url);
 }
 
+function renderExpression(question) {
+  return formatWorksheetQuestionPrompt(question);
+}
 function computeCorrectAnswer(operation, terms, operators) {
   if (!Array.isArray(terms) || terms.length < 2) {
     return null;

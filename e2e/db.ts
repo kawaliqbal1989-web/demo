@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
-import bcrypt from "bcrypt";
-import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
 dotenv.config(
   process.env.DOTENV_CONFIG_PATH
@@ -17,7 +17,7 @@ if (effectiveDatabaseUrl) {
   process.env.DATABASE_URL = effectiveDatabaseUrl;
 }
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient(effectiveDatabaseUrl || undefined);
 
 function maskDbUrl(url: string) {
   try {

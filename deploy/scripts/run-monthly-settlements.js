@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 import { generateMonthlySettlements } from "../src/services/settlement.service.js";
 
 function parseArgs(argv) {
@@ -42,7 +42,7 @@ async function main() {
     throw new Error("DATABASE_URL is required");
   }
 
-  const prisma = new PrismaClient();
+  const prisma = createPrismaClient();
 
   try {
     const data = await prisma.$transaction((tx) =>

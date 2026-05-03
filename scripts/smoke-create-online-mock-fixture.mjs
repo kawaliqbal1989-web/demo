@@ -1,7 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 import "dotenv/config";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function envText(name, fallback = "") {
   const raw = process.env[name];

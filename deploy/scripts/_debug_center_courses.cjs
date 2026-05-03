@@ -1,6 +1,7 @@
 require('dotenv').config();
-const { PrismaClient } = require('@prisma/client');
-const p = new PrismaClient();
+  const { createPrismaClient } = await import('../src/lib/prisma-client.js');
+  const p = createPrismaClient();
+
 
 (async () => {
   try {

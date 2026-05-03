@@ -1,7 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { createPrismaClient } from '../src/lib/prisma-client.js';
+const prisma = createPrismaClient();
 async function main(){
   const username = process.argv[2] || 'BP005';
   const user = await prisma.authUser.findFirst({ where: { username } });

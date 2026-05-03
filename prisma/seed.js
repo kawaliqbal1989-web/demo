@@ -1,7 +1,11 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "@prisma/client";
+import "dotenv/config";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: new PrismaMariaDb(process.env.DATABASE_URL)
+});
 
 function createQuestionBankRows({ tenantId, levelId, rank, templateId }) {
   const difficulties = [

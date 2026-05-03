@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const baseUrl = "http://localhost:4000";
 
 async function request(method, path, { body, token } = {}) {

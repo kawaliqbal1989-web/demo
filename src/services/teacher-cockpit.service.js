@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { Prisma } from "@prisma/client";
 import { computeStudentRisk } from "./student-risk.service.js";
 import { evaluatePromotionEligibility } from "./promotion-eligibility.service.js";
+import { resolveEffectiveStudentLevel } from "../utils/student-level.js";
 
 // ─── At-Risk Student Queue ──────────────────────────────────────────
 async function getAtRiskQueue(teacherUserId, tenantId, centerId) {
@@ -14,6 +15,15 @@ async function getAtRiskQueue(teacherUserId, tenantId, centerId) {
       admissionNo: true,
       levelId: true,
       level: { select: { name: true, rank: true } },
+      batchEnrollments: {
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          levelId: true,
+          level: { select: { name: true, rank: true } }
+        }
+      },
     },
   });
 
@@ -21,8 +31,9 @@ async function getAtRiskQueue(teacherUserId, tenantId, centerId) {
 
   const results = await Promise.allSettled(
     students.map(async (s) => {
-      const risk = await computeStudentRisk(s.id, tenantId, s.levelId);
-      return { student: s, risk };
+      const { effectiveLevel, effectiveLevelId } = resolveEffectiveStudentLevel(s);
+      const risk = await computeStudentRisk(s.id, tenantId, effectiveLevelId);
+      return { student: s, risk, effectiveLevel };
     })
   );
 
@@ -35,7 +46,7 @@ async function getAtRiskQueue(teacherUserId, tenantId, centerId) {
       studentId: r.student.id,
       name: `${r.student.firstName} ${r.student.lastName}`,
       admissionNo: r.student.admissionNo,
-      level: r.student.level?.name || "—",
+      level: r.effectiveLevel?.name || "—",
       riskLevel: r.risk.level,
       riskScore: r.risk.score,
       indicators: r.risk.indicators || [],
@@ -233,6 +244,15 @@ async function getWorksheetRecommendations(teacherUserId, tenantId, centerId) {
       admissionNo: true,
       levelId: true,
       level: { select: { name: true } },
+      batchEnrollments: {
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          levelId: true,
+          level: { select: { name: true } }
+        }
+      },
     },
   });
 
@@ -278,6 +298,7 @@ async function getWorksheetRecommendations(teacherUserId, tenantId, centerId) {
   }
 
   for (const student of students) {
+    const { effectiveLevel } = resolveEffectiveStudentLevel(student);
     const recentCount = recentMap.get(student.id) || 0;
     const weakList = weakMap.get(student.id) || [];
 
@@ -286,7 +307,7 @@ async function getWorksheetRecommendations(teacherUserId, tenantId, centerId) {
         studentId: student.id,
         name: `${student.firstName} ${student.lastName}`,
         admissionNo: student.admissionNo,
-        level: student.level?.name || "—",
+        level: effectiveLevel?.name || "—",
         type: "INACTIVE",
         reason: "No submissions in the last 7 days",
         suggestion: "Assign a worksheet to re-engage this student",
@@ -301,7 +322,7 @@ async function getWorksheetRecommendations(teacherUserId, tenantId, centerId) {
         studentId: student.id,
         name: `${student.firstName} ${student.lastName}`,
         admissionNo: student.admissionNo,
-        level: student.level?.name || "—",
+        level: effectiveLevel?.name || "—",
         type: "WEAK_TOPIC",
         reason: `Weak in "${topWeak.topic}" (${topWeak.accuracy}% accuracy)`,
         suggestion: `Assign focused practice on ${topWeak.topic}`,

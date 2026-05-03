@@ -1,5 +1,5 @@
 import dotenv from "dotenv";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
 dotenv.config(
   process.env.DOTENV_CONFIG_PATH
@@ -19,7 +19,7 @@ export async function cleanupE2EData() {
     process.env.DATABASE_URL = effectiveDatabaseUrl;
   }
 
-  const prisma = new PrismaClient();
+  const prisma = createPrismaClient(effectiveDatabaseUrl || undefined);
 
   try {
     const tenant = await prisma.tenant.findUnique({ where: { code: "DEFAULT" }, select: { id: true } });

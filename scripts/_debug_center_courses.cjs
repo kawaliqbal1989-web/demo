@@ -1,8 +1,9 @@
 require('dotenv').config();
-const { PrismaClient } = require('@prisma/client');
-const p = new PrismaClient();
 
 (async () => {
+  const { createPrismaClient } = await import('../src/lib/prisma-client.js');
+  const p = createPrismaClient();
+
   try {
     const bps = await p.businessPartner.findMany({ select: { id: true, accessMode: true, name: true }, take: 5 });
     console.log('Business Partners:', JSON.stringify(bps, null, 2));

@@ -135,7 +135,7 @@ function StudentProfilePage() {
   const centerLabel = me.centerName
     ? `${me.centerName}${me.centerCode ? ` (${me.centerCode})` : ""}`
     : me.centerCode || "—";
-  const levelLabel = me.levelName || me.level?.name || "—";
+  const levelLabel = me.levelTitle || me.levelName || me.level?.name || "—";
   const courseLabel = me.courseCode || me.course?.code || "—";
 
   return (

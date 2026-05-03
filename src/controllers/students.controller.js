@@ -19,6 +19,7 @@ import { buildUploadUrl } from "../utils/request-url.js";
 import { recordEnrollmentTransaction } from "../services/financial-ledger.service.js";
 import { toCsv } from "../utils/csv.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+import { withEffectiveStudentLevel } from "../utils/student-level.js";
 
 function parseIsoDateOnly(value) {
   if (!value) return null;
@@ -1026,6 +1027,7 @@ const listStudents = asyncHandler(async (req, res) => {
       orderBy: { createdAt: "desc" },
       take: 1,
       include: {
+        level: { select: { id: true, name: true, rank: true } },
         batch: { select: { id: true, name: true } },
         assignedTeacher: {
           select: {
@@ -1066,6 +1068,8 @@ const listStudents = asyncHandler(async (req, res) => {
       include: includeFallback
     });
   }
+
+  data = data.map((student) => withEffectiveStudentLevel(student));
 
   res.setHeader("X-Pagination-Limit", String(limit));
   res.setHeader("X-Pagination-Offset", String(offset));
@@ -1114,6 +1118,7 @@ const getStudent = asyncHandler(async (req, res) => {
       orderBy: { createdAt: "desc" },
       take: 1,
       include: {
+        level: { select: { id: true, name: true, rank: true } },
         batch: { select: { id: true, name: true } },
         assignedTeacher: {
           select: {
@@ -1153,6 +1158,8 @@ const getStudent = asyncHandler(async (req, res) => {
   if (!student) {
     return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
   }
+
+  student = withEffectiveStudentLevel(student);
 
   return res.apiSuccess("Student fetched", student);
 });

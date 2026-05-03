@@ -1,8 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import bcrypt from "bcrypt";
-import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function hasStudentCourseColumn() {
   const rows = await prisma.$queryRaw`

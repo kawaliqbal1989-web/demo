@@ -1,8 +1,9 @@
 import dotenv from 'dotenv';
 dotenv.config();
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcrypt';
-const prisma = new PrismaClient();
+import { createPrismaClient } from '../src/lib/prisma-client.js';
+import bcrypt from 'bcryptjs';
+
+const prisma = createPrismaClient();
 async function main(){
   const id = process.argv[2];
   const newUsername = process.argv[3];

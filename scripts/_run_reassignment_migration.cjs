@@ -1,5 +1,4 @@
 require('dotenv').config();
-const { PrismaClient } = require('@prisma/client');
 
 const LOWER_TABLE = 'worksheetreassignmentrequest';
 const UPPER_TABLE = 'WorksheetReassignmentRequest';
@@ -80,7 +79,8 @@ async function createLowercaseTable(prisma) {
 }
 
 (async () => {
-  const prisma = new PrismaClient();
+  const { createPrismaClient } = await import('../src/lib/prisma-client.js');
+  const prisma = createPrismaClient();
 
   try {
     const lowerExists = await tableExists(prisma, LOWER_TABLE);

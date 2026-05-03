@@ -15,12 +15,12 @@
  *
  * Requires DATABASE_URL env var (or .env loaded by dotenv).
  */
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const COURSES = [
   {

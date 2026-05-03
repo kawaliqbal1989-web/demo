@@ -60,6 +60,22 @@ function SuperadminCoursesPage() {
     return <SkeletonLoader variant="table" rows={6} />;
   }
 
+  const handleRefresh = () => {
+    void load({ limit, offset, q, status: statusFilter });
+  };
+
+  const handleSearch = (event) => {
+    event.preventDefault();
+    setOffset(0);
+    void load({ limit, offset: 0, q, status: statusFilter });
+  };
+
+  const handleStatusFilterChange = (nextStatus) => {
+    setStatusFilter(nextStatus);
+    setOffset(0);
+    void load({ limit, offset: 0, q, status: nextStatus });
+  };
+
   const resetForm = () => {
     setEditingId(null);
     setFormError("");
@@ -352,7 +368,6 @@ function SuperadminCoursesPage() {
           }
         }}
         onConfirm={() => void executeDelete()}
-      />
       />
     </section>
   );

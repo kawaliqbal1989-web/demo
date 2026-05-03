@@ -1,7 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
 const base = process.env.API_BASE || "http://localhost:4000";
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function asJson(res) {
   const text = await res.text();

@@ -1,5 +1,6 @@
-import { PrismaClient } from '@prisma/client';
-const prisma = new PrismaClient();
+import { createPrismaClient } from '../src/lib/prisma-client.js';
+
+const prisma = createPrismaClient();
 async function main(){
   const u = await prisma.authUser.findUnique({ where: { tenantId_email: { tenantId: 'tenant_default', email: 'superadmin@abacusweb.local' }}});
   console.log(u);

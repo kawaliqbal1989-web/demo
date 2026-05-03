@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { getLevelPerformance } from "./student-performance.service.js";
 import { calculateConsistencyScore, evaluatePromotionEligibility } from "./promotion-eligibility.service.js";
 import { computeStudentRisk, generateInsights } from "./student-risk.service.js";
+import { resolveEffectiveStudentLevel } from "../utils/student-level.js";
 
 /**
  * Fetch complete 360° data for a single student in one call.
@@ -41,6 +42,8 @@ async function getStudent360Data(studentId, tenantId, scopeNodeId) {
         where: { status: "ACTIVE" },
         take: 1,
         select: {
+          levelId: true,
+          level: { select: { id: true, name: true, rank: true } },
           batch: { select: { id: true, name: true } },
           assignedTeacher: {
             select: {
@@ -60,7 +63,8 @@ async function getStudent360Data(studentId, tenantId, scopeNodeId) {
 
   if (!student) return null;
 
-  const levelId = student.levelId;
+  const enrollment = student.batchEnrollments?.[0] || null;
+  const { effectiveLevel, effectiveLevelId } = resolveEffectiveStudentLevel(student, enrollment);
 
   // ── Step 2: Parallel data fetch ──
   const now = new Date();
@@ -85,13 +89,15 @@ async function getStudent360Data(studentId, tenantId, scopeNodeId) {
     risk,
   ] = await Promise.all([
     // Performance
-    levelId ? getLevelPerformance(studentId, levelId, tenantId) : null,
+    effectiveLevelId ? getLevelPerformance(studentId, effectiveLevelId, tenantId) : null,
 
     // Consistency
-    levelId ? calculateConsistencyScore(studentId, levelId, tenantId) : null,
+    effectiveLevelId ? calculateConsistencyScore(studentId, effectiveLevelId, tenantId) : null,
 
     // Promotion eligibility
-    levelId ? evaluatePromotionEligibility(studentId, levelId, tenantId) : { eligible: false, reasons: ["No level assigned"], metrics: {} },
+    effectiveLevelId
+      ? evaluatePromotionEligibility(studentId, effectiveLevelId, tenantId)
+      : { eligible: false, reasons: ["No level assigned"], metrics: {} },
 
     // Attendance last 30 days
     prisma.attendanceEntry.groupBy({
@@ -219,7 +225,7 @@ async function getStudent360Data(studentId, tenantId, scopeNodeId) {
     }),
 
     // Risk score
-    computeStudentRisk(studentId, tenantId, levelId),
+    computeStudentRisk(studentId, tenantId, effectiveLevelId),
   ]);
 
   // ── Step 3: Build attendance summary ──
@@ -350,8 +356,6 @@ async function getStudent360Data(studentId, tenantId, scopeNodeId) {
   const insights = generateInsights(risk, engagement, attendanceData, feeSummary, promotion);
 
   // ── Step 8: Assemble response ──
-  const enrollment = student.batchEnrollments?.[0] || null;
-
   return {
     student: {
       id: student.id,
@@ -368,7 +372,9 @@ async function getStudent360Data(studentId, tenantId, scopeNodeId) {
       gender: student.gender,
       isActive: student.isActive,
       createdAt: student.createdAt,
-      level: student.level,
+      level: effectiveLevel,
+      effectiveLevel,
+      effectiveLevelId,
       course: student.course,
       batch: enrollment?.batch || null,
       teacher: enrollment?.assignedTeacher

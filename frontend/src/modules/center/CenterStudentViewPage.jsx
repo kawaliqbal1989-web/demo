@@ -116,6 +116,7 @@ function CenterStudentViewPage() {
   );
 
   const student = data.student || data;
+  const displayLevel = student?.effectiveLevel || student?.level || null;
   const perfData = perf?.performance || perf;
   const studentPhotoSrc = resolvePhotoUrl(student?.photoUrl);
 
@@ -167,7 +168,7 @@ function CenterStudentViewPage() {
           <div className="info-grid__value">{student?.centerName || student?.center?.name || "—"}</div>
 
           <div className="info-grid__label">Level</div>
-          <div className="info-grid__value">{student?.level ? `${student.level.name} / ${student.level.rank}` : "—"}</div>
+          <div className="info-grid__value">{displayLevel ? `${displayLevel.name} / ${displayLevel.rank}` : "—"}</div>
 
           <div className="info-grid__label">Course</div>
           <div className="info-grid__value">{student?.course ? `${student.course.name} (${student.course.code})` : "—"}</div>

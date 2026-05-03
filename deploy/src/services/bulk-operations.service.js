@@ -62,25 +62,57 @@ export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId
   if (!studentIds?.length) return { transferred: 0 };
 
   // Verify target batch exists and is active
-  const batch = await prisma.batch.findFirst({ where: { tenantId, id: targetBatchId, isActive: true } });
+  const batch = await prisma.batch.findFirst({
+    where: { tenantId, id: targetBatchId, isActive: true },
+    include: {
+      teacherAssignments: {
+        select: { teacherUserId: true }
+      }
+    }
+  });
   if (!batch) throw new Error('Target batch not found or inactive');
 
   // If teacher specified, verify they exist
   if (targetTeacherUserId) {
-    const teacher = await prisma.authUser.findFirst({ where: { tenantId, id: targetTeacherUserId, role: 'TEACHER' } });
+    const teacher = await prisma.authUser.findFirst({
+      where: {
+        tenantId,
+        id: targetTeacherUserId,
+        role: 'TEACHER',
+        hierarchyNodeId: batch.hierarchyNodeId,
+        isActive: true
+      }
+    });
     if (!teacher) throw new Error('Target teacher not found');
   }
 
   // Find active enrollments for these students
   const enrollments = await prisma.enrollment.findMany({
     where: { tenantId, studentId: { in: studentIds }, status: 'ACTIVE' },
-    select: { id: true, studentId: true, batchId: true },
+    select: {
+      id: true,
+      studentId: true,
+      batchId: true,
+      levelId: true,
+      assignedTeacherUserId: true,
+      student: {
+        select: {
+          hierarchyNodeId: true,
+          levelId: true
+        }
+      }
+    },
   });
 
+  const batchTeacherIds = batch.teacherAssignments.map((assignment) => assignment.teacherUserId);
   const alreadyInBatch = enrollments.filter(e => e.batchId === targetBatchId).map(e => e.studentId);
-  const toTransfer = enrollments.filter(e => e.batchId !== targetBatchId);
+  const invalid = enrollments.filter((enrollment) => enrollment.student?.hierarchyNodeId !== batch.hierarchyNodeId);
+  const toTransfer = enrollments.filter((enrollment) => {
+    if (enrollment.batchId === targetBatchId) return false;
+    return enrollment.student?.hierarchyNodeId === batch.hierarchyNodeId;
+  });
 
-  if (!toTransfer.length) return { transferred: 0, skipped: alreadyInBatch.length };
+  if (!toTransfer.length) return { transferred: 0, skipped: alreadyInBatch.length, invalid: invalid.length };
 
   // Transaction: deactivate old enrollments + create new ones
   const results = await prisma.$transaction(async (tx) => {
@@ -91,30 +123,41 @@ export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId
     });
 
     // Create new enrollments in target batch
-    const newEnrollments = toTransfer.map(e => ({
-      tenantId,
-      hierarchyNodeId: batch.hierarchyNodeId,
-      studentId: e.studentId,
-      batchId: targetBatchId,
-      assignedTeacherUserId: targetTeacherUserId || null,
-      status: 'ACTIVE',
-      startDate: new Date(),
-    }));
+    const newEnrollments = toTransfer.map((enrollment) => {
+      const fallbackTeacherUserId = batchTeacherIds.includes(enrollment.assignedTeacherUserId)
+        ? enrollment.assignedTeacherUserId
+        : (batchTeacherIds[0] || null);
+      const resolvedTeacherUserId = targetTeacherUserId || fallbackTeacherUserId;
+      const resolvedLevelId = enrollment.levelId || enrollment.student?.levelId || null;
+
+      return {
+        tenantId,
+        hierarchyNodeId: batch.hierarchyNodeId,
+        studentId: enrollment.studentId,
+        batchId: targetBatchId,
+        assignedTeacherUserId: resolvedTeacherUserId,
+        levelId: resolvedLevelId,
+        status: 'ACTIVE',
+        startDate: new Date(),
+      };
+    });
 
     await tx.enrollment.createMany({ data: newEnrollments });
 
-    // Update students' currentTeacherUserId if teacher specified
-    if (targetTeacherUserId) {
-      await tx.student.updateMany({
-        where: { tenantId, id: { in: toTransfer.map(e => e.studentId) } },
-        data: { currentTeacherUserId: targetTeacherUserId },
+    for (const enrollment of newEnrollments) {
+      await tx.student.update({
+        where: { id: enrollment.studentId },
+        data: {
+          currentTeacherUserId: enrollment.assignedTeacherUserId,
+          ...(enrollment.levelId ? { levelId: enrollment.levelId } : {})
+        },
       });
     }
 
     return toTransfer.length;
   });
 
-  return { transferred: results, skipped: alreadyInBatch.length };
+  return { transferred: results, skipped: alreadyInBatch.length, invalid: invalid.length };
 }
 
 // ─── Bulk Fee Update ────────────────────────────────────────

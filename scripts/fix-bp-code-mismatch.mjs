@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function normalizeBpCode(code) {
   if (!code) return null;

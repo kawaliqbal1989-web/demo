@@ -9,6 +9,10 @@ import {
   getApprovalQueue,
 } from '../services/bulkOperationsService';
 
+function pickTeacherLabel(teacher) {
+  return teacher?.teacherProfile?.fullName || teacher?.fullName || teacher?.name || teacher?.username || teacher?.email || '';
+}
+
 /* ─── BulkActionDialog ────────────────────────────────────── */
 export function BulkActionDialog({ open, onClose, action, selectedCount, onConfirm, children }) {
   const [loading, setLoading] = useState(false);
@@ -147,7 +151,7 @@ export function BulkOperationsToolbar({ selectedIds, onComplete, levels = [], ba
             <label className="form-label" style={{ marginTop: '0.5rem' }}>Teacher (optional)</label>
             <select className="form-select" value={formData.teacherId || ''} onChange={e => setFormData({ ...formData, teacherId: e.target.value })}>
               <option value="">Keep current / none</option>
-              {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {teachers.map(t => <option key={t.id} value={t.id}>{pickTeacherLabel(t)}</option>)}
             </select>
           </>
         )}
@@ -167,7 +171,7 @@ export function BulkOperationsToolbar({ selectedIds, onComplete, levels = [], ba
         <label className="form-label">Teacher</label>
         <select className="form-select" value={formData.teacherId || ''} onChange={e => setFormData({ ...formData, teacherId: e.target.value })}>
           <option value="">Select teacher...</option>
-          {teachers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          {teachers.map(t => <option key={t.id} value={t.id}>{pickTeacherLabel(t)}</option>)}
         </select>
       </BulkActionDialog>
 

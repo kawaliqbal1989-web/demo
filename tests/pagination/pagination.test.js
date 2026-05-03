@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import { authHeader, http, loginAs, prisma, randomId } from "../helpers/test-helpers.js";
 
 describe("PAGINATION HARDENING", () => {

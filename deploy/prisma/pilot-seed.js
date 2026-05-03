@@ -1,7 +1,11 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { Prisma, PrismaClient } from "@prisma/client";
+import "dotenv/config";
 
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  adapter: new PrismaMariaDb(process.env.DATABASE_URL)
+});
 
 function addDays(date, days) {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);

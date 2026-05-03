@@ -25,6 +25,7 @@ import {
 import { listTeachers } from "../../services/teachersService";
 import { createEnrollment, updateEnrollment } from "../../services/enrollmentsService";
 import { listBatches } from "../../services/batchesService";
+import { bulkTransfer } from "../../services/bulkOperationsService";
 import { listLevels } from "../../services/levelsService";
 import { listCatalogCourses } from "../../services/catalogService";
 import { listLedger } from "../../services/ledgerService";
@@ -127,6 +128,12 @@ function CenterStudentsPage() {
   const [changeTeacherNextTeacherId, setChangeTeacherNextTeacherId] = useState("");
   const [changeTeacherSaving, setChangeTeacherSaving] = useState(false);
   const [changeTeacherError, setChangeTeacherError] = useState("");
+
+  const [changeBatchTarget, setChangeBatchTarget] = useState(null);
+  const [changeBatchSelectedId, setChangeBatchSelectedId] = useState("");
+  const [changeBatchSelectedTeacherId, setChangeBatchSelectedTeacherId] = useState("");
+  const [changeBatchSaving, setChangeBatchSaving] = useState(false);
+  const [changeBatchError, setChangeBatchError] = useState("");
 
   const [assignCourseStudentId, setAssignCourseStudentId] = useState(null);
   const [assignCourseCurrentLabel, setAssignCourseCurrentLabel] = useState("");
@@ -288,6 +295,13 @@ function CenterStudentsPage() {
     setCsvImportLevelId("");
     setCsvImportTeacherUserId("");
     setCsvImportStartDate("");
+  };
+
+  const closeChangeBatchDialog = () => {
+    setChangeBatchTarget(null);
+    setChangeBatchSelectedId("");
+    setChangeBatchSelectedTeacherId("");
+    setChangeBatchError("");
   };
 
   const openCsvImportModal = () => {
@@ -523,7 +537,7 @@ function CenterStudentsPage() {
     setEditTehsil(row?.tehsil || "");
     setEditTotalFeeAmount(row?.totalFeeAmount != null ? String(row.totalFeeAmount) : "");
     setEditAdmissionFeeAmount(row?.admissionFeeAmount != null ? String(row.admissionFeeAmount) : "");
-    setEditLevelId(row?.levelId || row?.level?.id || "");
+    setEditLevelId(row?.effectiveLevelId || row?.levelId || row?.effectiveLevel?.id || row?.level?.id || "");
     setEditCurrentTeacherUserId(row?.currentTeacherUserId || row?.currentTeacher?.id || "");
     setEditStatus(row?.isActive ? "ACTIVE" : "INACTIVE");
     setEditPhotoFile(null);
@@ -644,6 +658,60 @@ function CenterStudentsPage() {
       setChangeTeacherError(getFriendlyErrorMessage(err) || "Failed to change teacher.");
     } finally {
       setChangeTeacherSaving(false);
+    }
+  };
+
+  const getBatchTeacherOptions = (batchId) => {
+    const batch = batches.find((item) => item.id === batchId);
+    if (Array.isArray(batch?.teacherAssignments) && batch.teacherAssignments.length) {
+      return batch.teacherAssignments
+        .map((assignment) => assignment?.teacher)
+        .filter(Boolean);
+    }
+    return teachers;
+  };
+
+  const onChangeBatch = (row) => {
+    const enrollment = getActiveEnrollment(row);
+    if (!enrollment?.id) {
+      toast.error("No active enrollment found for this student. Create an enrollment first.");
+      return;
+    }
+
+    setChangeBatchTarget({ row, enrollment });
+    setChangeBatchSelectedId(enrollment.batchId || "");
+    setChangeBatchSelectedTeacherId(enrollment?.assignedTeacher?.id || row?.currentTeacherUserId || "");
+    setChangeBatchError("");
+  };
+
+  const onSaveBatchChange = async (e) => {
+    e.preventDefault();
+    if (!changeBatchTarget?.row?.id) return;
+    if (!changeBatchSelectedId) {
+      setChangeBatchError("Select a target batch.");
+      return;
+    }
+    if (changeBatchSelectedId === changeBatchTarget.enrollment.batchId) {
+      setChangeBatchError("Student is already assigned to this batch.");
+      return;
+    }
+
+    setChangeBatchSaving(true);
+    setChangeBatchError("");
+    try {
+      await bulkTransfer(
+        [changeBatchTarget.row.id],
+        changeBatchSelectedId,
+        changeBatchSelectedTeacherId || undefined
+      );
+      await refreshWithFilters(0);
+      setOffset(0);
+      closeChangeBatchDialog();
+      toast.success("Student batch updated.");
+    } catch (err) {
+      setChangeBatchError(getFriendlyErrorMessage(err) || "Failed to change batch.");
+    } finally {
+      setChangeBatchSaving(false);
     }
   };
 
@@ -910,9 +978,15 @@ function CenterStudentsPage() {
           const course = assignedCourseNames.length
             ? assignedCourseNames.join(", ")
             : (r?.course ? `${r.course.name}` : "");
-          const level = r?.level ? `${r.level.name} / ${r.level.rank}` : "";
+          const displayLevel = r?.effectiveLevel || r?.level || null;
+          const level = displayLevel ? `${displayLevel.name} / ${displayLevel.rank}` : "";
           return course ? `${course} → ${level}` : level;
         }
+      },
+      {
+        key: "batch",
+        header: "Batch",
+        render: (r) => getActiveEnrollment(r)?.batch?.name || ""
       },
       {
         key: "assignedTeacher",
@@ -976,6 +1050,9 @@ function CenterStudentsPage() {
                   >
                     Change Teacher
                   </Link>
+                  <button className="button secondary" style={{ width: "auto" }} onClick={() => void onChangeBatch(r)}>
+                    Change Batch
+                  </button>
                   <button className="button secondary" style={{ width: "auto" }} onClick={() => void onAssignCourse(r)}>
                     Assign Course
                   </button>
@@ -1890,8 +1967,91 @@ function CenterStudentsPage() {
         onComplete={() => { setSelectedIds(new Set()); void load({ limit, offset, q, status: statusFilter, teacherUserId: teacherFilter, levelId: levelFilter, courseCode: courseCodeFilter }); }}
         levels={levels}
         batches={batches}
-        teachers={teachers.map(t => ({ id: t.userId || t.id, name: t.name || `${t.firstName || ''} ${t.lastName || ''}`.trim() }))}
+        teachers={teachers}
       />
+
+      {changeBatchTarget ? (
+        <div className="dash-modal" role="dialog" aria-modal="true" aria-label="Change Batch">
+          <div className="card dash-modal__panel" style={{ display: "grid", gap: 12 }}>
+            <div className="dash-modal__header">
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>Change Batch</div>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                  Move {`${changeBatchTarget.row?.firstName || ""} ${changeBatchTarget.row?.lastName || ""}`.trim() || "student"} to another active batch.
+                </div>
+              </div>
+              <button className="button secondary" style={{ width: "auto" }} onClick={closeChangeBatchDialog}>
+                Close
+              </button>
+            </div>
+
+            <form onSubmit={onSaveBatchChange} style={{ display: "grid", gap: 10 }}>
+              {changeBatchError ? <p className="error">{changeBatchError}</p> : null}
+
+              <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, alignItems: "center" }}>
+                <div style={{ color: "var(--color-text-muted)" }}>Current Batch</div>
+                <div style={{ fontWeight: 700 }}>{changeBatchTarget.enrollment?.batch?.name || "—"}</div>
+              </div>
+
+              <label>
+                Target Batch
+                <select
+                  className="select"
+                  value={changeBatchSelectedId}
+                  onChange={(e) => {
+                    const nextBatchId = e.target.value;
+                    setChangeBatchSelectedId(nextBatchId);
+                    const options = getBatchTeacherOptions(nextBatchId);
+                    if (!options.length) {
+                      setChangeBatchSelectedTeacherId("");
+                      return;
+                    }
+                    const optionIds = options.map((teacher) => teacher.id);
+                    if (!optionIds.includes(changeBatchSelectedTeacherId)) {
+                      setChangeBatchSelectedTeacherId(optionIds[0]);
+                    }
+                  }}
+                >
+                  <option value="">Select batch...</option>
+                  {batches.map((batch) => (
+                    <option key={batch.id} value={batch.id} disabled={batch.id === changeBatchTarget.enrollment.batchId}>
+                      {batch.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                Teacher
+                <select
+                  className="select"
+                  value={changeBatchSelectedTeacherId}
+                  onChange={(e) => setChangeBatchSelectedTeacherId(e.target.value)}
+                >
+                  <option value="">Auto-assign from batch / none</option>
+                  {getBatchTeacherOptions(changeBatchSelectedId).map((teacher) => (
+                    <option key={teacher.id} value={teacher.id}>
+                      {pickTeacherLabel(teacher)}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 4 }}>
+                  Available teachers update from the selected batch when teacher assignments exist.
+                </div>
+              </label>
+
+              <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+                <button type="button" className="button secondary" style={{ width: "auto" }} onClick={closeChangeBatchDialog} disabled={changeBatchSaving}>
+                  Cancel
+                </button>
+                <button className="button" style={{ width: "auto" }} disabled={changeBatchSaving || !changeBatchSelectedId || changeBatchSelectedId === changeBatchTarget.enrollment.batchId}>
+                  {changeBatchSaving ? "Updating..." : "Update Batch"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
 
       <DataTable
         columns={columns}
@@ -2043,7 +2203,13 @@ function CenterStudentsPage() {
         title="Assign Level"
         message="Enter the level rank number (or level id):"
         inputLabel="Level Rank"
-        defaultValue={overridePromotionTarget?.level?.rank != null ? String(overridePromotionTarget.level.rank) : "1"}
+        defaultValue={
+          overridePromotionTarget?.effectiveLevel?.rank != null
+            ? String(overridePromotionTarget.effectiveLevel.rank)
+            : overridePromotionTarget?.level?.rank != null
+              ? String(overridePromotionTarget.level.rank)
+              : "1"
+        }
         confirmLabel="Assign"
         onConfirm={handleOverridePromotionConfirm}
         onCancel={() => setOverridePromotionTarget(null)}

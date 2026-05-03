@@ -1,7 +1,7 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 import { listCatalogCourses } from "../src/controllers/catalog.controller.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function makeRes(onDone) {
   return {

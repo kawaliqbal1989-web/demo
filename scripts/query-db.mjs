@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const tenants = await prisma.tenant.findMany({ select: { id: true, code: true } });
 const competitions = await prisma.competition.findMany({

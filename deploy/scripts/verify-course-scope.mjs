@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 const base = "http://localhost:4000/api";
 const tenantCode = "DEFAULT";
 const password = "Pass@123";

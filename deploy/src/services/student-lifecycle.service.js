@@ -213,6 +213,17 @@ async function assignLevelWithIntegrity({
       }
     });
 
+    await tx.enrollment.updateMany({
+      where: {
+        tenantId,
+        studentId,
+        status: "ACTIVE"
+      },
+      data: {
+        levelId: targetLevel.id
+      }
+    });
+
     return {
       studentId: student.id,
       previousLevelId: currentLevel.id,

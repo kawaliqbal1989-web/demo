@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const tenantId = process.argv[2] || "tenant_default";
 const levelRank = Number(process.argv[3] || 1);

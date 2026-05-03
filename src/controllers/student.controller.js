@@ -15,6 +15,7 @@ import {
 } from "../services/practice-entitlement.service.js";
 import { logger } from "../lib/logger.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+import { resolveEffectiveStudentLevel } from "../utils/student-level.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -126,13 +127,24 @@ const getStudentMe = asyncHandler(async (req, res) => {
       isActive: true,
       hierarchyNode: { select: { id: true, name: true, code: true } },
       level: { select: { id: true, name: true, rank: true } },
-      course: { select: { id: true, code: true, name: true } }
+      course: { select: { id: true, code: true, name: true } },
+      batchEnrollments: {
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          levelId: true,
+          level: { select: { id: true, name: true, rank: true } }
+        }
+      }
     }
   });
 
   if (!student) {
     return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
   }
+
+  const { effectiveLevel, effectiveLevelId } = resolveEffectiveStudentLevel(student);
 
   const [activeEnrollmentsCount, assignedWorksheetsCount, user] = await Promise.all([
     prisma.enrollment.count({
@@ -142,13 +154,15 @@ const getStudentMe = asyncHandler(async (req, res) => {
         status: "ACTIVE"
       }
     }),
-    prisma.worksheet.count({
-      where: {
-        tenantId: req.auth.tenantId,
-        levelId: student.levelId,
-        isPublished: true
-      }
-    }),
+    effectiveLevelId
+      ? prisma.worksheet.count({
+          where: {
+            tenantId: req.auth.tenantId,
+            levelId: effectiveLevelId,
+            isPublished: true
+          }
+        })
+      : 0,
     prisma.authUser.findFirst({
       where: {
         id: req.auth.userId,
@@ -188,9 +202,9 @@ const getStudentMe = asyncHandler(async (req, res) => {
     centerId: student.hierarchyNodeId,
     centerName: student.hierarchyNode?.name || null,
     centerCode: student.hierarchyNode?.code || null,
-    levelId: student.levelId,
-    levelTitle: student.level?.name || null,
-    levelRank: student.level?.rank ?? null,
+    levelId: effectiveLevelId,
+    levelTitle: effectiveLevel?.name || null,
+    levelRank: effectiveLevel?.rank ?? null,
     activeEnrollmentsCount,
     assignedWorksheetsCount,
     courseId: student.course?.id || null,
@@ -2754,19 +2768,22 @@ const getStudentMyCourse = asyncHandler(async (req, res) => {
       })
     : null;
 
-  const levelRank = enrollment?.level?.rank ?? student.level?.rank ?? null;
+  const { effectiveLevel, effectiveLevelId } = resolveEffectiveStudentLevel(student, enrollment);
+  const levelRank = effectiveLevel?.rank ?? null;
   const courseCode = levelRank ? `AB-L${levelRank}` : null;
   const courseName = levelRank ? `Abacus Level ${levelRank}` : null;
-  const levelTitle = enrollment?.level?.name ?? student.level?.name ?? null;
+  const levelTitle = effectiveLevel?.name ?? null;
 
   const [totalWorksheets, attemptedCount, completedCount, latestSubmission] = await Promise.all([
-    prisma.worksheet.count({
-      where: {
-        tenantId: req.auth.tenantId,
-        levelId: student.levelId,
-        isPublished: true
-      }
-    }),
+    effectiveLevelId
+      ? prisma.worksheet.count({
+          where: {
+            tenantId: req.auth.tenantId,
+            levelId: effectiveLevelId,
+            isPublished: true
+          }
+        })
+      : 0,
     prisma.worksheetSubmission.count({
       where: {
         tenantId: req.auth.tenantId,

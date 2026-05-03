@@ -1,7 +1,7 @@
-import bcrypt from "bcrypt";
-import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const TENANT_CODE = process.env.TENANT_CODE || "DEFAULT";
 const PREFIX = process.env.TEST_PREFIX || "T1100";

@@ -1,6 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const statements = [
   "ALTER TABLE `AttendanceCorrectionRequest` ADD CONSTRAINT `AttendanceCorrectionRequest_requestedByUserId_fkey` FOREIGN KEY (`requestedByUserId`) REFERENCES `AuthUser`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;",

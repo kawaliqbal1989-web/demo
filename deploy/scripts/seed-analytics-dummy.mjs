@@ -4,8 +4,8 @@
  *            WorksheetSubmission, MockTest, MockTestResult, Competition,
  *            CompetitionEnrollment for center T1100 (cmmemji7x0005hru0z06mltos).
  */
-import { PrismaClient } from "@prisma/client";
-const prisma = new PrismaClient();
+import { createPrismaClient } from "../src/lib/prisma-client.js";
+const prisma = createPrismaClient();
 
 // ─── Known IDs from the existing DB ──────────────────────────────────
 const TENANT  = "tenant_default";

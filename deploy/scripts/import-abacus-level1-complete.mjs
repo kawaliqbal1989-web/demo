@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const DEFAULT_FILE = "ABACUS_LEVEL_1_COMPLETE_IMPORT.json";
 const DEFAULT_TENANT = "tenant_default";

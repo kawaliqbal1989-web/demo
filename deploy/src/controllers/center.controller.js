@@ -15,6 +15,7 @@ import {
   unassignStudentPracticeFeature
 } from "../services/practice-entitlement.service.js";
 import { getStudent360Data } from "../services/student-360.service.js";
+import { withEffectiveStudentLevel } from "../utils/student-level.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -1137,7 +1138,17 @@ const getCenterStudentAttendanceHistory = asyncHandler(async (req, res) => {
       guardianPhone: true,
       email: true,
       phonePrimary: true,
+      levelId: true,
       level: { select: { id: true, name: true, rank: true } },
+      batchEnrollments: {
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        select: {
+          levelId: true,
+          level: { select: { id: true, name: true, rank: true } }
+        }
+      },
       currentTeacher: {
         select: {
           username: true,
@@ -1151,6 +1162,8 @@ const getCenterStudentAttendanceHistory = asyncHandler(async (req, res) => {
   if (!student) {
     return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
   }
+
+  const studentWithEffectiveLevel = withEffectiveStudentLevel(student);
 
   const [rows, total, summary] = await Promise.all([
     prisma.attendanceEntry.findMany({
@@ -1189,15 +1202,19 @@ const getCenterStudentAttendanceHistory = asyncHandler(async (req, res) => {
 
   return res.apiSuccess("Student attendance history", {
     student: {
-      id: student.id,
-      admissionNo: student.admissionNo || null,
-      fullName: `${student.firstName || ""} ${student.lastName || ""}`.trim() || null,
-      guardianName: student.guardianName || null,
-      guardianPhone: student.guardianPhone || student.phonePrimary || null,
-      email: student.email || null,
-      levelName: student.level?.name || null,
-      levelRank: student.level?.rank ?? null,
-      teacherName: student.currentTeacher?.teacherProfile?.fullName || student.currentTeacher?.username || student.currentTeacher?.email || null
+      id: studentWithEffectiveLevel.id,
+      admissionNo: studentWithEffectiveLevel.admissionNo || null,
+      fullName: `${studentWithEffectiveLevel.firstName || ""} ${studentWithEffectiveLevel.lastName || ""}`.trim() || null,
+      guardianName: studentWithEffectiveLevel.guardianName || null,
+      guardianPhone: studentWithEffectiveLevel.guardianPhone || studentWithEffectiveLevel.phonePrimary || null,
+      email: studentWithEffectiveLevel.email || null,
+      levelName: studentWithEffectiveLevel.effectiveLevel?.name || null,
+      levelRank: studentWithEffectiveLevel.effectiveLevel?.rank ?? null,
+      teacherName:
+        studentWithEffectiveLevel.currentTeacher?.teacherProfile?.fullName ||
+        studentWithEffectiveLevel.currentTeacher?.username ||
+        studentWithEffectiveLevel.currentTeacher?.email ||
+        null
     },
     items: rows.map((r) => ({
       date: r.session?.date || null,

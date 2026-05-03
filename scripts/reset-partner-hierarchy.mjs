@@ -1,9 +1,9 @@
 import dotenv from "dotenv";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
 dotenv.config();
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const args = process.argv.slice(2);
 const shouldDelete = args.includes("--yes");

@@ -113,13 +113,14 @@ function TeacherStudentViewPage() {
   }
 
   const student = data.student;
+  const displayLevel = student?.effectiveLevel || student?.level || null;
   const practiceFeatures = student?.practiceFeatures || {};
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
       <PageHeader
         title={`${student?.firstName || ""} ${student?.lastName || ""}`}
-        subtitle={`${student?.admissionNo || ""} · ${student?.level ? `${student.level.name} / Level ${student.level.rank}` : "No level"}`}
+        subtitle={`${student?.admissionNo || ""} · ${displayLevel ? `${displayLevel.name} / Level ${displayLevel.rank}` : "No level"}`}
         actions={
           <Link className="button" style={{ width: "auto" }} to={`/teacher/students/${studentId}/360`}>
             View Full Profile →
@@ -136,7 +137,7 @@ function TeacherStudentViewPage() {
       <div className="card" style={{ display: "grid", gap: 6 }}>
         <div><strong>{student?.firstName} {student?.lastName}</strong> ({student?.admissionNo})</div>
         <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-          Level: {student?.level ? `${student.level.name} / ${student.level.rank}` : ""}
+          Level: {displayLevel ? `${displayLevel.name} / ${displayLevel.rank}` : ""}
         </div>
         <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
           Guardian: {student?.guardianName || ""} {student?.guardianPhone ? `• ${student.guardianPhone}` : ""}

@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { PrismaClient } from "@prisma/client";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 const DEFAULT_FILE = "WORKBOOK_L1_PART_A_structured.json";
 const DEFAULT_TENANT = "tenant_default";

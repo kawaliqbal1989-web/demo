@@ -82,6 +82,7 @@ function Student360Page() {
   }
   const riskInfo = RISK_COLORS[risk?.level] || RISK_COLORS.HEALTHY;
   const fullName = [student.firstName, student.lastName].filter(Boolean).join(" ") || "—";
+  const displayLevel = student.effectiveLevel || student.level || null;
 
   return (
     <section style={{ display: "grid", gap: 16 }}>
@@ -115,7 +116,7 @@ function Student360Page() {
             <span className="info-grid__label">Course</span>
             <span className="info-grid__value">{student.course?.name || "—"}</span>
             <span className="info-grid__label">Level</span>
-            <span className="info-grid__value">{student.level?.name || "—"}</span>
+            <span className="info-grid__value">{displayLevel?.name || "—"}</span>
             <span className="info-grid__label">Batch</span>
             <span className="info-grid__value">{student.batch?.name || "—"}</span>
             <span className="info-grid__label">Teacher</span>

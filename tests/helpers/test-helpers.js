@@ -1,4 +1,4 @@
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import request from "supertest";
 import { app } from "../../src/app.js";
 import { prisma } from "../../src/lib/prisma.js";

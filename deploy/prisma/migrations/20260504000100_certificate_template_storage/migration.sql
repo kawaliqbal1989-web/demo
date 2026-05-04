@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `certificatetemplate` (
+  `id` VARCHAR(191) NOT NULL,
+  `tenantId` VARCHAR(191) NOT NULL,
+  `businessPartnerId` VARCHAR(191) NOT NULL,
+  `title` VARCHAR(191) NOT NULL DEFAULT 'Certificate of Achievement',
+  `signatoryName` VARCHAR(191) NULL,
+  `signatoryDesignation` VARCHAR(191) NULL,
+  `signatureImagePath` VARCHAR(191) NULL,
+  `signatureImageUrl` TEXT NULL,
+  `affiliationLogoPath` VARCHAR(191) NULL,
+  `affiliationLogoUrl` TEXT NULL,
+  `stampImagePath` VARCHAR(191) NULL,
+  `stampImageUrl` TEXT NULL,
+  `backgroundImagePath` VARCHAR(191) NULL,
+  `backgroundImageUrl` TEXT NULL,
+  `layout` JSON NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `certificatetemplate_businessPartnerId_key` (`businessPartnerId`),
+  KEY `certificatetemplate_tenantId_idx` (`tenantId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

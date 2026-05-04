@@ -3,6 +3,62 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import { buildUploadUrl } from "../utils/request-url.js";
 
+const CREATE_CERTIFICATE_TEMPLATE_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS \`certificatetemplate\` (
+  \`id\` VARCHAR(191) NOT NULL,
+  \`tenantId\` VARCHAR(191) NOT NULL,
+  \`businessPartnerId\` VARCHAR(191) NOT NULL,
+  \`title\` VARCHAR(191) NOT NULL DEFAULT 'Certificate of Achievement',
+  \`signatoryName\` VARCHAR(191) NULL,
+  \`signatoryDesignation\` VARCHAR(191) NULL,
+  \`signatureImagePath\` VARCHAR(191) NULL,
+  \`signatureImageUrl\` TEXT NULL,
+  \`affiliationLogoPath\` VARCHAR(191) NULL,
+  \`affiliationLogoUrl\` TEXT NULL,
+  \`stampImagePath\` VARCHAR(191) NULL,
+  \`stampImageUrl\` TEXT NULL,
+  \`backgroundImagePath\` VARCHAR(191) NULL,
+  \`backgroundImageUrl\` TEXT NULL,
+  \`layout\` JSON NULL,
+  \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (\`id\`),
+  UNIQUE KEY \`certificatetemplate_businessPartnerId_key\` (\`businessPartnerId\`),
+  KEY \`certificatetemplate_tenantId_idx\` (\`tenantId\`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+`;
+
+const selectCertificateTemplate = {
+  id: true,
+  title: true,
+  signatoryName: true,
+  signatoryDesignation: true,
+  signatureImageUrl: true,
+  affiliationLogoUrl: true,
+  stampImageUrl: true,
+  backgroundImageUrl: true,
+  layout: true
+};
+
+async function ensureCertificateTemplateStorage() {
+  await prisma.$executeRawUnsafe(CREATE_CERTIFICATE_TEMPLATE_TABLE_SQL);
+}
+
+async function findCertificateTemplate(businessPartnerId) {
+  return prisma.certificateTemplate.findUnique({
+    where: { businessPartnerId },
+    select: selectCertificateTemplate
+  });
+}
+
+async function saveCertificateTemplateRecord({ tenantId, businessPartnerId, data }) {
+  return prisma.certificateTemplate.upsert({
+    where: { businessPartnerId },
+    create: { tenantId, businessPartnerId, ...data },
+    update: data
+  });
+}
+
 function buildDefaultCertificateTemplate() {
   return {
     title: "Certificate of Achievement",
@@ -22,23 +78,19 @@ const getCertificateTemplate = asyncHandler(async (req, res) => {
 
   let template = null;
   try {
-    template = await prisma.certificateTemplate.findUnique({
-      where: { businessPartnerId },
-      select: {
-        id: true,
-        title: true,
-        signatoryName: true,
-        signatoryDesignation: true,
-        signatureImageUrl: true,
-        affiliationLogoUrl: true,
-        stampImageUrl: true,
-        backgroundImageUrl: true,
-        layout: true
-      }
-    });
+    template = await findCertificateTemplate(businessPartnerId);
   } catch (error) {
     if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
       throw error;
+    }
+
+    try {
+      await ensureCertificateTemplateStorage();
+      template = await findCertificateTemplate(businessPartnerId);
+    } catch (retryError) {
+      if (!isSchemaMismatchError(retryError, ["certificatetemplate"])) {
+        throw retryError;
+      }
     }
   }
 
@@ -60,16 +112,21 @@ const upsertCertificateTemplate = asyncHandler(async (req, res) => {
 
   let template;
   try {
-    template = await prisma.certificateTemplate.upsert({
-      where: { businessPartnerId },
-      create: { tenantId, businessPartnerId, ...data },
-      update: data
-    });
+    template = await saveCertificateTemplateRecord({ tenantId, businessPartnerId, data });
   } catch (error) {
     if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
       throw error;
     }
-    return res.apiError(503, "Certificate template storage is unavailable until database migrations are applied", "CERTIFICATE_TEMPLATE_SCHEMA_MISSING");
+
+    try {
+      await ensureCertificateTemplateStorage();
+      template = await saveCertificateTemplateRecord({ tenantId, businessPartnerId, data });
+    } catch (retryError) {
+      if (!isSchemaMismatchError(retryError, ["certificatetemplate"])) {
+        throw retryError;
+      }
+      return res.apiError(503, "Certificate template storage is unavailable until database migrations are applied", "CERTIFICATE_TEMPLATE_SCHEMA_MISSING");
+    }
   }
 
   res.locals.entityId = template.id;
@@ -90,15 +147,10 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
 
     let template;
     try {
-      template = await prisma.certificateTemplate.upsert({
-        where: { businessPartnerId },
-        create: {
-          tenantId,
-          businessPartnerId,
-          [fieldPath]: file.filename,
-          [fieldUrl]: url
-        },
-        update: {
+      template = await saveCertificateTemplateRecord({
+        tenantId,
+        businessPartnerId,
+        data: {
           [fieldPath]: file.filename,
           [fieldUrl]: url
         }
@@ -107,7 +159,23 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
       if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
         throw error;
       }
-      return res.apiError(503, "Certificate template storage is unavailable until database migrations are applied", "CERTIFICATE_TEMPLATE_SCHEMA_MISSING");
+
+      try {
+        await ensureCertificateTemplateStorage();
+        template = await saveCertificateTemplateRecord({
+          tenantId,
+          businessPartnerId,
+          data: {
+            [fieldPath]: file.filename,
+            [fieldUrl]: url
+          }
+        });
+      } catch (retryError) {
+        if (!isSchemaMismatchError(retryError, ["certificatetemplate"])) {
+          throw retryError;
+        }
+        return res.apiError(503, "Certificate template storage is unavailable until database migrations are applied", "CERTIFICATE_TEMPLATE_SCHEMA_MISSING");
+      }
     }
 
     res.locals.entityId = template.id;

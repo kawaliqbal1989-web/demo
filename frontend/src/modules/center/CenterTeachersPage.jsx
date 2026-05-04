@@ -1005,8 +1005,34 @@ function CenterTeachersPage() {
                 header: "Student Name",
                 render: (r) => `${r?.firstName || ""} ${r?.lastName || ""}`.trim()
               },
-              { key: "course", header: "Course", render: (r) => r?.level?.name || "" },
-              { key: "level", header: "Level", render: (r) => (r?.level?.rank != null ? String(r.level.rank) : "") }
+              {
+                key: "course",
+                header: "Course",
+                render: (r) => {
+                  const assignedCourseNames = Array.isArray(r?.assignedCourses)
+                    ? r.assignedCourses
+                      .map((item) => item?.course?.name || "")
+                      .filter(Boolean)
+                    : [];
+
+                  if (assignedCourseNames.length) {
+                    return assignedCourseNames.join(", ");
+                  }
+
+                  return r?.course?.name || "";
+                }
+              },
+              {
+                key: "level",
+                header: "Level",
+                render: (r) => {
+                  const displayLevel = r?.effectiveLevel || r?.level || null;
+                  if (!displayLevel) return "";
+                  return displayLevel.rank != null
+                    ? `${displayLevel.name} / ${displayLevel.rank}`
+                    : displayLevel.name || "";
+                }
+              }
             ]}
             rows={assignedStudents}
             keyField="id"

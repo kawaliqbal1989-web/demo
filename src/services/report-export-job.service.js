@@ -8,6 +8,27 @@ const inflightExports = new Map();
 const ACTIVE_EXPORT_JOB_STATUSES = Object.freeze(["QUEUED", "PROCESSING", "RETRY_WAIT"]);
 const REUSABLE_EXPORT_ARTIFACT_STATUSES = Object.freeze(["AVAILABLE"]);
 
+function isReportExportStorageMissingError(error) {
+  const code = String(error?.code || "");
+  if (!["P2021", "P2022", "P2010"].includes(code)) {
+    return false;
+  }
+
+  const modelName = String(error?.meta?.modelName || "").toLowerCase();
+  const table = String(error?.meta?.table || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    modelName.includes("reportexport") ||
+    table.includes("reportexport") ||
+    table.includes("report_export") ||
+    message.includes("reportexport") ||
+    message.includes("report_export") ||
+    message.includes("unknown column") ||
+    message.includes("does not exist")
+  );
+}
+
 function stableSerialize(value) {
   if (value === null || value === undefined) {
     return "null";
@@ -692,19 +713,27 @@ async function getReportExportJobForViewer({ jobId, viewer }) {
 async function listReportExportJobs({ viewer, filters = {} }) {
   const limit = Math.max(1, Math.min(50, Number.parseInt(filters.limit, 10) || 20));
 
-  return prisma.reportExportJob.findMany({
-    where: {
-      ...buildViewerWhere(viewer),
-      ...(filters.reportKey ? { reportKey: String(filters.reportKey) } : {}),
-      ...(filters.status ? { status: String(filters.status).toUpperCase() } : {}),
-      ...(filters.format ? { exportFormat: String(filters.format).toUpperCase() } : {})
-    },
-    include: {
-      artifact: true
-    },
-    orderBy: [{ createdAt: "desc" }],
-    take: limit
-  });
+  try {
+    return prisma.reportExportJob.findMany({
+      where: {
+        ...buildViewerWhere(viewer),
+        ...(filters.reportKey ? { reportKey: String(filters.reportKey) } : {}),
+        ...(filters.status ? { status: String(filters.status).toUpperCase() } : {}),
+        ...(filters.format ? { exportFormat: String(filters.format).toUpperCase() } : {})
+      },
+      include: {
+        artifact: true
+      },
+      orderBy: [{ createdAt: "desc" }],
+      take: limit
+    });
+  } catch (error) {
+    if (!isReportExportStorageMissingError(error)) {
+      throw error;
+    }
+
+    return [];
+  }
 }
 
 async function getReportExportOperationalSummary({ viewer }) {
@@ -713,51 +742,71 @@ async function getReportExportOperationalSummary({ viewer }) {
   const queuedBefore = new Date(now.getTime() - env.reportExportSlaQueuedMs);
   const processingBefore = new Date(now.getTime() - env.reportExportSlaProcessingMs);
 
-  const [statusCounts, queuedSlaBreaches, processingSlaBreaches, retryWaitCount, expiredArtifacts] = await Promise.all([
-    prisma.reportExportJob.groupBy({
-      by: ["status"],
-      where,
-      _count: { _all: true }
-    }),
-    prisma.reportExportJob.count({
-      where: {
-        ...where,
-        status: "QUEUED",
-        queuedAt: { lte: queuedBefore }
-      }
-    }),
-    prisma.reportExportJob.count({
-      where: {
-        ...where,
-        status: "PROCESSING",
-        startedAt: { lte: processingBefore }
-      }
-    }),
-    prisma.reportExportJob.count({
-      where: {
-        ...where,
-        status: "RETRY_WAIT"
-      }
-    }),
-    prisma.reportExportArtifact.count({
-      where: {
-        tenantId: viewer.tenantId,
-        status: "EXPIRED"
-      }
-    })
-  ]);
+  try {
+    const [statusCounts, queuedSlaBreaches, processingSlaBreaches, retryWaitCount, expiredArtifacts] = await Promise.all([
+      prisma.reportExportJob.groupBy({
+        by: ["status"],
+        where,
+        _count: { _all: true }
+      }),
+      prisma.reportExportJob.count({
+        where: {
+          ...where,
+          status: "QUEUED",
+          queuedAt: { lte: queuedBefore }
+        }
+      }),
+      prisma.reportExportJob.count({
+        where: {
+          ...where,
+          status: "PROCESSING",
+          startedAt: { lte: processingBefore }
+        }
+      }),
+      prisma.reportExportJob.count({
+        where: {
+          ...where,
+          status: "RETRY_WAIT"
+        }
+      }),
+      prisma.reportExportArtifact.count({
+        where: {
+          tenantId: viewer.tenantId,
+          status: "EXPIRED"
+        }
+      })
+    ]);
 
-  return {
-    statusCounts: Object.fromEntries(statusCounts.map((entry) => [entry.status, entry._count._all])),
-    queuedSlaBreaches,
-    processingSlaBreaches,
-    retryWaitCount,
-    expiredArtifacts,
-    thresholds: {
-      queuedMs: env.reportExportSlaQueuedMs,
-      processingMs: env.reportExportSlaProcessingMs
+    return {
+      statusCounts: Object.fromEntries(statusCounts.map((entry) => [entry.status, entry._count._all])),
+      queuedSlaBreaches,
+      processingSlaBreaches,
+      retryWaitCount,
+      expiredArtifacts,
+      thresholds: {
+        queuedMs: env.reportExportSlaQueuedMs,
+        processingMs: env.reportExportSlaProcessingMs
+      }
+    };
+  } catch (error) {
+    if (!isReportExportStorageMissingError(error)) {
+      throw error;
     }
-  };
+
+    return {
+      statusCounts: {},
+      queuedSlaBreaches: 0,
+      processingSlaBreaches: 0,
+      retryWaitCount: 0,
+      expiredArtifacts: 0,
+      thresholds: {
+        queuedMs: env.reportExportSlaQueuedMs,
+        processingMs: env.reportExportSlaProcessingMs
+      },
+      skipped: true,
+      reason: "REPORT_EXPORT_STORAGE_UNAVAILABLE"
+    };
+  }
 }
 
 async function getReportExportOperationsDashboard({

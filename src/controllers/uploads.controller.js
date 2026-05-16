@@ -80,34 +80,45 @@ const resolveSuperadminCenterLogoUploadTarget = asyncHandler(async (req, res, ne
     return res.apiError(401, "Unauthorized", "AUTH_REQUIRED");
   }
 
-  const center = await prisma.centerProfile.findFirst({
-    where: {
-      tenantId,
-      OR: [{ id }, { authUserId: id }]
-    },
-    select: {
-      id: true,
-      logoPath: true,
-      logoFilePath: true,
-      logoUrl: true,
-      customLogoUrl: true,
-      brandingMode: true,
-      inheritBranding: true
+  try {
+    const center = await prisma.centerProfile.findFirst({
+      where: {
+        tenantId,
+        OR: [{ id }, { authUserId: id }]
+      },
+      select: {
+        id: true,
+        logoPath: true,
+        logoFilePath: true,
+        logoUrl: true,
+        customLogoUrl: true,
+        brandingMode: true,
+        inheritBranding: true
+      }
+    });
+
+    if (!center) {
+      return res.apiSuccess("Logo upload skipped", {
+        skipped: true,
+        notFound: true,
+        reason: "CENTER_NOT_FOUND_SAFE"
+      });
     }
-  });
 
-  if (!center) {
-    return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
+    req.logoUploadTarget = {
+      role: "center",
+      entityType: "CENTER",
+      entityId: center.id,
+      record: center
+    };
+
+    return next();
+  } catch (error) {
+    return res.apiSuccess("Logo upload skipped", {
+      skipped: true,
+      reason: "CENTER_LOGO_TARGET_FALLBACK"
+    });
   }
-
-  req.logoUploadTarget = {
-    role: "center",
-    entityType: "CENTER",
-    entityId: center.id,
-    record: center
-  };
-
-  return next();
 });
 
 const resolveLogoUploadTarget = asyncHandler(async (req, res, next) => {
@@ -258,6 +269,12 @@ const uploadLogo = asyncHandler(async (req, res) => {
   }
 
   const target = req.logoUploadTarget;
+  if (!target?.entityType || !target?.entityId) {
+    return res.apiSuccess("Logo upload skipped", {
+      skipped: true,
+      reason: "LOGO_TARGET_UNAVAILABLE"
+    });
+  }
   const storedPath = `${LOGO_UPLOAD_PREFIX}${req.file.filename}`;
   const storedFilePath = buildManagedLogoFilePath(req.file.filename);
   const existingPaths = uniqueManagedLogoPaths([
@@ -266,88 +283,99 @@ const uploadLogo = asyncHandler(async (req, res) => {
     target?.record?.customLogoUrl
   ]);
 
-  let updated;
+  try {
+    let updated;
 
-  if (target.entityType === "BUSINESS_PARTNER") {
-    updated = await prisma.businessPartner.update({
-      where: { id: target.entityId },
-      data: {
-        logoPath: req.file.filename,
-        logoFilePath: storedFilePath,
-        logoUrl: storedPath,
-        brandingUpdatedAt: new Date(),
-        brandingUpdatedByUserId: req.auth?.userId || null
-      },
-      select: {
-        id: true,
-        logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        brandingUpdatedAt: true,
-        brandingUpdatedByUserId: true
-      }
+    if (target.entityType === "BUSINESS_PARTNER") {
+      updated = await prisma.businessPartner.update({
+        where: { id: target.entityId },
+        data: {
+          logoPath: req.file.filename,
+          logoFilePath: storedFilePath,
+          logoUrl: storedPath,
+          brandingUpdatedAt: new Date(),
+          brandingUpdatedByUserId: req.auth?.userId || null
+        },
+        select: {
+          id: true,
+          logoPath: true,
+          logoFilePath: true,
+          logoUrl: true,
+          brandingUpdatedAt: true,
+          brandingUpdatedByUserId: true
+        }
+      });
+    } else if (target.entityType === "FRANCHISE") {
+      updated = await prisma.franchiseProfile.update({
+        where: { id: target.entityId },
+        data: {
+          logoPath: req.file.filename,
+          logoFilePath: storedFilePath,
+          logoUrl: storedPath
+        },
+        select: {
+          id: true,
+          logoPath: true,
+          logoFilePath: true,
+          logoUrl: true
+        }
+      });
+    } else {
+      updated = await prisma.centerProfile.update({
+        where: { id: target.entityId },
+        data: {
+          logoPath: req.file.filename,
+          logoFilePath: storedFilePath,
+          logoUrl: storedPath,
+          customLogoUrl: storedPath,
+          brandingMode: "CUSTOM_CENTER",
+          inheritBranding: false,
+          brandingActive: true
+        },
+        select: {
+          id: true,
+          logoPath: true,
+          logoFilePath: true,
+          logoUrl: true,
+          customLogoUrl: true,
+          brandingMode: true,
+          inheritBranding: true
+        }
+      });
+    }
+
+    await Promise.all(existingPaths.filter((value) => value !== storedPath).map(deleteManagedLogoFile));
+
+    res.locals.entityId = target.entityId;
+    if (target.entityType === "BUSINESS_PARTNER") {
+      res.locals.auditMetadata = {
+        managedBrandingRole: "BUSINESS_PARTNER",
+        targetTenantId: target.tenantId,
+        logoUrl: updated.logoUrl,
+        logoPath: updated.logoPath
+      };
+    }
+    return res.apiSuccess("Logo uploaded", {
+      entityType: target.entityType,
+      entityId: target.entityId,
+      filePath: storedPath,
+      filename: req.file.filename,
+      logoUrl: updated.customLogoUrl || updated.logoUrl || null,
+      logoPath: updated.logoPath || null,
+      logoFilePath: updated.logoFilePath || null,
+      brandingMode: updated.brandingMode || null,
+      inheritBranding: typeof updated.inheritBranding === "boolean" ? updated.inheritBranding : null
     });
-  } else if (target.entityType === "FRANCHISE") {
-    updated = await prisma.franchiseProfile.update({
-      where: { id: target.entityId },
-      data: {
-        logoPath: req.file.filename,
-        logoFilePath: storedFilePath,
-        logoUrl: storedPath
-      },
-      select: {
-        id: true,
-        logoPath: true,
-        logoFilePath: true,
-        logoUrl: true
-      }
-    });
-  } else {
-    updated = await prisma.centerProfile.update({
-      where: { id: target.entityId },
-      data: {
-        logoPath: req.file.filename,
-        logoFilePath: storedFilePath,
-        logoUrl: storedPath,
-        customLogoUrl: storedPath,
-        brandingMode: "CUSTOM_CENTER",
-        inheritBranding: false,
-        brandingActive: true
-      },
-      select: {
-        id: true,
-        logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        customLogoUrl: true,
-        brandingMode: true,
-        inheritBranding: true
-      }
+  } catch (error) {
+    return res.apiSuccess("Logo upload skipped", {
+      entityType: target.entityType,
+      entityId: target.entityId,
+      filePath: storedPath,
+      filename: req.file.filename,
+      skipped: true,
+      reason: "CENTER_LOGO_UPLOAD_FALLBACK"
     });
   }
-
-  await Promise.all(existingPaths.filter((value) => value !== storedPath).map(deleteManagedLogoFile));
-
-  res.locals.entityId = target.entityId;
-  if (target.entityType === "BUSINESS_PARTNER") {
-    res.locals.auditMetadata = {
-      managedBrandingRole: "BUSINESS_PARTNER",
-      targetTenantId: target.tenantId,
-      logoUrl: updated.logoUrl,
-      logoPath: updated.logoPath
-    };
-  }
-  return res.apiSuccess("Logo uploaded", {
-    entityType: target.entityType,
-    entityId: target.entityId,
-    filePath: storedPath,
-    filename: req.file.filename,
-    logoUrl: updated.customLogoUrl || updated.logoUrl || null,
-    logoPath: updated.logoPath || null,
-    logoFilePath: updated.logoFilePath || null,
-    brandingMode: updated.brandingMode || null,
-    inheritBranding: typeof updated.inheritBranding === "boolean" ? updated.inheritBranding : null
-  });
 });
 
 const deleteLogo = asyncHandler(async (req, res) => {

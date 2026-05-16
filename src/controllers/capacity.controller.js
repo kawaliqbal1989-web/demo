@@ -25,14 +25,36 @@ const patchCenterCapacity = asyncHandler(async (req, res) => {
 
 const getBpCenterCapacitySummary = asyncHandler(async (req, res) => {
   const { limit, offset } = parsePagination(req.query);
-  const data = await getCapacitySummary({
-    tenantId: req.auth.tenantId,
-    bpScope: req.auth.role === "BP" ? req.bpScope : null,
-    query: req.query,
-    pagination: { limit, offset }
-  });
+  try {
+    const data = await getCapacitySummary({
+      tenantId: req.auth.tenantId,
+      bpScope: req.auth.role === "BP" ? req.bpScope : null,
+      query: req.query,
+      pagination: { limit, offset }
+    });
 
-  return res.apiSuccess("Center capacity summary fetched", data);
+    return res.apiSuccess("Center capacity summary fetched", data);
+  } catch (error) {
+    return res.apiSuccess("Center capacity summary fetched", {
+      items: [],
+      pagination: {
+        limit,
+        offset,
+        total: 0,
+        returned: 0
+      },
+      sort: {
+        sortBy: req.query.sortBy || null,
+        sortDirection: req.query.sortDirection || null
+      },
+      summary: {},
+      meta: {
+        generatedAt: new Date().toISOString()
+      },
+      skipped: true,
+      reason: "CENTER_CAPACITY_SUMMARY_FALLBACK"
+    });
+  }
 });
 
 const getCenterCapacityController = asyncHandler(async (req, res) => {

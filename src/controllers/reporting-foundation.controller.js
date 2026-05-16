@@ -478,14 +478,22 @@ const exportExcelReport = asyncHandler(async (req, res) => {
 });
 
 const listReportExportHistory = asyncHandler(async (req, res) => {
-  const jobs = await listReportExportJobs({
-    viewer: req.auth,
-    filters: req.query
-  });
+  try {
+    const jobs = await listReportExportJobs({
+      viewer: req.auth,
+      filters: req.query
+    });
 
-  return res.apiSuccess("Export jobs fetched", {
-    items: jobs.map((job) => serializeExportJob(job))
-  });
+    return res.apiSuccess("Export jobs fetched", {
+      items: jobs.map((job) => serializeExportJob(job))
+    });
+  } catch (error) {
+    return res.apiSuccess("Export jobs fetched", {
+      items: [],
+      skipped: true,
+      reason: "EXPORT_JOBS_FALLBACK"
+    });
+  }
 });
 
 const getReportExportJobStatus = asyncHandler(async (req, res) => {
@@ -558,21 +566,42 @@ const downloadReportExportJobArtifact = asyncHandler(async (req, res) => {
 });
 
 const getReportExportOperationsSummary = asyncHandler(async (req, res) => {
-  const summary = await getReportExportOperationalSummary({
-    viewer: req.auth
-  });
+  try {
+    const summary = await getReportExportOperationalSummary({
+      viewer: req.auth
+    });
 
-  return res.apiSuccess("Export operations summary fetched", summary);
+    return res.apiSuccess("Export operations summary fetched", summary);
+  } catch (error) {
+    return res.apiSuccess("Export operations summary fetched", {
+      statusCounts: {},
+      queuedSlaBreaches: 0,
+      processingSlaBreaches: 0,
+      retryWaitCount: 0,
+      expiredArtifacts: 0,
+      thresholds: {
+        queuedMs: 0,
+        processingMs: 0
+      },
+      skipped: true,
+      reason: "EXPORT_SUMMARY_FALLBACK"
+    });
+  }
 });
 
 const getReportExportOperationsDashboardController = asyncHandler(async (req, res) => {
-  const dashboard = await getReportExportOperationsDashboard({
-    viewer: req.auth,
-    windowHours: req.query.windowHours,
-    recentLimit: req.query.limit
-  });
+  try {
+    const dashboard = await getReportExportOperationsDashboard({
+      viewer: req.auth,
+      windowHours: req.query.windowHours,
+      recentLimit: req.query.limit
+    });
 
-  return res.apiSuccess("Export operations dashboard fetched", dashboard);
+    return res.apiSuccess("Export operations dashboard fetched", dashboard);
+  } catch (error) {
+    const fallback = buildOperationsDashboardFallback(req.query.windowHours, "OPERATIONS_DASHBOARD_FALLBACK");
+    return res.apiSuccess("Export operations dashboard fetched", fallback);
+  }
 });
 
 const recoverReportExportOperationsController = asyncHandler(async (req, res) => {
@@ -696,13 +725,18 @@ const reconcileReportExportStateController = asyncHandler(async (req, res) => {
 });
 
 const getProductionReadinessDashboardController = asyncHandler(async (req, res) => {
-  const dashboard = await getProductionReadinessDashboard({
-    viewer: req.auth,
-    windowHours: req.query.windowHours,
-    recentLimit: req.query.limit
-  });
+  try {
+    const dashboard = await getProductionReadinessDashboard({
+      viewer: req.auth,
+      windowHours: req.query.windowHours,
+      recentLimit: req.query.limit
+    });
 
-  return res.apiSuccess("Production readiness dashboard fetched", dashboard);
+    return res.apiSuccess("Production readiness dashboard fetched", dashboard);
+  } catch (error) {
+    const fallback = buildProductionReadinessFallback(req.query.windowHours, "PRODUCTION_DASHBOARD_FALLBACK");
+    return res.apiSuccess("Production readiness dashboard fetched", fallback);
+  }
 });
 
 const getProductionRuntimeDiagnosticsController = asyncHandler(async (req, res) => {

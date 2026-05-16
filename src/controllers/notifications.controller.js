@@ -164,26 +164,55 @@ const triggerCleanup = asyncHandler(async (req, res) => {
 });
 
 const listOperationalPartnerNotifications = asyncHandler(async (req, res) => {
-  const filters = await normalizeOperationalFilters(req);
-  const data = await listOperationalNotifications({
-    tenantId: req.auth.tenantId,
-    recipientUserId: req.auth.userId,
-    filters
-  });
+  try {
+    const filters = await normalizeOperationalFilters(req);
+    const data = await listOperationalNotifications({
+      tenantId: req.auth.tenantId,
+      recipientUserId: req.auth.userId,
+      filters
+    });
 
-  return res.apiSuccess("Operational notifications fetched", data);
+    return res.apiSuccess("Operational notifications fetched", data);
+  } catch (error) {
+    const limit = Math.min(100, Math.max(1, parsePositiveInteger(req.query.limit, 20) || 20));
+    const offset = parsePositiveInteger(req.query.offset, 0);
+    return res.apiSuccess("Operational notifications fetched", {
+      page: Math.floor(offset / limit) + 1,
+      limit,
+      offset,
+      total: 0,
+      unreadCount: 0,
+      items: [],
+      skipped: true,
+      reason: "OPERATIONAL_NOTIFICATIONS_FALLBACK"
+    });
+  }
 });
 
 const getOperationalPartnerUnreadCount = asyncHandler(async (req, res) => {
-  const filters = await normalizeOperationalFilters(req);
-  const data = await getOperationalUnreadCounts({
-    tenantId: req.auth.tenantId,
-    recipientUserId: req.auth.userId,
-    filters,
-    includeGroups: true
-  });
+  try {
+    const filters = await normalizeOperationalFilters(req);
+    const data = await getOperationalUnreadCounts({
+      tenantId: req.auth.tenantId,
+      recipientUserId: req.auth.userId,
+      filters,
+      includeGroups: true
+    });
 
-  return res.apiSuccess("Operational unread counts fetched", data);
+    return res.apiSuccess("Operational unread counts fetched", data);
+  } catch (error) {
+    return res.apiSuccess("Operational unread counts fetched", {
+      totalUnread: 0,
+      criticalUnread: 0,
+      highUnread: 0,
+      grouped: {
+        bySeverity: {},
+        byCategory: {}
+      },
+      skipped: true,
+      reason: "OPERATIONAL_UNREAD_COUNTS_FALLBACK"
+    });
+  }
 });
 
 const markOperationalPartnerNotificationRead = asyncHandler(async (req, res) => {

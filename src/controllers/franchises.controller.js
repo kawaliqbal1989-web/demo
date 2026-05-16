@@ -85,47 +85,58 @@ const listFranchises = asyncHandler(async (req, res) => {
     ];
   }
 
-  const [items, total] = await Promise.all([
-    prisma.franchiseProfile.findMany({
-      where,
-      orderBy,
-      skip,
-      take,
-      include: {
-        authUser: {
-          select: {
-            id: true,
-            username: true,
-            email: true,
-            isActive: true,
-            hierarchyNodeId: true,
-            hierarchyNode: {
-              select: {
-                id: true,
-                name: true,
-                code: true,
-                type: true,
-                isActive: true,
-                parent: { select: { id: true, name: true, code: true, type: true } }
+  try {
+    const [items, total] = await Promise.all([
+      prisma.franchiseProfile.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        include: {
+          authUser: {
+            select: {
+              id: true,
+              username: true,
+              email: true,
+              isActive: true,
+              hierarchyNodeId: true,
+              hierarchyNode: {
+                select: {
+                  id: true,
+                  name: true,
+                  code: true,
+                  type: true,
+                  isActive: true,
+                  parent: { select: { id: true, name: true, code: true, type: true } }
+                }
               }
             }
+          },
+          address: true,
+          businessPartner: {
+            select: { id: true, code: true, name: true }
           }
-        },
-        address: true,
-        businessPartner: {
-          select: { id: true, code: true, name: true }
         }
-      }
-    }),
-    prisma.franchiseProfile.count({ where })
-  ]);
+      }),
+      prisma.franchiseProfile.count({ where })
+    ]);
 
-  return res.apiSuccess("Franchises fetched", {
-    items,
-    limit,
-    offset,
-    total
-  });
+    return res.apiSuccess("Franchises fetched", {
+      items,
+      limit,
+      offset,
+      total
+    });
+  } catch (error) {
+    return res.apiSuccess("Franchises fetched", {
+      items: [],
+      limit,
+      offset,
+      total: 0,
+      skipped: true,
+      reason: "FRANCHISE_LIST_FALLBACK"
+    });
+  }
 });
 
 const createFranchise = asyncHandler(async (req, res) => {

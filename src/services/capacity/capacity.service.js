@@ -19,6 +19,25 @@ import {
 
 const centerCapacityExecutionLocks = new Map();
 
+function isCapacityStorageMissingError(error) {
+  const code = String(error?.code || "");
+  if (code !== "P2021" && code !== "P2022") {
+    return false;
+  }
+
+  const modelName = String(error?.meta?.modelName || "").toLowerCase();
+  const table = String(error?.meta?.table || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    modelName.includes("centercapacity") ||
+    table.includes("centercapacity") ||
+    table.includes("center_capacity") ||
+    message.includes("centercapacity") ||
+    message.includes("center_capacity")
+  );
+}
+
 function isCapacityEnforcementError(error) {
   return ["TEACHER_CAPACITY_EXCEEDED", "STUDENT_CAPACITY_EXCEEDED"].includes(String(error?.errorCode || ""));
 }
@@ -141,24 +160,34 @@ async function loadCenterCapacityUsage({ tx, tenantId, hierarchyNodeId }) {
 }
 
 async function buildCenterSnapshot({ tx, tenantId, center, auditLimit = 10 }) {
-  const [capacity, usage, auditHistory] = await Promise.all([
-    tx.centerCapacity.findUnique({
-      where: {
-        centerId: center.id
-      }
-    }),
-    loadCenterCapacityUsage({
-      tx,
-      tenantId,
-      hierarchyNodeId: center.authUser?.hierarchyNodeId || null
-    }),
-    listCenterCapacityAuditHistory({
-      tenantId,
-      centerId: center.id,
-      limit: auditLimit,
-      tx
-    })
-  ]);
+  const usage = await loadCenterCapacityUsage({
+    tx,
+    tenantId,
+    hierarchyNodeId: center.authUser?.hierarchyNodeId || null
+  });
+
+  let capacity = null;
+  let auditHistory = [];
+
+  try {
+    [capacity, auditHistory] = await Promise.all([
+      tx.centerCapacity.findUnique({
+        where: {
+          centerId: center.id
+        }
+      }),
+      listCenterCapacityAuditHistory({
+        tenantId,
+        centerId: center.id,
+        limit: auditLimit,
+        tx
+      })
+    ]);
+  } catch (error) {
+    if (!isCapacityStorageMissingError(error)) {
+      throw error;
+    }
+  }
 
   return buildCenterCapacitySnapshot({
     center,

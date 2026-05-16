@@ -1225,37 +1225,97 @@ const saSetCenterStatus = asyncHandler(async (req, res) => {
 
 const saGetCenterDetail = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const lookupWhere = { id, tenantId: req.auth.tenantId };
 
-  const center = await prisma.centerProfile.findFirst({
-    where: { id, tenantId: req.auth.tenantId },
-    include: {
-      address: true,
-      authUser: {
-        select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
-      },
-      franchiseProfile: { select: { id: true, code: true, name: true } }
+  try {
+    const center = await prisma.centerProfile.findFirst({
+      where: lookupWhere,
+      include: {
+        address: true,
+        authUser: {
+          select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
+        },
+        franchiseProfile: { select: { id: true, code: true, name: true } }
+      }
+    });
+    if (!center) return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
+
+    const centerNodeId = center.authUser?.hierarchyNodeId;
+
+    const [studentsCount, teachersCount, batchesCount] = await Promise.all([
+      centerNodeId
+        ? prisma.student.count({ where: { tenantId: req.auth.tenantId, hierarchyNodeId: centerNodeId, isActive: true } })
+        : Promise.resolve(0),
+      centerNodeId
+        ? prisma.authUser.count({ where: { tenantId: req.auth.tenantId, role: "TEACHER", hierarchyNodeId: centerNodeId } })
+        : Promise.resolve(0),
+      centerNodeId
+        ? prisma.batch.count({ where: { tenantId: req.auth.tenantId, hierarchyNodeId: centerNodeId } })
+        : Promise.resolve(0)
+    ]);
+
+    return res.apiSuccess("Center detail loaded", {
+      ...center,
+      metrics: { studentsCount, teachersCount, batchesCount }
+    });
+  } catch (error) {
+    const center = await prisma.centerProfile.findFirst({
+      where: lookupWhere,
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        displayName: true,
+        status: true,
+        isActive: true,
+        authUserId: true,
+        franchiseProfileId: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    }).catch(() => null);
+
+    if (!center) {
+      return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
     }
-  });
-  if (!center) return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
 
-  const centerNodeId = center.authUser?.hierarchyNodeId;
+    const authUser = center.authUserId
+      ? await prisma.authUser.findUnique({
+          where: { id: center.authUserId },
+          select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
+        }).catch(() => null)
+      : null;
 
-  const [studentsCount, teachersCount, batchesCount] = await Promise.all([
-    centerNodeId
-      ? prisma.student.count({ where: { tenantId: req.auth.tenantId, hierarchyNodeId: centerNodeId, isActive: true } })
-      : Promise.resolve(0),
-    centerNodeId
-      ? prisma.authUser.count({ where: { tenantId: req.auth.tenantId, role: "TEACHER", hierarchyNodeId: centerNodeId } })
-      : Promise.resolve(0),
-    centerNodeId
-      ? prisma.batch.count({ where: { tenantId: req.auth.tenantId, hierarchyNodeId: centerNodeId } })
-      : Promise.resolve(0)
-  ]);
+    const centerNodeId = authUser?.hierarchyNodeId || null;
+    const [studentsCount, teachersCount, batchesCount] = await Promise.all([
+      centerNodeId
+        ? prisma.student.count({ where: { tenantId: req.auth.tenantId, hierarchyNodeId: centerNodeId, isActive: true } }).catch(() => 0)
+        : Promise.resolve(0),
+      centerNodeId
+        ? prisma.authUser.count({ where: { tenantId: req.auth.tenantId, role: "TEACHER", hierarchyNodeId: centerNodeId } }).catch(() => 0)
+        : Promise.resolve(0),
+      centerNodeId
+        ? prisma.batch.count({ where: { tenantId: req.auth.tenantId, hierarchyNodeId: centerNodeId } }).catch(() => 0)
+        : Promise.resolve(0)
+    ]);
 
-  return res.apiSuccess("Center detail loaded", {
-    ...center,
-    metrics: { studentsCount, teachersCount, batchesCount }
-  });
+    const franchiseProfile = center.franchiseProfileId
+      ? await prisma.franchiseProfile.findFirst({
+          where: { id: center.franchiseProfileId, tenantId: req.auth.tenantId },
+          select: { id: true, code: true, name: true }
+        }).catch(() => null)
+      : null;
+
+    return res.apiSuccess("Center detail loaded", {
+      ...center,
+      address: null,
+      authUser,
+      franchiseProfile,
+      metrics: { studentsCount, teachersCount, batchesCount },
+      skipped: true,
+      reason: "CENTER_DETAIL_FALLBACK"
+    });
+  }
 });
 
 export {

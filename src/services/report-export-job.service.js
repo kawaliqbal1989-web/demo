@@ -824,7 +824,9 @@ async function getReportExportOperationsDashboard({
   const staleHeartbeatBefore = new Date(now.getTime() - env.reportExportWorkerHeartbeatStaleMs);
   const expiringSoonBefore = new Date(now.getTime() + 2 * 60 * 60 * 1000);
 
-  const [
+  try {
+
+    const [
     statusCounts,
     formatCounts,
     queueCounts,
@@ -846,7 +848,7 @@ async function getReportExportOperationsDashboard({
     dueSoonSchedules,
     recentActivity,
     recentDownloads
-  ] = await Promise.all([
+    ] = await Promise.all([
     prisma.reportExportJob.groupBy({
       by: ["status"],
       where: { tenantId },
@@ -1032,8 +1034,8 @@ async function getReportExportOperationsDashboard({
     })
   ]);
 
-  const workerMap = new Map();
-  for (const job of activeProcessingJobs) {
+    const workerMap = new Map();
+    for (const job of activeProcessingJobs) {
     const workerId = job.leaseOwner || "unassigned";
     const heartbeatAt = job.lastHeartbeatAt || job.startedAt || job.queuedAt || null;
     const leaseExpiresAt = job.leaseExpiresAt || null;
@@ -1061,161 +1063,244 @@ async function getReportExportOperationsDashboard({
       || (current.lastHeartbeatAt && new Date(current.lastHeartbeatAt) <= staleHeartbeatBefore)
     );
 
-    workerMap.set(workerId, current);
-  }
-
-  const completedQueueDurations = recentCompletedJobs.map((job) => toMilliseconds(job.queuedAt, job.startedAt)).filter(Number.isFinite);
-  const completedProcessingDurations = recentCompletedJobs.map((job) => toMilliseconds(job.startedAt, job.completedAt)).filter(Number.isFinite);
-  const completedEndToEndDurations = recentCompletedJobs.map((job) => toMilliseconds(job.queuedAt, job.completedAt)).filter(Number.isFinite);
-  const queueSlaBreachesCompleted = completedQueueDurations.filter((value) => value > env.reportExportSlaQueuedMs).length;
-  const processingSlaBreachesCompleted = completedProcessingDurations.filter((value) => value > env.reportExportSlaProcessingMs).length;
-  const totalCompletedBytes = recentCompletedJobs.reduce((total, job) => total + (Number(job.byteLength) || 0), 0);
-
-  const incidents = [
-    ...queuedBreachJobs.map((job) => buildOperationalIncident({
-      type: "QUEUE_SLA_BREACH",
-      severity: "warning",
-      message: `Queued export exceeded ${env.reportExportSlaQueuedMs}ms SLA`,
-      job,
-      metadata: {
-        ageMs: toMilliseconds(job.queuedAt, now)
-      },
-      detectedAt: now
-    })),
-    ...processingBreachJobs.map((job) => buildOperationalIncident({
-      type: "PROCESSING_SLA_BREACH",
-      severity: "warning",
-      message: `Processing export exceeded ${env.reportExportSlaProcessingMs}ms SLA`,
-      job,
-      metadata: {
-        runtimeMs: toMilliseconds(job.startedAt, now),
-        lastHeartbeatAt: job.lastHeartbeatAt || null
-      },
-      detectedAt: now
-    })),
-    ...staleProcessingJobs.map((job) => buildOperationalIncident({
-      type: "STALE_WORKER_LEASE",
-      severity: "critical",
-      message: "Processing export lease is stale or heartbeat is overdue",
-      job,
-      metadata: {
-        leaseOwner: job.leaseOwner || null,
-        leaseExpiresAt: job.leaseExpiresAt || null,
-        lastHeartbeatAt: job.lastHeartbeatAt || null
-      },
-      detectedAt: now
-    })),
-    ...recentFailedJobs.map((job) => buildOperationalIncident({
-      type: "FAILED_EXPORT",
-      severity: job.retryCount >= job.maxAttempts ? "critical" : "warning",
-      message: job.lastErrorMessage || "Export failed",
-      job,
-      metadata: {
-        retryCount: job.retryCount,
-        maxAttempts: job.maxAttempts,
-        lastErrorCode: job.lastErrorCode || null
-      },
-      detectedAt: job.failedAt || now
-    }))
-  ]
-    .sort((left, right) => new Date(right.detectedAt) - new Date(left.detectedAt))
-    .slice(0, normalizedRecentLimit);
-
-  return {
-    generatedAt: now,
-    windowHours: normalizedWindowHours,
-    thresholds: {
-      queuedMs: env.reportExportSlaQueuedMs,
-      processingMs: env.reportExportSlaProcessingMs,
-      staleHeartbeatMs: env.reportExportWorkerHeartbeatStaleMs
-    },
-    backlog: {
-      statusCounts: summarizeCounts(statusCounts),
-      formatCounts: summarizeCounts(formatCounts, "exportFormat"),
-      queueCounts: summarizeCounts(queueCounts, "queueName"),
-      oldestQueuedAt: oldestQueuedJob?.queuedAt || null,
-      oldestQueuedAgeMs: oldestQueuedJob ? toMilliseconds(oldestQueuedJob.queuedAt, now) : 0,
-      nextRetryAt: oldestRetryJob?.nextRetryAt || null,
-      retryWaitCount: summarizeCounts(statusCounts).RETRY_WAIT || 0
-    },
-    throughput: {
-      completedCount: recentCompletedJobs.length,
-      failedCount: recentFailedJobs.length,
-      retriedCount: recentRetriedJobs.length,
-      averageQueueMs: averageNumbers(completedQueueDurations),
-      averageProcessingMs: averageNumbers(completedProcessingDurations),
-      averageEndToEndMs: averageNumbers(completedEndToEndDurations),
-      totalCompletedBytes,
-      averageCompletedBytes: recentCompletedJobs.length ? Math.round(totalCompletedBytes / recentCompletedJobs.length) : 0,
-      queueSlaBreachesCompleted,
-      processingSlaBreachesCompleted
-    },
-    charts: {
-      throughput: buildTimeSeries({
-        jobs: recentCompletedJobs,
-        windowHours: normalizedWindowHours,
-        now,
-        valueFactory: () => 1
-      }),
-      saturation: buildTimeSeries({
-        jobs: [...queuedBreachJobs, ...processingBreachJobs, ...staleProcessingJobs],
-        windowHours: normalizedWindowHours,
-        now,
-        valueFactory: () => 1
-      }),
-      workerUtilization: buildTimeSeries({
-        jobs: recentCompletedJobs,
-        windowHours: normalizedWindowHours,
-        now,
-        valueFactory: (job) => Math.max(1, Math.round((toMilliseconds(job.startedAt, job.completedAt) || 0) / 60000))
-      })
-    },
-    distributions: {
-      duration: buildDurationDistribution(recentJobs),
-      queueNames: buildGroupedDistribution(recentJobs, "queueName"),
-      reportKeys: buildGroupedDistribution(recentJobs, "reportKey"),
-      scopeRoles: buildGroupedDistribution(recentJobs, "scopeRole"),
-      retryHeatmap: buildRetryHeatmap(recentJobs)
-    },
-    workers: {
-      active: Array.from(workerMap.values()).sort((left, right) => {
-        if (left.stale !== right.stale) {
-          return left.stale ? -1 : 1;
-        }
-        return right.activeJobs - left.activeJobs;
-      }),
-      counts: {
-        activeWorkers: workerMap.size,
-        staleWorkers: Array.from(workerMap.values()).filter((worker) => worker.stale).length,
-        staleProcessingJobs: staleProcessingJobs.length
-      }
-    },
-    artifacts: {
-      statusCounts: summarizeCounts(artifactStatusCounts),
-      availableCount: availableArtifactAggregate._count?._all || 0,
-      availableBytes: Number(availableArtifactAggregate._sum?.byteLength) || 0,
-      expiringSoonCount: expiringSoonArtifacts.length,
-      overdueExpiredCount: overdueExpiredArtifacts.length,
-      expiringSoon: expiringSoonArtifacts,
-      overdueExpired: overdueExpiredArtifacts
-    },
-    schedules: {
-      statusCounts: summarizeCounts(scheduleStatusCounts),
-      dueSoonCount: dueSoonSchedules.length,
-      dueSoon: dueSoonSchedules
-    },
-    sla: {
-      queuedBreaches: queuedBreachJobs.length,
-      processingBreaches: processingBreachJobs.length,
-      staleLeaseBreaches: staleProcessingJobs.length,
-      incidents
-    },
-    recent: {
-      jobs: recentJobs.map((job) => serializeExportJob(job)),
-      activity: recentActivity.map((entry) => serializeOperationalActivity(entry)).filter(Boolean),
-      downloads: recentDownloads.map((entry) => serializeOperationalActivity(entry)).filter(Boolean)
+      workerMap.set(workerId, current);
     }
-  };
+
+    const completedQueueDurations = recentCompletedJobs.map((job) => toMilliseconds(job.queuedAt, job.startedAt)).filter(Number.isFinite);
+    const completedProcessingDurations = recentCompletedJobs.map((job) => toMilliseconds(job.startedAt, job.completedAt)).filter(Number.isFinite);
+    const completedEndToEndDurations = recentCompletedJobs.map((job) => toMilliseconds(job.queuedAt, job.completedAt)).filter(Number.isFinite);
+    const queueSlaBreachesCompleted = completedQueueDurations.filter((value) => value > env.reportExportSlaQueuedMs).length;
+    const processingSlaBreachesCompleted = completedProcessingDurations.filter((value) => value > env.reportExportSlaProcessingMs).length;
+    const totalCompletedBytes = recentCompletedJobs.reduce((total, job) => total + (Number(job.byteLength) || 0), 0);
+
+    const incidents = [
+      ...queuedBreachJobs.map((job) => buildOperationalIncident({
+        type: "QUEUE_SLA_BREACH",
+        severity: "warning",
+        message: `Queued export exceeded ${env.reportExportSlaQueuedMs}ms SLA`,
+        job,
+        metadata: {
+          ageMs: toMilliseconds(job.queuedAt, now)
+        },
+        detectedAt: now
+      })),
+      ...processingBreachJobs.map((job) => buildOperationalIncident({
+        type: "PROCESSING_SLA_BREACH",
+        severity: "warning",
+        message: `Processing export exceeded ${env.reportExportSlaProcessingMs}ms SLA`,
+        job,
+        metadata: {
+          runtimeMs: toMilliseconds(job.startedAt, now),
+          lastHeartbeatAt: job.lastHeartbeatAt || null
+        },
+        detectedAt: now
+      })),
+      ...staleProcessingJobs.map((job) => buildOperationalIncident({
+        type: "STALE_WORKER_LEASE",
+        severity: "critical",
+        message: "Processing export lease is stale or heartbeat is overdue",
+        job,
+        metadata: {
+          leaseOwner: job.leaseOwner || null,
+          leaseExpiresAt: job.leaseExpiresAt || null,
+          lastHeartbeatAt: job.lastHeartbeatAt || null
+        },
+        detectedAt: now
+      })),
+      ...recentFailedJobs.map((job) => buildOperationalIncident({
+        type: "FAILED_EXPORT",
+        severity: job.retryCount >= job.maxAttempts ? "critical" : "warning",
+        message: job.lastErrorMessage || "Export failed",
+        job,
+        metadata: {
+          retryCount: job.retryCount,
+          maxAttempts: job.maxAttempts,
+          lastErrorCode: job.lastErrorCode || null
+        },
+        detectedAt: job.failedAt || now
+      }))
+    ]
+      .sort((left, right) => new Date(right.detectedAt) - new Date(left.detectedAt))
+      .slice(0, normalizedRecentLimit);
+
+    return {
+      generatedAt: now,
+      windowHours: normalizedWindowHours,
+      thresholds: {
+        queuedMs: env.reportExportSlaQueuedMs,
+        processingMs: env.reportExportSlaProcessingMs,
+        staleHeartbeatMs: env.reportExportWorkerHeartbeatStaleMs
+      },
+      backlog: {
+        statusCounts: summarizeCounts(statusCounts),
+        formatCounts: summarizeCounts(formatCounts, "exportFormat"),
+        queueCounts: summarizeCounts(queueCounts, "queueName"),
+        oldestQueuedAt: oldestQueuedJob?.queuedAt || null,
+        oldestQueuedAgeMs: oldestQueuedJob ? toMilliseconds(oldestQueuedJob.queuedAt, now) : 0,
+        nextRetryAt: oldestRetryJob?.nextRetryAt || null,
+        retryWaitCount: summarizeCounts(statusCounts).RETRY_WAIT || 0
+      },
+      throughput: {
+        completedCount: recentCompletedJobs.length,
+        failedCount: recentFailedJobs.length,
+        retriedCount: recentRetriedJobs.length,
+        averageQueueMs: averageNumbers(completedQueueDurations),
+        averageProcessingMs: averageNumbers(completedProcessingDurations),
+        averageEndToEndMs: averageNumbers(completedEndToEndDurations),
+        totalCompletedBytes,
+        averageCompletedBytes: recentCompletedJobs.length ? Math.round(totalCompletedBytes / recentCompletedJobs.length) : 0,
+        queueSlaBreachesCompleted,
+        processingSlaBreachesCompleted
+      },
+      charts: {
+        throughput: buildTimeSeries({
+          jobs: recentCompletedJobs,
+          windowHours: normalizedWindowHours,
+          now,
+          valueFactory: () => 1
+        }),
+        saturation: buildTimeSeries({
+          jobs: [...queuedBreachJobs, ...processingBreachJobs, ...staleProcessingJobs],
+          windowHours: normalizedWindowHours,
+          now,
+          valueFactory: () => 1
+        }),
+        workerUtilization: buildTimeSeries({
+          jobs: recentCompletedJobs,
+          windowHours: normalizedWindowHours,
+          now,
+          valueFactory: (job) => Math.max(1, Math.round((toMilliseconds(job.startedAt, job.completedAt) || 0) / 60000))
+        })
+      },
+      distributions: {
+        duration: buildDurationDistribution(recentJobs),
+        queueNames: buildGroupedDistribution(recentJobs, "queueName"),
+        reportKeys: buildGroupedDistribution(recentJobs, "reportKey"),
+        scopeRoles: buildGroupedDistribution(recentJobs, "scopeRole"),
+        retryHeatmap: buildRetryHeatmap(recentJobs)
+      },
+      workers: {
+        active: Array.from(workerMap.values()).sort((left, right) => {
+          if (left.stale !== right.stale) {
+            return left.stale ? -1 : 1;
+          }
+          return right.activeJobs - left.activeJobs;
+        }),
+        counts: {
+          activeWorkers: workerMap.size,
+          staleWorkers: Array.from(workerMap.values()).filter((worker) => worker.stale).length,
+          staleProcessingJobs: staleProcessingJobs.length
+        }
+      },
+      artifacts: {
+        statusCounts: summarizeCounts(artifactStatusCounts),
+        availableCount: availableArtifactAggregate._count?._all || 0,
+        availableBytes: Number(availableArtifactAggregate._sum?.byteLength) || 0,
+        expiringSoonCount: expiringSoonArtifacts.length,
+        overdueExpiredCount: overdueExpiredArtifacts.length,
+        expiringSoon: expiringSoonArtifacts,
+        overdueExpired: overdueExpiredArtifacts
+      },
+      schedules: {
+        statusCounts: summarizeCounts(scheduleStatusCounts),
+        dueSoonCount: dueSoonSchedules.length,
+        dueSoon: dueSoonSchedules
+      },
+      sla: {
+        queuedBreaches: queuedBreachJobs.length,
+        processingBreaches: processingBreachJobs.length,
+        staleLeaseBreaches: staleProcessingJobs.length,
+        incidents
+      },
+      recent: {
+        jobs: recentJobs.map((job) => serializeExportJob(job)),
+        activity: recentActivity.map((entry) => serializeOperationalActivity(entry)).filter(Boolean),
+        downloads: recentDownloads.map((entry) => serializeOperationalActivity(entry)).filter(Boolean)
+      }
+    };
+  } catch (error) {
+    if (!isReportExportStorageMissingError(error)) {
+      throw error;
+    }
+
+    return {
+      generatedAt: now,
+      windowHours: normalizedWindowHours,
+      thresholds: {
+        queuedMs: env.reportExportSlaQueuedMs,
+        processingMs: env.reportExportSlaProcessingMs,
+        staleHeartbeatMs: env.reportExportWorkerHeartbeatStaleMs
+      },
+      backlog: {
+        statusCounts: {},
+        formatCounts: {},
+        queueCounts: {},
+        oldestQueuedAt: null,
+        oldestQueuedAgeMs: 0,
+        nextRetryAt: null,
+        retryWaitCount: 0
+      },
+      throughput: {
+        completedCount: 0,
+        failedCount: 0,
+        retriedCount: 0,
+        averageQueueMs: 0,
+        averageProcessingMs: 0,
+        averageEndToEndMs: 0,
+        totalCompletedBytes: 0,
+        averageCompletedBytes: 0,
+        queueSlaBreachesCompleted: 0,
+        processingSlaBreachesCompleted: 0
+      },
+      charts: {
+        throughput: buildTimeSeries({ jobs: [], windowHours: normalizedWindowHours, now, valueFactory: () => 0 }),
+        saturation: buildTimeSeries({ jobs: [], windowHours: normalizedWindowHours, now, valueFactory: () => 0 }),
+        workerUtilization: buildTimeSeries({ jobs: [], windowHours: normalizedWindowHours, now, valueFactory: () => 0 })
+      },
+      distributions: {
+        duration: [],
+        queueNames: [],
+        reportKeys: [],
+        scopeRoles: [],
+        retryHeatmap: []
+      },
+      workers: {
+        active: [],
+        counts: {
+          activeWorkers: 0,
+          staleWorkers: 0,
+          staleProcessingJobs: 0
+        }
+      },
+      artifacts: {
+        statusCounts: {},
+        availableCount: 0,
+        availableBytes: 0,
+        expiringSoonCount: 0,
+        overdueExpiredCount: 0,
+        expiringSoon: [],
+        overdueExpired: []
+      },
+      schedules: {
+        statusCounts: {},
+        dueSoonCount: 0,
+        dueSoon: []
+      },
+      sla: {
+        queuedBreaches: 0,
+        processingBreaches: 0,
+        staleLeaseBreaches: 0,
+        incidents: []
+      },
+      recent: {
+        jobs: [],
+        activity: [],
+        downloads: []
+      },
+      skipped: true,
+      reason: "REPORT_EXPORT_STORAGE_UNAVAILABLE"
+    };
+  }
 }
 
 async function markExportJobProcessing(jobId, { workerId, leaseMs = env.reportExportWorkerLeaseMs } = {}) {

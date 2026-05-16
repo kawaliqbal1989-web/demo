@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { logger } from "../lib/logger.js";
+import { resolveBusinessPartnerForUser } from "./bp-scope.service.js";
 
 function createHttpError(statusCode, message, errorCode) {
   const error = new Error(message);
@@ -53,88 +54,6 @@ function resolveRange({ from, to } = {}) {
   }
 
   return { from: start, toExclusive: endExclusive };
-}
-
-async function resolveBusinessPartnerForUser({ tenantId, userId }) {
-  const user = await prisma.authUser.findFirst({
-    where: {
-      id: userId,
-      tenantId,
-      isActive: true
-    },
-    select: {
-      id: true,
-      role: true,
-      username: true,
-      email: true,
-      hierarchyNodeId: true
-    }
-  });
-
-  if (!user || user.role !== "BP") {
-    return null;
-  }
-
-  const select = {
-    id: true,
-    code: true,
-    name: true,
-    tenantId: true,
-    hierarchyNodeId: true
-  };
-
-  // Most reliable: BP AuthUser.username is created as the partner code (e.g., BP008).
-  const username = user.username ? String(user.username).trim() : "";
-  if (username) {
-    const byCode = await prisma.businessPartner.findUnique({
-      where: {
-        tenantId_code: {
-          tenantId,
-          code: username
-        }
-      },
-      select
-    });
-
-    if (byCode) {
-      return byCode;
-    }
-  }
-
-  if (user.hierarchyNodeId) {
-    const byNode = await prisma.businessPartner.findFirst({
-      where: {
-        tenantId,
-        hierarchyNodeId: user.hierarchyNodeId
-      },
-      select,
-      orderBy: { createdAt: "desc" }
-    });
-
-    if (byNode) {
-      return byNode;
-    }
-  }
-
-  if (user.email) {
-    const email = String(user.email).trim().toLowerCase();
-    if (email) {
-      const byEmail = await prisma.businessPartner.findFirst({
-        where: {
-          tenantId,
-          contactEmail: email
-        },
-        select,
-        orderBy: { createdAt: "desc" }
-      });
-
-      if (byEmail) {
-        return byEmail;
-      }
-    }
-  }
-
-  return null;
 }
 
 function buildWhere({ tenantId, from, toExclusive, businessPartnerId, centerId, type }) {

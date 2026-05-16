@@ -4,6 +4,13 @@ import { parsePagination } from "../utils/pagination.js";
 import { generateUsername } from "../utils/username-generator.js";
 import { hashPassword } from "../utils/password.js";
 import { buildUploadUrl } from "../utils/request-url.js";
+import {
+  assertCenterCapacityAvailable,
+  isCapacityEnforcementError,
+  recordCapacityLimitBlocked,
+  recordCapacityOverAllocation,
+  withCenterCapacityExecutionLock
+} from "../services/capacity/capacity.service.js";
 import crypto from "crypto";
 
 function generateTempPassword() {
@@ -254,76 +261,110 @@ const createTeacher = asyncHandler(async (req, res) => {
 
   let created;
   try {
-    created = await prisma.$transaction(async (tx) => {
-      const username = requestedTeacherCode || (await generateUsername({ tx, tenantId: req.auth.tenantId, role: "TEACHER" }));
+    created = await withCenterCapacityExecutionLock(
+      {
+        tenantId: req.auth.tenantId,
+        hierarchyNodeId
+      },
+      () => prisma.$transaction(async (tx) => {
+        const capacityCheck = active
+          ? await assertCenterCapacityAvailable({
+              tx,
+              tenantId: req.auth.tenantId,
+              hierarchyNodeId,
+              resourceType: "TEACHER",
+              increment: 1
+            })
+          : null;
 
-      let resolvedEmail = normalizeString(email);
-      if (!resolvedEmail) {
-        resolvedEmail = generateFallbackEmail({ teacherCode: username });
-      }
+        const username = requestedTeacherCode || (await generateUsername({ tx, tenantId: req.auth.tenantId, role: "TEACHER" }));
 
-      // Avoid unique collisions when auto-generating.
-      if (!normalizeString(email)) {
-        const existing = await tx.authUser.findFirst({
-          where: { tenantId: req.auth.tenantId, email: resolvedEmail },
-          select: { id: true }
+        let resolvedEmail = normalizeString(email);
+        if (!resolvedEmail) {
+          resolvedEmail = generateFallbackEmail({ teacherCode: username });
+        }
+
+        // Avoid unique collisions when auto-generating.
+        if (!normalizeString(email)) {
+          const existing = await tx.authUser.findFirst({
+            where: { tenantId: req.auth.tenantId, email: resolvedEmail },
+            select: { id: true }
+          });
+          if (existing) {
+            resolvedEmail = `${username.toLowerCase()}_${Date.now()}@internal.local`;
+          }
+        }
+
+        const passwordHash = await hashPassword(tempPassword || `tmp_${Date.now()}_${Math.floor(Math.random() * 100000)}`);
+
+        const user = await tx.authUser.create({
+          data: {
+            tenantId: req.auth.tenantId,
+            username,
+            email: resolvedEmail,
+            passwordHash,
+            role: "TEACHER",
+            hierarchyNodeId,
+            parentUserId: req.auth.userId,
+            mustChangePassword: true,
+            isActive: shouldCreateLogin ? active : false
+          },
+          select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true, createdAt: true }
         });
-        if (existing) {
-          resolvedEmail = `${username.toLowerCase()}_${Date.now()}@internal.local`;
-        }
-      }
 
-      const passwordHash = await hashPassword(tempPassword || `tmp_${Date.now()}_${Math.floor(Math.random() * 100000)}`);
+        const profile = await tx.teacherProfile.create({
+          data: {
+            tenantId: req.auth.tenantId,
+            hierarchyNodeId,
+            authUserId: user.id,
+            fullName: String(fullName).trim(),
+            phonePrimary: phonePrimary ? String(phonePrimary).trim() : null,
+            joiningDate: normalizedJoiningDate === undefined ? null : normalizedJoiningDate,
+            qualification: normalizeString(qualification) || null,
+            experienceYears: normalizedExperienceYears === undefined ? null : normalizedExperienceYears,
+            specialization: normalizeString(specialization) || null,
+            phoneAlternate: normalizeString(phoneAlternate) || null,
+            whatsappNumber: normalizeString(whatsappNumber) || null,
+            address: normalizeString(address) || null,
+            city: normalizeString(city) || null,
+            state: normalizeString(state) || null,
+            pincode: normalizeString(pincode) || null,
+            emergencyContactName: normalizeString(emergencyContactName) || null,
+            emergencyContactPhone: normalizeString(emergencyContactPhone) || null,
+            emergencyContactRelation: normalizeString(relation) || null,
+            photoUrl: normalizeString(photoUrl) || null,
+            notes: normalizeString(notes) || null,
+            preferredLanguage: normalizeString(preferredLanguage) || null,
+            employmentType: normalizeString(employmentType) || null,
+            salaryType: normalizeString(salaryType) || null,
+            isProbation: isProbation === undefined ? null : Boolean(isProbation),
+            status: normalizedStatus,
+            isActive: active
+          }
+        });
 
-      const user = await tx.authUser.create({
-        data: {
-          tenantId: req.auth.tenantId,
-          username,
-          email: resolvedEmail,
-          passwordHash,
-          role: "TEACHER",
-          hierarchyNodeId,
-          parentUserId: req.auth.userId,
-          mustChangePassword: true,
-          isActive: shouldCreateLogin ? active : false
-        },
-        select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true, createdAt: true }
-      });
-
-      const profile = await tx.teacherProfile.create({
-        data: {
-          tenantId: req.auth.tenantId,
-          hierarchyNodeId,
-          authUserId: user.id,
-          fullName: String(fullName).trim(),
-          phonePrimary: phonePrimary ? String(phonePrimary).trim() : null,
-          joiningDate: normalizedJoiningDate === undefined ? null : normalizedJoiningDate,
-          qualification: normalizeString(qualification) || null,
-          experienceYears: normalizedExperienceYears === undefined ? null : normalizedExperienceYears,
-          specialization: normalizeString(specialization) || null,
-          phoneAlternate: normalizeString(phoneAlternate) || null,
-          whatsappNumber: normalizeString(whatsappNumber) || null,
-          address: normalizeString(address) || null,
-          city: normalizeString(city) || null,
-          state: normalizeString(state) || null,
-          pincode: normalizeString(pincode) || null,
-          emergencyContactName: normalizeString(emergencyContactName) || null,
-          emergencyContactPhone: normalizeString(emergencyContactPhone) || null,
-          emergencyContactRelation: normalizeString(relation) || null,
-          photoUrl: normalizeString(photoUrl) || null,
-          notes: normalizeString(notes) || null,
-          preferredLanguage: normalizeString(preferredLanguage) || null,
-          employmentType: normalizeString(employmentType) || null,
-          salaryType: normalizeString(salaryType) || null,
-          isProbation: isProbation === undefined ? null : Boolean(isProbation),
-          status: normalizedStatus,
-          isActive: active
-        }
-      });
-
-      return { user, profile, tempPassword };
-    });
+        return { user, profile, tempPassword, capacityCheck };
+      })
+    );
   } catch (error) {
+    if (isCapacityEnforcementError(error)) {
+      await recordCapacityLimitBlocked({
+        tenantId: req.auth.tenantId,
+        actor: {
+          userId: req.auth.userId,
+          role: req.auth.role
+        },
+        error,
+        requestMetadata: {
+          method: req.method,
+          path: req.originalUrl,
+          operation: "teacher-create"
+        }
+      });
+
+      return res.apiError(error.statusCode || 409, error.message, error.errorCode || "TEACHER_CAPACITY_EXCEEDED");
+    }
+
     if (error?.code === "P2002") {
       if (uniqueTargetsInclude(error, "username")) {
         return res.apiError(409, "Teacher code already exists", "TEACHER_CODE_EXISTS");
@@ -341,8 +382,30 @@ const createTeacher = asyncHandler(async (req, res) => {
     throw error;
   }
 
+  if (created.capacityCheck?.shouldAuditOverAllocation) {
+    await recordCapacityOverAllocation({
+      tenantId: req.auth.tenantId,
+      actor: {
+        userId: req.auth.userId,
+        role: req.auth.role
+      },
+      centerSnapshot: created.capacityCheck.snapshot,
+      resourceType: "TEACHER",
+      projectedUsed: created.capacityCheck.projectedUsed,
+      requestMetadata: {
+        method: req.method,
+        path: req.originalUrl,
+        operation: "teacher-create"
+      }
+    });
+  }
+
   res.locals.entityId = created.user.id;
-  return res.apiSuccess("Teacher created", created, 201);
+  return res.apiSuccess("Teacher created", {
+    user: created.user,
+    profile: created.profile,
+    tempPassword: created.tempPassword
+  }, 201);
 });
 
 const updateTeacher = asyncHandler(async (req, res) => {

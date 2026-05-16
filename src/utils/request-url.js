@@ -89,4 +89,34 @@ function normalizeStoredUploadUrl(value) {
   }
 }
 
-export { buildUploadUrl, getRequestOrigin, normalizeStoredUploadUrl };
+function versionAssetUrl(value, version) {
+  const normalized = normalizeStoredUploadUrl(value);
+  if (!normalized) {
+    return "";
+  }
+
+  const versionTime = version instanceof Date
+    ? version.getTime()
+    : new Date(version || "").getTime();
+
+  if (!Number.isFinite(versionTime)) {
+    return normalized;
+  }
+
+  try {
+    const isAbsolute = /^https?:\/\//i.test(normalized);
+    const url = isAbsolute
+      ? new URL(normalized)
+      : new URL(normalized, "http://local.upload");
+
+    url.searchParams.set("v", String(versionTime));
+    return isAbsolute
+      ? url.toString()
+      : `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    const separator = normalized.includes("?") ? "&" : "?";
+    return `${normalized}${separator}v=${encodeURIComponent(String(versionTime))}`;
+  }
+}
+
+export { buildUploadUrl, getRequestOrigin, normalizeStoredUploadUrl, versionAssetUrl };

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { LoadingState } from "../../components/LoadingState";
-import { getMyBusinessPartner, updateRevenueSplit } from "../../services/businessPartnersService";
+import { updateRevenueSplit } from "../../services/businessPartnersService";
+import { getPartnerProfile } from "../../services/partnerService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
 function BusinessPartnerRevenueSplitPage() {
@@ -15,7 +16,7 @@ function BusinessPartnerRevenueSplitPage() {
 
   const load = async () => {
     setError("");
-    const data = await getMyBusinessPartner();
+    const data = await getPartnerProfile({ _suppressErrorLogging: true });
     const p = data.data;
     setPartner(p);
     setCenterSharePercent(p.centerSharePercent ?? 0);

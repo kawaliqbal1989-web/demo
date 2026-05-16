@@ -21,6 +21,13 @@ import {
   forwardPartnerCompetitionRequest
 } from "../controllers/partner.controller.js";
 import {
+  getBpDashboardCenterHealth,
+  getBpDashboardFranchiseRanking,
+  getBpDashboardOverview,
+  getBpDashboardRevenueTrend,
+  getBpDashboardStudentGrowthTrend
+} from "../controllers/bp-dashboard.controller.js";
+import {
   getCertificateTemplate,
   upsertCertificateTemplate,
   uploadSignatureImage,
@@ -34,6 +41,8 @@ import {
   certificateStampUpload,
   certificateBackgroundUpload
 } from "../middleware/upload.js";
+import { getBpNetworkPulse } from "../controllers/leadership-intel.controller.js";
+import { getBpAiNarrative } from "../controllers/ai-narrative.controller.js";
 
 const partnerRouter = Router();
 
@@ -44,6 +53,36 @@ partnerRouter.get(
   "/dashboard",
   auditAction("BP_VIEW_DASHBOARD", "BUSINESS_PARTNER"),
   getPartnerDashboard
+);
+
+partnerRouter.get(
+  "/dashboard/overview",
+  auditAction("BP_VIEW_DASHBOARD_OVERVIEW", "BUSINESS_PARTNER"),
+  getBpDashboardOverview
+);
+
+partnerRouter.get(
+  "/dashboard/revenue-trend",
+  auditAction("BP_VIEW_DASHBOARD_REVENUE_TREND", "BUSINESS_PARTNER"),
+  getBpDashboardRevenueTrend
+);
+
+partnerRouter.get(
+  "/dashboard/student-growth-trend",
+  auditAction("BP_VIEW_DASHBOARD_STUDENT_GROWTH_TREND", "BUSINESS_PARTNER"),
+  getBpDashboardStudentGrowthTrend
+);
+
+partnerRouter.get(
+  "/dashboard/franchise-ranking",
+  auditAction("BP_VIEW_DASHBOARD_FRANCHISE_RANKING", "BUSINESS_PARTNER"),
+  getBpDashboardFranchiseRanking
+);
+
+partnerRouter.get(
+  "/dashboard/center-health",
+  auditAction("BP_VIEW_DASHBOARD_CENTER_HEALTH", "BUSINESS_PARTNER"),
+  getBpDashboardCenterHealth
 );
 
 partnerRouter.get(
@@ -176,10 +215,6 @@ partnerRouter.post(
   auditAction("BP_UPLOAD_CERTIFICATE_BACKGROUND", "CERTIFICATE_TEMPLATE"),
   uploadBackgroundImage
 );
-
-/* ── Intelligence ── */
-import { getBpNetworkPulse } from "../controllers/leadership-intel.controller.js";
-import { getBpAiNarrative } from "../controllers/ai-narrative.controller.js";
 
 partnerRouter.get("/intel/network-pulse", getBpNetworkPulse);
 

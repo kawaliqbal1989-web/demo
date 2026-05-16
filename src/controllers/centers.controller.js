@@ -1,57 +1,97 @@
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { parsePagination } from "../utils/pagination.js";
+import { applyBpScopeToCenterQuery } from "../utils/bp-scope-filters.js";
+
+function normalizeString(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const trimmed = String(value).trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function normalizeCenterStatus(status) {
+  if (!status) {
+    return null;
+  }
+
+  const normalized = String(status).trim().toUpperCase();
+  if (["ACTIVE", "INACTIVE", "SUSPENDED", "ARCHIVED"].includes(normalized)) {
+    return normalized;
+  }
+
+  return null;
+}
 
 const listCenters = asyncHandler(async (req, res) => {
   const { take, skip, limit, offset, orderBy } = parsePagination(req.query);
+  const q = normalizeString(req.query.q);
+  const status = normalizeCenterStatus(req.query.status);
+  const centerId = normalizeString(req.query.centerId);
+  const franchiseId = normalizeString(req.query.franchiseId);
 
-  const where = {
-    tenantId: req.auth.tenantId,
-    isActive: true
-  };
-
-  // SUPERADMIN can list all hierarchy nodes; BP should see only center/school nodes.
-  // In this system, centers/schools are modeled as hierarchy nodes of type SCHOOL or BRANCH.
   const isBusinessPartner = req.auth.role === "BP";
 
   if (isBusinessPartner) {
-    if (!req.auth.hierarchyNodeId) {
-      return res.apiError(400, "BP user is missing hierarchyNodeId", "BP_HIERARCHY_REQUIRED");
-    }
-
-    // Treat centers as direct child hierarchy nodes under the BP's hierarchy node.
-    where.parentId = req.auth.hierarchyNodeId;
-
-    // Only include actual centers/schools (avoid leaking other hierarchy metadata).
-    where.type = { in: ["SCHOOL", "BRANCH"] };
-  }
-
-  const select = isBusinessPartner
-    ? {
-        id: true,
-        name: true,
-        code: true,
-        type: true
+    const scopedWhere = applyBpScopeToCenterQuery({
+      tenantId: req.auth.tenantId,
+      bpScope: req.bpScope,
+      where: {
+        isActive: true,
+        status: status || "ACTIVE",
+        ...(centerId ? { id: centerId } : {}),
+        ...(franchiseId ? { franchiseProfileId: franchiseId } : {}),
+        ...(q
+          ? {
+              OR: [
+                { code: { contains: q } },
+                { name: { contains: q } },
+                { displayName: { contains: q } },
+                {
+                  authUser: {
+                    is: {
+                      OR: [{ username: { contains: q } }, { email: { contains: q } }]
+                    }
+                  }
+                }
+              ]
+            }
+          : {})
       }
-    : {
-        id: true,
-        name: true,
-        code: true,
-        type: true,
-        parentId: true,
-        createdAt: true
-      };
+    });
 
-  const items = await prisma.hierarchyNode.findMany({
-    where,
-    orderBy,
-    skip,
-    take,
-    select
-  });
+    const [items, total] = await Promise.all([
+      prisma.centerProfile.findMany({
+        where: scopedWhere,
+        orderBy,
+        skip,
+        take,
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          displayName: true,
+          status: true,
+          isActive: true,
+          franchiseProfileId: true,
+          authUser: {
+            select: {
+              hierarchyNodeId: true,
+              hierarchyNode: {
+                select: {
+                  type: true
+                }
+              }
+            }
+          }
+        }
+      }),
+      prisma.centerProfile.count({ where: scopedWhere })
+    ]);
 
-  if (isBusinessPartner) {
-    const nodeIds = items.map((x) => x.id).filter(Boolean);
+    const nodeIds = items.map((item) => item.authUser?.hierarchyNodeId).filter(Boolean);
 
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
@@ -116,24 +156,51 @@ const listCenters = asyncHandler(async (req, res) => {
     const activeTeachersByNode = new Map(activeTeachersRows.map((r) => [r.hierarchyNodeId, r._count._all]));
     const newEnrollmentsByNode = new Map(newEnrollmentsRows.map((r) => [r.hierarchyNodeId, r._count._all]));
 
-    const enriched = items.map((c) => {
-      const id = c.id;
+    const enriched = items.map((center) => {
+      const nodeId = center.authUser?.hierarchyNodeId || null;
       return {
-        ...c,
-        studentsTotal: Number(studentsTotalByNode.get(id) || 0),
-        studentsActive: Number(studentsActiveByNode.get(id) || 0),
-        enrollmentsActive: Number(enrollmentsActiveByNode.get(id) || 0),
-        teachersActive: Number(activeTeachersByNode.get(id) || 0),
-        newEnrollmentsLast30Days: Number(newEnrollmentsByNode.get(id) || 0)
+        id: center.id,
+        code: center.code,
+        name: center.displayName || center.name,
+        type: center.authUser?.hierarchyNode?.type || null,
+        status: center.status,
+        isActive: center.isActive,
+        franchiseProfileId: center.franchiseProfileId,
+        studentsTotal: Number(studentsTotalByNode.get(nodeId) || 0),
+        studentsActive: Number(studentsActiveByNode.get(nodeId) || 0),
+        enrollmentsActive: Number(enrollmentsActiveByNode.get(nodeId) || 0),
+        teachersActive: Number(activeTeachersByNode.get(nodeId) || 0),
+        newEnrollmentsLast30Days: Number(newEnrollmentsByNode.get(nodeId) || 0)
       };
     });
 
     return res.apiSuccess("Centers fetched", {
       items: enriched,
       limit,
-      offset
+      offset,
+      total
     });
   }
+
+  const where = {
+    tenantId: req.auth.tenantId,
+    isActive: true
+  };
+
+  const items = await prisma.hierarchyNode.findMany({
+    where,
+    orderBy,
+    skip,
+    take,
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      type: true,
+      parentId: true,
+      createdAt: true
+    }
+  });
 
   return res.apiSuccess("Centers fetched", {
     items,

@@ -7,6 +7,8 @@ import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { InputDialog } from "../../components/InputDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { BulkOperationsToolbar } from "../../components/WorkflowWidgets";
+import { CapacityInlineNotice, buildCapacityRequestHref } from "../../components/CapacityGovernance";
+import { useCenterCapacitySnapshot } from "../../hooks/useCenterCapacitySnapshot";
 import {
   assignStudentCourse,
   assignStudentLevel,
@@ -35,6 +37,7 @@ import {
   FEE_SCHEDULE_OPTIONS,
   formatFeeScheduleTarget
 } from "../../utils/feeSchedules.js";
+import { buildCapacityLimitMessage, shouldDisableCapacityAction } from "../../utils/capacityGovernance";
 
 function parseName(value) {
   const parts = String(value || "").trim().split(/\s+/).filter(Boolean);
@@ -49,6 +52,12 @@ function pickTeacherLabel(teacher) {
 }
 
 function CenterStudentsPage() {
+  const {
+    data: capacitySnapshot,
+    error: capacityError,
+    loading: capacityLoading,
+    retry: retryCapacity
+  } = useCenterCapacitySnapshot();
   const [rows, setRows] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [limit, setLimit] = useState(20);
@@ -1094,6 +1103,8 @@ function CenterStudentsPage() {
 
   const teacherOptions = useMemo(() => teachers, [teachers]);
   const levelOptions = useMemo(() => levels, [levels]);
+  const studentActionsLocked = shouldDisableCapacityAction(capacitySnapshot, "students");
+  const studentLimitMessage = buildCapacityLimitMessage(capacitySnapshot?.usage?.students, "Student");
 
   if (loading && !rows.length) {
     return <SkeletonLoader variant="table" rows={6} />;
@@ -1130,11 +1141,22 @@ function CenterStudentsPage() {
             type="button"
             style={{ width: "auto", fontSize: 13 }}
             onClick={openCsvImportModal}
+            disabled={studentActionsLocked}
+            title={studentLimitMessage}
           >
             Import CSV
           </button>
         </div>
       </div>
+
+      <CapacityInlineNotice
+        title="Student seats"
+        metric={capacitySnapshot?.usage?.students}
+        loading={capacityLoading}
+        error={capacityError}
+        onRetry={retryCapacity}
+        requestHref={capacitySnapshot ? buildCapacityRequestHref(capacitySnapshot, "students") : "#"}
+      />
 
       <form className="card" onSubmit={onCreate} style={{ display: "grid", gap: 10 }}>
         <h3 style={{ marginTop: 0 }}>Student Admission</h3>
@@ -1290,7 +1312,7 @@ function CenterStudentsPage() {
         ) : null}
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button className="button" disabled={creating} style={{ width: "auto" }}>
+          <button className="button" disabled={creating || studentActionsLocked} style={{ width: "auto" }} title={studentLimitMessage}>
             {creating ? "Admitting..." : "Admit Student"}
           </button>
           <button
@@ -2177,7 +2199,8 @@ function CenterStudentsPage() {
                 className="button"
                 type="button"
                 style={{ width: "auto" }}
-                disabled={!csvFile || csvImporting}
+                disabled={!csvFile || csvImporting || studentActionsLocked}
+                title={studentLimitMessage}
                 onClick={() => void handleSubmitCsvImport()}
               >
                 {csvImporting ? "Importing…" : "Import"}

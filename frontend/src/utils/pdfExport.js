@@ -4,6 +4,7 @@
  */
 import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
+import { resolveAssetUrl } from "./assetUrls";
 
 /**
  * Generate a QR code as a data URL.
@@ -12,6 +13,67 @@ import QRCode from "qrcode";
  */
 export async function generateQrDataUrl(text) {
   return QRCode.toDataURL(text, { width: 200, margin: 1 });
+}
+
+function drawSignatureBlock({ doc, template, issuedAt, sigEl, sigInfoEl }) {
+  if (sigEl.visible === false) {
+    return;
+  }
+
+  if (template?.signatureImageUrl && template._signatureImageData) {
+    try {
+      doc.addImage(template._signatureImageData, "PNG", sigEl.x, sigEl.y, sigEl.w, sigEl.h, undefined, "FAST");
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  const sigLineY = sigEl.y + sigEl.h + 2;
+  const sigCenterX = sigEl.x + sigEl.w / 2;
+  doc.setDrawColor(156, 163, 175);
+  doc.setLineWidth(0.3);
+  doc.line(sigCenterX - 35, sigLineY, sigCenterX + 35, sigLineY);
+
+  if (sigInfoEl.visible !== false) {
+    doc.setFontSize(sigInfoEl.fontSize || 9);
+    doc.setTextColor(107, 114, 128);
+    const sigName = template?.signatoryName || "";
+    const sigDesignation = template?.signatoryDesignation || "Director";
+    if (sigName) {
+      doc.setFont("helvetica", "bold");
+      doc.text(sigName, sigInfoEl.x, sigInfoEl.y, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.text(sigDesignation, sigInfoEl.x, sigInfoEl.y + 5, { align: "center" });
+    } else {
+      doc.setFont("helvetica", "normal");
+      doc.text(sigDesignation, sigInfoEl.x, sigInfoEl.y + 2, { align: "center" });
+    }
+  }
+
+  if (sigEl.showDate === true && issuedAt) {
+    const dateY = sigInfoEl.visible !== false
+      ? sigInfoEl.y + (template?.signatoryName ? 12 : 8)
+      : sigLineY + 6;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(107, 114, 128);
+    doc.text(new Date(issuedAt).toLocaleDateString(), sigInfoEl.x || sigCenterX, dateY, { align: "center" });
+  }
+}
+
+function drawStampBlock({ doc, template, stampEl }) {
+  if (stampEl.visible === false) {
+    return;
+  }
+
+  if (template?.stampImageUrl && template._stampImageData) {
+    try {
+      doc.addImage(template._stampImageData, "PNG", stampEl.x, stampEl.y, stampEl.w, stampEl.h, undefined, "FAST");
+    } catch (_) {
+      /* ignore */
+    }
+  }
 }
 
 /**
@@ -35,6 +97,7 @@ export function generateCertificatePdf({ studentName, levelName, certificateNumb
       w: saved.w ?? defaults.w,
       h: saved.h ?? defaults.h,
       fontSize: saved.fontSize ?? defaults.fontSize,
+      showDate: saved.showDate ?? defaults.showDate,
       visible: saved.visible ?? defaults.visible
     };
   };
@@ -48,7 +111,7 @@ export function generateCertificatePdf({ studentName, levelName, certificateNumb
   const completionEl = el("completionText", { x: w / 2, y: 106, fontSize: 14, visible: true });
   const levelEl = el("levelName", { x: w / 2, y: 120, fontSize: 20, visible: true });
   const metaEl = el("certMeta", { x: w / 2, y: 145, fontSize: 10, visible: true });
-  const sigEl = el("signature", { x: 55, y: 155, w: 40, h: 15, visible: true });
+  const sigEl = el("signature", { x: 55, y: 155, w: 40, h: 15, showDate: false, visible: true });
   const sigInfoEl = el("signatoryInfo", { x: 75, y: 175, fontSize: 9, visible: true });
   const stampEl = el("stamp", { x: w - 90, y: 152, w: 30, h: 30, visible: true });
   const qrEl = el("qrCode", { x: w - 45, y: h - 45, w: 25, h: 25, visible: true });
@@ -151,59 +214,8 @@ export function generateCertificatePdf({ studentName, levelName, certificateNumb
     doc.text(`Issued: ${dateStr}`, metaEl.x + 40, metaEl.y, { align: "center" });
   }
 
-  // Signature section
-  if (sigEl.visible !== false) {
-    if (template?.signatureImageUrl && template._signatureImageData) {
-      try {
-        doc.addImage(template._signatureImageData, "PNG", sigEl.x, sigEl.y, sigEl.w, sigEl.h, undefined, "FAST");
-      } catch (_) {
-        /* ignore */
-      }
-    }
-    // Signature line
-    const sigLineY = sigEl.y + sigEl.h + 2;
-    const sigCenterX = sigEl.x + sigEl.w / 2;
-    doc.setDrawColor(156, 163, 175);
-    doc.setLineWidth(0.3);
-    doc.line(sigCenterX - 35, sigLineY, sigCenterX + 35, sigLineY);
-  }
-
-  // Signatory info
-  if (sigInfoEl.visible !== false) {
-    doc.setFontSize(sigInfoEl.fontSize || 9);
-    doc.setTextColor(107, 114, 128);
-    const sigName = template?.signatoryName || "";
-    const sigDesignation = template?.signatoryDesignation || "Director";
-    if (sigName) {
-      doc.setFont("helvetica", "bold");
-      doc.text(sigName, sigInfoEl.x, sigInfoEl.y, { align: "center" });
-      doc.setFont("helvetica", "normal");
-      doc.text(sigDesignation, sigInfoEl.x, sigInfoEl.y + 5, { align: "center" });
-    } else {
-      doc.setFont("helvetica", "normal");
-      doc.text(sigDesignation, sigInfoEl.x, sigInfoEl.y + 2, { align: "center" });
-    }
-  }
-
-  // Stamp / seal (right side) if available
-  if (stampEl.visible !== false) {
-    if (template?.stampImageUrl && template._stampImageData) {
-      try {
-        doc.addImage(template._stampImageData, "PNG", stampEl.x, stampEl.y, stampEl.w, stampEl.h, undefined, "FAST");
-      } catch (_) {
-        /* ignore */
-      }
-    }
-    // Date line
-    const stampCenterX = stampEl.x + stampEl.w / 2;
-    const stampLineY = stampEl.y + stampEl.h + 2;
-    doc.setDrawColor(156, 163, 175);
-    doc.setLineWidth(0.3);
-    doc.line(stampCenterX - 35, stampLineY, stampCenterX + 35, stampLineY);
-    doc.setFontSize(9);
-    doc.setTextColor(107, 114, 128);
-    doc.text("Date", stampCenterX, stampLineY + 7, { align: "center" });
-  }
+  drawSignatureBlock({ doc, template, issuedAt, sigEl, sigInfoEl });
+  drawStampBlock({ doc, template, stampEl });
 
   // QR code (bottom-right corner)
   if (qrEl.visible !== false && qrDataUrl) {
@@ -239,10 +251,11 @@ export async function preloadTemplateImages(template) {
 
   const results = await Promise.allSettled(
     entries.map(async ([key, url]) => {
-      if (!url) return [key, null];
+      const resolvedUrl = resolveAssetUrl(url);
+      if (!resolvedUrl) return [key, null];
       const img = new Image();
       img.crossOrigin = "anonymous";
-      img.src = url;
+      img.src = resolvedUrl;
       await new Promise((resolve, reject) => {
         img.onload = resolve;
         img.onerror = reject;

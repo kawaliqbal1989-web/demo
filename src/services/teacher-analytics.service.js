@@ -1,5 +1,18 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../lib/prisma-compat.js";
 import { prisma } from "../lib/prisma.js";
+import {
+  ALERT_QUERY_LIMIT,
+  getTeacherAttendanceProductivityAnalytics,
+  getTeacherAttendanceProductivityDashboardSlice,
+  getTeacherGradingProductivityAnalytics,
+  getTeacherGradingProductivityDashboardSlice,
+  getTeacherOperationalAnomaliesAnalytics,
+  getTeacherOperationalOverviewAnalytics,
+  getTeacherOperationalTaskQueue,
+  getTeacherOperationalTrendsAnalytics,
+  resolveCachedTeacherDashboardSlice,
+  resolveTeacherOperationalScope
+} from "./teacher-productivity-analytics.service.js";
 
 function toSafe(v) {
   if (v === null || v === undefined) return 0;
@@ -592,10 +605,21 @@ async function getStudentProgressAnalytics({ tenantId, centerId, teacherUserId, 
 }
 
 export {
+  ALERT_QUERY_LIMIT,
   getAttendanceAnalytics,
   getWorksheetAnalytics,
   getMockTestAnalytics,
   getExamAnalytics,
   getCompetitionAnalytics,
-  getStudentProgressAnalytics
+  getStudentProgressAnalytics,
+  resolveTeacherOperationalScope,
+  getTeacherAttendanceProductivityAnalytics,
+  getTeacherGradingProductivityAnalytics,
+  getTeacherOperationalOverviewAnalytics,
+  getTeacherOperationalTaskQueue,
+  getTeacherOperationalAnomaliesAnalytics,
+  getTeacherOperationalTrendsAnalytics,
+  getTeacherAttendanceProductivityDashboardSlice,
+  getTeacherGradingProductivityDashboardSlice,
+  resolveCachedTeacherDashboardSlice
 };

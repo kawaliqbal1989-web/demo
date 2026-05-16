@@ -46,6 +46,30 @@ import {
   getTeacherStudentAttendanceHistory,
   getTeacherStudent360,
 } from "../controllers/teacher-portal.controller.js";
+import {
+  getTeacherDashboardAnomaliesController,
+  getTeacherDashboardAttendanceProductivityController,
+  getTeacherDashboardGradingProductivityController,
+  getTeacherDashboardOverviewController,
+  getTeacherDashboardTaskQueueController,
+  getTeacherDashboardTrendsController,
+} from "../controllers/teacher-dashboard.controller.js";
+import {
+  acknowledgeTeacherWorkflowAction,
+  bulkGradeTeacherWorkflowAction,
+  completeTeacherWorkflowGradingAction,
+  getTeacherWorkflowById,
+  getTeacherWorkflowHistoryById,
+  listTeacherAnomalyWorkflowQueue,
+  listTeacherAttendanceWorkflowQueue,
+  listTeacherGradingWorkflowQueue,
+  listTeacherWorkflowQueue,
+  markTeacherWorkflowAttendanceAction,
+  reopenTeacherWorkflowAction,
+  resolveTeacherWorkflowAction,
+  reviewTeacherWorkflowAction,
+  startTeacherWorkflowRecoveryAction,
+} from "../controllers/teacher-workflow.controller.js";
 
 const teacherRouter = Router();
 
@@ -176,6 +200,84 @@ teacherRouter.get("/cockpit/at-risk", getAtRisk);
 teacherRouter.get("/cockpit/batches", getCockpitBatches);
 teacherRouter.get("/cockpit/recommendations", getRecommendations);
 teacherRouter.get("/cockpit/interventions", getInterventions);
+
+teacherRouter.get("/dashboard/overview", getTeacherDashboardOverviewController);
+teacherRouter.get("/dashboard/attendance-productivity", getTeacherDashboardAttendanceProductivityController);
+teacherRouter.get("/dashboard/grading-productivity", getTeacherDashboardGradingProductivityController);
+teacherRouter.get("/dashboard/task-queue", getTeacherDashboardTaskQueueController);
+teacherRouter.get("/dashboard/anomalies", getTeacherDashboardAnomaliesController);
+teacherRouter.get("/dashboard/trends", getTeacherDashboardTrendsController);
+
+teacherRouter.get(
+  "/workflows/queues",
+  auditAction("TEACHER_VIEW_WORKFLOW_QUEUE", "TEACHER_OPERATIONAL_WORKFLOW"),
+  listTeacherWorkflowQueue
+);
+teacherRouter.get(
+  "/workflows/queues/attendance",
+  auditAction("TEACHER_VIEW_WORKFLOW_QUEUE", "TEACHER_OPERATIONAL_WORKFLOW"),
+  listTeacherAttendanceWorkflowQueue
+);
+teacherRouter.get(
+  "/workflows/queues/grading",
+  auditAction("TEACHER_VIEW_WORKFLOW_QUEUE", "TEACHER_OPERATIONAL_WORKFLOW"),
+  listTeacherGradingWorkflowQueue
+);
+teacherRouter.get(
+  "/workflows/queues/anomalies",
+  auditAction("TEACHER_VIEW_WORKFLOW_QUEUE", "TEACHER_OPERATIONAL_WORKFLOW"),
+  listTeacherAnomalyWorkflowQueue
+);
+teacherRouter.get(
+  "/workflows/:id",
+  auditAction("TEACHER_VIEW_WORKFLOW_DETAIL", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  getTeacherWorkflowById
+);
+teacherRouter.get(
+  "/workflows/:id/history",
+  auditAction("TEACHER_VIEW_WORKFLOW_HISTORY", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  getTeacherWorkflowHistoryById
+);
+teacherRouter.post(
+  "/workflows/:id/actions/review",
+  auditAction("TEACHER_REVIEW_WORKFLOW", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  reviewTeacherWorkflowAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/acknowledge",
+  auditAction("TEACHER_ACKNOWLEDGE_WORKFLOW", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  acknowledgeTeacherWorkflowAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/start-recovery",
+  auditAction("TEACHER_START_WORKFLOW_RECOVERY", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  startTeacherWorkflowRecoveryAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/mark-attendance",
+  auditAction("TEACHER_MARK_WORKFLOW_ATTENDANCE", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  markTeacherWorkflowAttendanceAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/complete-grading",
+  auditAction("TEACHER_COMPLETE_WORKFLOW_GRADING", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  completeTeacherWorkflowGradingAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/bulk-grade",
+  auditAction("TEACHER_BULK_WORKFLOW_GRADING", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  bulkGradeTeacherWorkflowAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/resolve",
+  auditAction("TEACHER_RESOLVE_WORKFLOW", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  resolveTeacherWorkflowAction
+);
+teacherRouter.post(
+  "/workflows/:id/actions/reopen",
+  auditAction("TEACHER_REOPEN_WORKFLOW", "TEACHER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  reopenTeacherWorkflowAction
+);
 
 /* ── AI Narrative (Phase 10) ── */
 teacherRouter.get("/ai/narrative", getTeacherAiNarrative);

@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma.js";
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../lib/prisma-compat.js";
 import { computeStudentRisk } from "./student-risk.service.js";
 import { evaluatePromotionEligibility } from "./promotion-eligibility.service.js";
 import { resolveEffectiveStudentLevel } from "../utils/student-level.js";

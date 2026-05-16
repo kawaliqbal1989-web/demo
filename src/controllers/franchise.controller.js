@@ -249,6 +249,10 @@ const listFranchiseCenters = asyncHandler(async (req, res) => {
 });
 
 const createCenter = asyncHandler(async (req, res) => {
+  if (req.body.inheritBranding !== undefined || req.body.logoUrl !== undefined) {
+    return res.apiError(403, "Center branding can only be changed by superadmin", "FORBIDDEN");
+  }
+
   const {
     name,
     displayName,
@@ -398,6 +402,10 @@ const createCenter = asyncHandler(async (req, res) => {
 
 const updateCenter = asyncHandler(async (req, res) => {
   const { id } = req.params;
+
+  if (req.body.inheritBranding !== undefined || req.body.logoUrl !== undefined) {
+    return res.apiError(403, "Center branding can only be changed by superadmin", "FORBIDDEN");
+  }
 
   const {
     name,
@@ -974,12 +982,15 @@ const rejectFranchiseCompetitionRequest = asyncHandler(async (req, res) => {
 });
 
 const updateFranchiseProfile = asyncHandler(async (req, res) => {
+  if (req.body.logoUrl !== undefined) {
+    return res.apiError(403, "Franchise branding can only be changed by superadmin", "FORBIDDEN");
+  }
+
   const allowed = [
     "displayName",
     "phonePrimary",
     "emailOfficial",
-    "whatsappEnabled",
-    "logoUrl"
+    "whatsappEnabled"
   ];
 
   const data = {};

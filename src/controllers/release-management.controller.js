@@ -81,12 +81,19 @@ const MIGRATION_SEQUENCE = [
   { wave: "wave3", file: "migration_revenue_split_config.sql", phase: 7, order: 14, description: "BusinessPartner.centerSharePercent" },
   { wave: "wave3", file: "migration_subscription_enforcement.sql", phase: 7, order: 15, description: "BusinessPartner.subscriptionStatus" },
   { wave: "wave3", file: "migration_drop_centerprofile_branding_fields.sql", phase: 7, order: 16, description: "Drop unused CenterProfile columns" },
-  { wave: "wave3", file: "migration_financial_ledger.sql", phase: 7, order: 17, description: "FinancialTransaction immutable ledger" },
-  { wave: "wave3", file: "migration_notification_automation.sql", phase: 8, order: 18, description: "Notification priority/category, NotificationPreference" },
+  { wave: "wave3", file: "migration_centerprofile_branding_schema_restore.sql", phase: 7, order: 17, description: "Restore CenterProfile branding schema for current app features" },
+  { wave: "wave3", file: "migration_financial_ledger.sql", phase: 7, order: 18, description: "FinancialTransaction immutable ledger" },
+  { wave: "wave3", file: "migration_notification_automation.sql", phase: 8, order: 19, description: "Notification priority/category, NotificationPreference" },
   // Wave 4: Workflow & AI
-  { wave: "wave4", file: "migration_worksheet_reassignment.sql", phase: 9, order: 19, description: "WorksheetReassignmentRequest table" },
-  { wave: "wave4", file: "migration_competition_workflow_hardening.sql", phase: 9, order: 20, description: "Competition.rejectedAt workflow" },
-  { wave: "wave4", file: "migration_competition_result_status.sql", phase: 9, order: 21, description: "Competition.resultStatus publish/unpublish" },
+  { wave: "wave4", file: "migration_worksheet_reassignment.sql", phase: 9, order: 20, description: "WorksheetReassignmentRequest table" },
+  { wave: "wave4", file: "migration_competition_workflow_hardening.sql", phase: 9, order: 21, description: "Competition.rejectedAt workflow" },
+  { wave: "wave4", file: "migration_competition_result_status.sql", phase: 9, order: 22, description: "Competition.resultStatus publish/unpublish" },
+  { wave: "wave4", file: "migration_report_export_schema_restore.sql", phase: 9, order: 23, description: "Restore report export schema required by operations dashboards" },
+  { wave: "wave4", file: "migration_report_export_job_status_enum_restore.sql", phase: 9, order: 24, description: "Restore report export job status enum for retry-capable worker flows" },
+  { wave: "wave4", file: "migration_logo_file_path_restore.sql", phase: 9, order: 25, description: "Add explicit logoFilePath columns for locally managed branding assets" },
+  { wave: "wave4", file: "migration_center_capacity_schema_restore.sql", phase: 9, order: 26, description: "Restore CenterCapacity table required by BP/superadmin capacity governance endpoints" },
+  { wave: "wave4", file: "migration_business_partner_code_normalization.sql", phase: 9, order: 27, description: "Normalize legacy business partner codes from BP-001/BP-002 to BP001/BP002" },
+  { wave: "wave4", file: "migration_bp_branding_governance.sql", phase: 9, order: 28, description: "Add superadmin-managed BP branding metadata columns and FK tracking" },
 ];
 
 const handleGetMigrationSequence = asyncHandler(async (req, res) => {

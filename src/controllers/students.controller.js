@@ -1,3 +1,4 @@
+import { Prisma } from "../lib/prisma-compat.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { recordAudit } from "../utils/audit.js";
@@ -20,6 +21,13 @@ import { recordEnrollmentTransaction } from "../services/financial-ledger.servic
 import { toCsv } from "../utils/csv.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import { withEffectiveStudentLevel } from "../utils/student-level.js";
+import {
+  assertCenterCapacityAvailable,
+  isCapacityEnforcementError,
+  recordCapacityLimitBlocked,
+  recordCapacityOverAllocation,
+  withCenterCapacityExecutionLock
+} from "../services/capacity/capacity.service.js";
 
 function parseIsoDateOnly(value) {
   if (!value) return null;
@@ -62,6 +70,10 @@ function makeApiError(statusCode, message, errorCode) {
   err.statusCode = statusCode;
   err.errorCode = errorCode;
   return err;
+}
+
+function isTransactionSerializationError(error) {
+  return String(error?.code || "") === "P2034";
 }
 
 function getUniqueConstraintTargets(error) {
@@ -1546,196 +1558,268 @@ const createStudent = asyncHandler(async (req, res) => {
     return res.apiError(400, "loginPassword (or admissionNo) is required to create login", "STUDENT_PASSWORD_REQUIRED");
   }
 
-  const created = await prisma.$transaction(async (tx) => {
-    await validateInitialStudentLevel({
-      tx,
-      tenantId: req.auth.tenantId,
-      levelId: resolvedLevelId
-    });
+  const willConsumeStudentCapacity = isActive === undefined ? true : Boolean(isActive);
+  let created;
 
-    const levelDefaults = await getLevelFeeDefaults({ tx, tenantId: req.auth.tenantId, levelId: resolvedLevelId });
-
-    let resolvedCurrentTeacherUserId = currentTeacherUserId ? String(currentTeacherUserId) : null;
-    if (resolvedCurrentTeacherUserId) {
-      const teacher = await tx.authUser.findFirst({
-        where: {
-          tenantId: req.auth.tenantId,
-          id: resolvedCurrentTeacherUserId,
-          role: "TEACHER",
-          isActive: true,
-          hierarchyNodeId
-        },
-        select: { id: true }
-      });
-
-      if (!teacher) {
-        return res.apiError(400, "currentTeacherUserId is not a valid active teacher for this center", "TEACHER_NOT_FOUND");
-      }
-    }
-
-    let finalAdmissionNo = shouldAutoGenerateAdmissionNo
-      ? await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" })
-      : requestedAdmissionNo;
-    let compatibilityMode = false;
-
-    // If client did not send loginPassword, default to the final admissionNo.
-    const tempPassword = shouldCreateLogin ? String(loginPassword || finalAdmissionNo || "").trim() : null;
-    if (shouldCreateLogin && !tempPassword) {
-      return res.apiError(400, "loginPassword (or admissionNo) is required to create login", "STUDENT_PASSWORD_REQUIRED");
-    }
-
-    // Create student with retry on admissionNo collisions (tenantId+admissionNo is unique).
-    let student = null;
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+  try {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        // eslint-disable-next-line no-await-in-loop
-        student = await tx.student.create({
-          data: buildStudentCreateData({
+        created = await withCenterCapacityExecutionLock(
+          {
             tenantId: req.auth.tenantId,
-            admissionNo: finalAdmissionNo,
-            firstName,
-            lastName,
-            normalizedGender,
-            email,
-            dateOfBirth,
-            hierarchyNodeId,
-            resolvedLevelId,
-            guardianName,
-            guardianPhone,
-            guardianEmail,
-            phonePrimary,
-            phoneSecondary,
-            address,
-            state,
-            district,
-            tehsil,
-            normalizedTotalFeeAmount,
-            normalizedAdmissionFeeAmount,
-            levelDefaults,
-            resolvedCurrentTeacherUserId,
-            isActive,
-            compatibilityMode
-          })
-        });
-        break;
-      } catch (err) {
-        if (isSchemaMismatchError(err, ["student", "feeconcessionamount", "currentteacheruserid"])) {
-          if (!compatibilityMode) {
-            compatibilityMode = true;
-            continue;
-          }
-
-          throw makeApiError(503, "Student admission storage is unavailable until database migrations are applied", "STUDENT_SCHEMA_MISSING");
-        }
-
-        if (!isUniqueConstraintError(err)) {
-          throw err;
-        }
-
-        // If email is duplicated, do NOT retry (changing admissionNo won't help).
-        if (isStudentEmailUniqueCollision(err)) {
-          throw makeApiError(409, "Student email already exists", "STUDENT_EMAIL_EXISTS");
-        }
-
-        // Only retry on admissionNo collisions when we are auto-generating.
-        if (!shouldAutoGenerateAdmissionNo || !isAdmissionNoUniqueCollision(err)) {
-          throw err;
-        }
-
-        // eslint-disable-next-line no-await-in-loop
-        finalAdmissionNo = await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" });
-      }
-    }
-
-    if (!student) {
-      // Fallback: try creating with a timestamp-randomized admissionNo to avoid blocking
-      const fallbackAdmissionNo = `${String(finalAdmissionNo || "ST").slice(0, 16)}${Date.now()}${Math.floor(Math.random() * 10000)}`;
-      try {
-        student = await tx.student.create({
-          data: buildStudentCreateData({
-            tenantId: req.auth.tenantId,
-            admissionNo: fallbackAdmissionNo,
-            firstName,
-            lastName,
-            normalizedGender,
-            email,
-            dateOfBirth,
-            hierarchyNodeId,
-            resolvedLevelId,
-            guardianName,
-            guardianPhone,
-            guardianEmail,
-            phonePrimary,
-            phoneSecondary,
-            address,
-            state,
-            district,
-            tehsil,
-            normalizedTotalFeeAmount,
-            normalizedAdmissionFeeAmount,
-            levelDefaults,
-            resolvedCurrentTeacherUserId,
-            isActive,
-            compatibilityMode: true
-          })
-        });
-      } catch (err) {
-        if (isStudentEmailUniqueCollision(err)) {
-          throw makeApiError(409, "Student email already exists", "STUDENT_EMAIL_EXISTS");
-        }
-        if (isSchemaMismatchError(err, ["student", "feeconcessionamount", "currentteacheruserid"])) {
-          throw makeApiError(503, "Student admission storage is unavailable until database migrations are applied", "STUDENT_SCHEMA_MISSING");
-        }
-        throw makeApiError(503, "Unable to allocate a unique student code. Please retry.", "STUDENT_CODE_GENERATION_FAILED");
-      }
-    }
-
-    let createdLogin = null;
-    if (shouldCreateLogin) {
-      const passwordHash = await hashPassword(tempPassword);
-      try {
-        createdLogin = await tx.authUser.create({
-          data: {
-            tenantId: req.auth.tenantId,
-            email: email ? String(email) : makeStudentPlaceholderEmail({ tenantId: req.auth.tenantId, studentId: student.id }),
-            username: String(finalAdmissionNo),
-            role: "STUDENT",
-            passwordHash,
-            isActive: true,
-            mustChangePassword: true,
-            studentId: student.id,
-            parentUserId: req.auth.userId,
             hierarchyNodeId
           },
-          select: { id: true, username: true, email: true }
-        });
-      } catch (err) {
-        if (isUniqueConstraintError(err) && uniqueTargetsInclude(err, "email")) {
-          throw makeApiError(409, "Email already used by another account", "AUTH_EMAIL_EXISTS");
-        }
-        if (isUniqueConstraintError(err) && uniqueTargetsInclude(err, "username")) {
-          throw makeApiError(409, "Student code already used by another account", "AUTH_USERNAME_EXISTS");
-        }
-        throw err;
-      }
-    }
+          () => prisma.$transaction(async (tx) => {
+            const capacityCheck = willConsumeStudentCapacity
+              ? await assertCenterCapacityAvailable({
+                  tx,
+                  tenantId: req.auth.tenantId,
+                  hierarchyNodeId,
+                  resourceType: "STUDENT",
+                  increment: 1
+                })
+              : null;
 
-    try {
-      await recordEnrollmentTransaction({
-        tx,
-        tenantId: req.auth.tenantId,
-        studentId: student.id,
-        actorUserId: req.auth.userId,
-        grossAmount: enrollmentFeeAmount ?? 0
-      });
-    } catch (error) {
-      if (!isSchemaMismatchError(error, ["financialtransaction", "studentfeeinstallment", "settlement"])) {
+          await validateInitialStudentLevel({
+            tx,
+            tenantId: req.auth.tenantId,
+            levelId: resolvedLevelId
+          });
+
+          const levelDefaults = await getLevelFeeDefaults({ tx, tenantId: req.auth.tenantId, levelId: resolvedLevelId });
+
+          let resolvedCurrentTeacherUserId = currentTeacherUserId ? String(currentTeacherUserId) : null;
+          if (resolvedCurrentTeacherUserId) {
+            const teacher = await tx.authUser.findFirst({
+              where: {
+                tenantId: req.auth.tenantId,
+                id: resolvedCurrentTeacherUserId,
+                role: "TEACHER",
+                isActive: true,
+                hierarchyNodeId
+              },
+              select: { id: true }
+            });
+
+            if (!teacher) {
+              throw makeApiError(400, "currentTeacherUserId is not a valid active teacher for this center", "TEACHER_NOT_FOUND");
+            }
+          }
+
+          let finalAdmissionNo = shouldAutoGenerateAdmissionNo
+            ? await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" })
+            : requestedAdmissionNo;
+          let compatibilityMode = false;
+
+          const tempPassword = shouldCreateLogin ? String(loginPassword || finalAdmissionNo || "").trim() : null;
+          if (shouldCreateLogin && !tempPassword) {
+            throw makeApiError(400, "loginPassword (or admissionNo) is required to create login", "STUDENT_PASSWORD_REQUIRED");
+          }
+
+          let student = null;
+          for (let createAttempt = 0; createAttempt < 8; createAttempt += 1) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              student = await tx.student.create({
+                data: buildStudentCreateData({
+                  tenantId: req.auth.tenantId,
+                  admissionNo: finalAdmissionNo,
+                  firstName,
+                  lastName,
+                  normalizedGender,
+                  email,
+                  dateOfBirth,
+                  hierarchyNodeId,
+                  resolvedLevelId,
+                  guardianName,
+                  guardianPhone,
+                  guardianEmail,
+                  phonePrimary,
+                  phoneSecondary,
+                  address,
+                  state,
+                  district,
+                  tehsil,
+                  normalizedTotalFeeAmount,
+                  normalizedAdmissionFeeAmount,
+                  levelDefaults,
+                  resolvedCurrentTeacherUserId,
+                  isActive,
+                  compatibilityMode
+                })
+              });
+              break;
+            } catch (err) {
+              if (isSchemaMismatchError(err, ["student", "feeconcessionamount", "currentteacheruserid"])) {
+                if (!compatibilityMode) {
+                  compatibilityMode = true;
+                  continue;
+                }
+
+                throw makeApiError(503, "Student admission storage is unavailable until database migrations are applied", "STUDENT_SCHEMA_MISSING");
+              }
+
+              if (!isUniqueConstraintError(err)) {
+                throw err;
+              }
+
+              if (isStudentEmailUniqueCollision(err)) {
+                throw makeApiError(409, "Student email already exists", "STUDENT_EMAIL_EXISTS");
+              }
+
+              if (!shouldAutoGenerateAdmissionNo || !isAdmissionNoUniqueCollision(err)) {
+                throw err;
+              }
+
+              // eslint-disable-next-line no-await-in-loop
+              finalAdmissionNo = await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" });
+            }
+          }
+
+          if (!student) {
+            const fallbackAdmissionNo = `${String(finalAdmissionNo || "ST").slice(0, 16)}${Date.now()}${Math.floor(Math.random() * 10000)}`;
+            try {
+              student = await tx.student.create({
+                data: buildStudentCreateData({
+                  tenantId: req.auth.tenantId,
+                  admissionNo: fallbackAdmissionNo,
+                  firstName,
+                  lastName,
+                  normalizedGender,
+                  email,
+                  dateOfBirth,
+                  hierarchyNodeId,
+                  resolvedLevelId,
+                  guardianName,
+                  guardianPhone,
+                  guardianEmail,
+                  phonePrimary,
+                  phoneSecondary,
+                  address,
+                  state,
+                  district,
+                  tehsil,
+                  normalizedTotalFeeAmount,
+                  normalizedAdmissionFeeAmount,
+                  levelDefaults,
+                  resolvedCurrentTeacherUserId,
+                  isActive,
+                  compatibilityMode: true
+                })
+              });
+            } catch (err) {
+              if (isStudentEmailUniqueCollision(err)) {
+                throw makeApiError(409, "Student email already exists", "STUDENT_EMAIL_EXISTS");
+              }
+              if (isSchemaMismatchError(err, ["student", "feeconcessionamount", "currentteacheruserid"])) {
+                throw makeApiError(503, "Student admission storage is unavailable until database migrations are applied", "STUDENT_SCHEMA_MISSING");
+              }
+              throw makeApiError(503, "Unable to allocate a unique student code. Please retry.", "STUDENT_CODE_GENERATION_FAILED");
+            }
+          }
+
+          let createdLogin = null;
+          if (shouldCreateLogin) {
+            const passwordHash = await hashPassword(tempPassword);
+            try {
+              createdLogin = await tx.authUser.create({
+                data: {
+                  tenantId: req.auth.tenantId,
+                  email: email ? String(email) : makeStudentPlaceholderEmail({ tenantId: req.auth.tenantId, studentId: student.id }),
+                  username: String(finalAdmissionNo),
+                  role: "STUDENT",
+                  passwordHash,
+                  isActive: true,
+                  mustChangePassword: true,
+                  studentId: student.id,
+                  parentUserId: req.auth.userId,
+                  hierarchyNodeId
+                },
+                select: { id: true, username: true, email: true }
+              });
+            } catch (err) {
+              if (isUniqueConstraintError(err) && uniqueTargetsInclude(err, "email")) {
+                throw makeApiError(409, "Email already used by another account", "AUTH_EMAIL_EXISTS");
+              }
+              if (isUniqueConstraintError(err) && uniqueTargetsInclude(err, "username")) {
+                throw makeApiError(409, "Student code already used by another account", "AUTH_USERNAME_EXISTS");
+              }
+              throw err;
+            }
+          }
+
+          try {
+            await recordEnrollmentTransaction({
+              tx,
+              tenantId: req.auth.tenantId,
+              studentId: student.id,
+              actorUserId: req.auth.userId,
+              grossAmount: enrollmentFeeAmount ?? 0
+            });
+          } catch (error) {
+            if (!isSchemaMismatchError(error, ["financialtransaction", "studentfeeinstallment", "settlement"])) {
+              throw error;
+            }
+          }
+
+            return { student, createdLogin, tempPassword, capacityCheck };
+          }, {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable
+          })
+        );
+
+        break;
+      } catch (error) {
+        if (isTransactionSerializationError(error) && attempt < 1) {
+          continue;
+        }
+
         throw error;
       }
     }
+  } catch (error) {
+    if (isCapacityEnforcementError(error)) {
+      await recordCapacityLimitBlocked({
+        tenantId: req.auth.tenantId,
+        actor: {
+          userId: req.auth.userId,
+          role: req.auth.role
+        },
+        error,
+        requestMetadata: {
+          method: req.method,
+          path: req.originalUrl,
+          operation: "student-create"
+        }
+      });
 
-    return { student, createdLogin, tempPassword };
-  });
+      return res.apiError(error.statusCode || 409, error.message, error.errorCode || "STUDENT_CAPACITY_EXCEEDED");
+    }
+
+    throw error;
+  }
+
+  if (!created) {
+    throw makeApiError(503, "Student admission capacity validation could not be completed. Please retry.", "STUDENT_CAPACITY_RETRY_FAILED");
+  }
+
+  if (created.capacityCheck?.shouldAuditOverAllocation) {
+    await recordCapacityOverAllocation({
+      tenantId: req.auth.tenantId,
+      actor: {
+        userId: req.auth.userId,
+        role: req.auth.role
+      },
+      centerSnapshot: created.capacityCheck.snapshot,
+      resourceType: "STUDENT",
+      projectedUsed: created.capacityCheck.projectedUsed,
+      requestMetadata: {
+        method: req.method,
+        path: req.originalUrl,
+        operation: "student-create"
+      }
+    });
+  }
 
   res.locals.entityId = created.student.id;
   return res.apiSuccess(
@@ -2705,96 +2789,175 @@ const bulkImportStudentsCsv = asyncHandler(async (req, res) => {
     }
 
     try {
+      const shouldConsumeStudentCapacity = normalizeBooleanFlag(getCsvField(row, ["isActive", "status"]), true);
+
       // eslint-disable-next-line no-await-in-loop
-      await prisma.$transaction(async (tx) => {
-        const rowLevelId = await resolveImportLevelId({
-          tx,
+      const createdRow = await withCenterCapacityExecutionLock(
+        {
           tenantId: req.auth.tenantId,
-          requestedLevelId: getCsvField(row, ["levelId"]),
-          requestedLevelRank: getCsvField(row, ["levelRank"]),
-          requestedLevelName: getCsvField(row, ["levelName", "level"]),
-          fallbackLevelId: defaultLevelId
-        });
+          hierarchyNodeId
+        },
+        () => prisma.$transaction(async (tx) => {
+          const capacityCheck = shouldConsumeStudentCapacity
+            ? await assertCenterCapacityAvailable({
+                tx,
+                tenantId: req.auth.tenantId,
+                hierarchyNodeId,
+                resourceType: "STUDENT",
+                increment: 1
+              })
+            : null;
 
-        const rowBatch = await resolveImportBatch({
-          tx,
-          tenantId: req.auth.tenantId,
-          hierarchyNodeId,
-          requestedBatchId: getCsvField(row, ["batchId"]),
-          requestedBatchName: getCsvField(row, ["batchName", "batch"]),
-          fallbackBatchId: defaultBatchId
-        });
+          const rowLevelId = await resolveImportLevelId({
+            tx,
+            tenantId: req.auth.tenantId,
+            requestedLevelId: getCsvField(row, ["levelId"]),
+            requestedLevelRank: getCsvField(row, ["levelRank"]),
+            requestedLevelName: getCsvField(row, ["levelName", "level"]),
+            fallbackLevelId: defaultLevelId
+          });
 
-        const assignedTeacherUserId = await resolveImportTeacherId({
-          tx,
-          tenantId: req.auth.tenantId,
-          hierarchyNodeId,
-          requestedTeacherUserId: getCsvField(row, ["assignedTeacherUserId", "teacherUserId"]),
-          requestedTeacherUsername: getCsvField(row, ["teacherCode", "teacherUsername", "teacherusername"]),
-          requestedTeacherEmail: getCsvField(row, ["teacherEmail", "teacheremail"]),
-          fallbackTeacherUserId: defaultTeacherUserId
-        });
+          const rowBatch = await resolveImportBatch({
+            tx,
+            tenantId: req.auth.tenantId,
+            hierarchyNodeId,
+            requestedBatchId: getCsvField(row, ["batchId"]),
+            requestedBatchName: getCsvField(row, ["batchName", "batch"]),
+            fallbackBatchId: defaultBatchId
+          });
 
-        const admissionNoInput = normalizeAdmissionNo(getCsvField(row, ["admissionNo", "studentCode", "studentcode"]));
-        const admissionNo = admissionNoInput || await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" });
-        const totalFeeAmount = normalizeImportMoney(getCsvField(row, ["totalFeeAmount", "totalfeeamount"]), "totalFeeAmount");
-        const admissionFeeAmount = normalizeImportMoney(getCsvField(row, ["admissionFeeAmount", "admissionfeeamount"]), "admissionFeeAmount");
-        const feeConcessionAmount = normalizeImportConcession(getCsvField(row, ["feeConcessionAmount", "feeconcessionamount"]));
-        const levelDefaults = await getLevelFeeDefaults({ tx, tenantId: req.auth.tenantId, levelId: rowLevelId });
-        const computedFeeDefaults = buildStudentFeeAmounts(levelDefaults, feeConcessionAmount);
-        const studentFeeData = {
-          totalFeeAmount: totalFeeAmount !== undefined ? totalFeeAmount : computedFeeDefaults.totalFeeAmount,
-          admissionFeeAmount: admissionFeeAmount !== undefined ? admissionFeeAmount : computedFeeDefaults.admissionFeeAmount,
-          feeConcessionAmount: computedFeeDefaults.feeConcessionAmount
-        };
+          const assignedTeacherUserId = await resolveImportTeacherId({
+            tx,
+            tenantId: req.auth.tenantId,
+            hierarchyNodeId,
+            requestedTeacherUserId: getCsvField(row, ["assignedTeacherUserId", "teacherUserId"]),
+            requestedTeacherUsername: getCsvField(row, ["teacherCode", "teacherUsername", "teacherusername"]),
+            requestedTeacherEmail: getCsvField(row, ["teacherEmail", "teacheremail"]),
+            fallbackTeacherUserId: defaultTeacherUserId
+          });
 
-        const createdStudent = await tx.student.create({
-          data: {
+          const admissionNoInput = normalizeAdmissionNo(getCsvField(row, ["admissionNo", "studentCode", "studentcode"]));
+          const admissionNo = admissionNoInput || await generateNextStudentCode({ tx, tenantId: req.auth.tenantId, prefix: "ST" });
+          const totalFeeAmount = normalizeImportMoney(getCsvField(row, ["totalFeeAmount", "totalfeeamount"]), "totalFeeAmount");
+          const admissionFeeAmount = normalizeImportMoney(getCsvField(row, ["admissionFeeAmount", "admissionfeeamount"]), "admissionFeeAmount");
+          const feeConcessionAmount = normalizeImportConcession(getCsvField(row, ["feeConcessionAmount", "feeconcessionamount"]));
+          const levelDefaults = await getLevelFeeDefaults({ tx, tenantId: req.auth.tenantId, levelId: rowLevelId });
+          const computedFeeDefaults = buildStudentFeeAmounts(levelDefaults, feeConcessionAmount);
+          const studentFeeData = {
+            totalFeeAmount: totalFeeAmount !== undefined ? totalFeeAmount : computedFeeDefaults.totalFeeAmount,
+            admissionFeeAmount: admissionFeeAmount !== undefined ? admissionFeeAmount : computedFeeDefaults.admissionFeeAmount,
+            feeConcessionAmount: computedFeeDefaults.feeConcessionAmount
+          };
+
+          const studentCreateInput = {
             tenantId: req.auth.tenantId,
             admissionNo,
             firstName,
             lastName: lastName || null,
-            gender: normalizedGender || null,
+            normalizedGender,
+            email: getCsvField(row, ["email", "studentEmail", "student_email"]) || null,
             dateOfBirth: parseOptionalCsvDate(getCsvField(row, ["dateOfBirth", "date_of_birth", "dob"]), "dateOfBirth"),
+            hierarchyNodeId,
+            resolvedLevelId: rowLevelId,
             guardianName: getCsvField(row, ["guardianName", "guardian_name"]) || null,
             guardianPhone: getCsvField(row, ["guardianPhone", "guardian_phone"]) || null,
             guardianEmail: getCsvField(row, ["guardianEmail", "guardian_email"]) || null,
-            email: getCsvField(row, ["email", "studentEmail", "student_email"]) || null,
             phonePrimary: getCsvField(row, ["phonePrimary", "phone_primary"]) || getCsvField(row, ["guardianPhone", "guardian_phone"]) || null,
             phoneSecondary: getCsvField(row, ["phoneSecondary", "phone_secondary"]) || null,
             address: getCsvField(row, ["address"]) || null,
             state: getCsvField(row, ["state"]) || null,
             district: getCsvField(row, ["district"]) || null,
             tehsil: getCsvField(row, ["tehsil"]) || null,
-            hierarchyNodeId,
-            levelId: rowLevelId,
-            currentTeacherUserId: assignedTeacherUserId,
-            isActive: normalizeBooleanFlag(getCsvField(row, ["isActive", "status"]), true),
-            ...studentFeeData
+            normalizedTotalFeeAmount: studentFeeData.totalFeeAmount,
+            normalizedAdmissionFeeAmount: studentFeeData.admissionFeeAmount,
+            levelDefaults,
+            resolvedCurrentTeacherUserId: assignedTeacherUserId,
+            isActive: shouldConsumeStudentCapacity
+          };
+
+          let createdStudent;
+          let compatibilityMode = false;
+          for (let createAttempt = 0; createAttempt < 2; createAttempt += 1) {
+            try {
+              // eslint-disable-next-line no-await-in-loop
+              createdStudent = await tx.student.create({
+                data: buildStudentCreateData({
+                  ...studentCreateInput,
+                  compatibilityMode
+                })
+              });
+              break;
+            } catch (error) {
+              if (isSchemaMismatchError(error, ["student", "feeconcessionamount", "currentteacheruserid"]) && !compatibilityMode) {
+                compatibilityMode = true;
+                continue;
+              }
+              throw error;
+            }
+          }
+
+          const enrollmentStartDate = parseOptionalCsvDate(
+            getCsvField(row, ["startDate", "start_date"]) || defaultStartDate,
+            "startDate"
+          );
+
+          await tx.enrollment.create({
+            data: {
+              tenantId: req.auth.tenantId,
+              hierarchyNodeId: rowBatch.hierarchyNodeId,
+              studentId: createdStudent.id,
+              batchId: rowBatch.id,
+              assignedTeacherUserId,
+              levelId: rowLevelId,
+              startDate: enrollmentStartDate,
+              status: "ACTIVE"
+            }
+          });
+
+          return { capacityCheck };
+        })
+      );
+
+      if (createdRow?.capacityCheck?.shouldAuditOverAllocation) {
+        // eslint-disable-next-line no-await-in-loop
+        await recordCapacityOverAllocation({
+          tenantId: req.auth.tenantId,
+          actor: {
+            userId: req.auth.userId,
+            role: req.auth.role
+          },
+          centerSnapshot: createdRow.capacityCheck.snapshot,
+          resourceType: "STUDENT",
+          projectedUsed: createdRow.capacityCheck.projectedUsed,
+          requestMetadata: {
+            method: req.method,
+            path: req.originalUrl,
+            operation: "student-bulk-import",
+            row: rowIdx + 2
           }
         });
-
-        const enrollmentStartDate = parseOptionalCsvDate(
-          getCsvField(row, ["startDate", "start_date"]) || defaultStartDate,
-          "startDate"
-        );
-
-        await tx.enrollment.create({
-          data: {
-            tenantId: req.auth.tenantId,
-            hierarchyNodeId: rowBatch.hierarchyNodeId,
-            studentId: createdStudent.id,
-            batchId: rowBatch.id,
-            assignedTeacherUserId,
-            levelId: rowLevelId,
-            startDate: enrollmentStartDate,
-            status: "ACTIVE"
-          }
-        });
-      });
+      }
 
       results.created += 1;
     } catch (e) {
+      if (isCapacityEnforcementError(e)) {
+        // eslint-disable-next-line no-await-in-loop
+        await recordCapacityLimitBlocked({
+          tenantId: req.auth.tenantId,
+          actor: {
+            userId: req.auth.userId,
+            role: req.auth.role
+          },
+          error: e,
+          requestMetadata: {
+            method: req.method,
+            path: req.originalUrl,
+            operation: "student-bulk-import",
+            row: rowIdx + 2
+          }
+        });
+      }
+
       const msg = e?.message || "Unknown error";
       results.errors.push({ row: rowIdx + 2, error: msg.slice(0, 200) });
     }

@@ -8,6 +8,7 @@ const ROLE_PREFIX = {
   CENTER: "/center",
   TEACHER: "/teacher",
   STUDENT: "/student",
+  PARENT: "/parent",
 };
 
 const LABEL_MAP = {
@@ -17,6 +18,7 @@ const LABEL_MAP = {
   center: "Center",
   teacher: "Teacher",
   student: "Student",
+  parent: "Parent",
   dashboard: "Dashboard",
   analytics: "Analytics",
   reports: "Reports",

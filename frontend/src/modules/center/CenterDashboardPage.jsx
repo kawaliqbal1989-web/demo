@@ -17,6 +17,10 @@ import { getDashboardSummary } from "../../services/reportsService";
 import { listWorksheets } from "../../services/worksheetsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { CenterAssistant } from "../../components/AiNarrativeSurfaces";
+import { CenterCapacityPanel } from "../../components/CapacityGovernance";
+import { useCenterCapacitySnapshot } from "../../hooks/useCenterCapacitySnapshot";
+import { useAuth } from "../../hooks/useAuth";
+import { buildCapacityLimitMessage, shouldDisableCapacityAction } from "../../utils/capacityGovernance";
 
 function todayISO() {
   const d = new Date();
@@ -47,12 +51,16 @@ function getMockTestStatusStyle(status) {
   };
 }
 
-import { useAuth } from "../../hooks/useAuth";
-
 function CenterDashboardPage() {
   const { branding } = useAuth();
   const [searchParams] = useSearchParams();
   const mockTestsSectionRef = useRef(null);
+  const {
+    data: capacitySnapshot,
+    error: capacityError,
+    loading: capacityLoading,
+    retry: retryCapacity
+  } = useCenterCapacitySnapshot();
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -256,6 +264,26 @@ function CenterDashboardPage() {
   }
 
   const centerProfile = me?.centerProfile;
+  const studentActionsLocked = shouldDisableCapacityAction(capacitySnapshot, "students");
+  const teacherActionsLocked = shouldDisableCapacityAction(capacitySnapshot, "teachers");
+  const studentLimitMessage = buildCapacityLimitMessage(capacitySnapshot?.usage?.students, "Student");
+  const teacherLimitMessage = buildCapacityLimitMessage(capacitySnapshot?.usage?.teachers, "Teacher");
+
+  function renderQuickAction({ label, to, disabled = false, title = "" }) {
+    if (disabled) {
+      return (
+        <button className="button secondary" style={{ width: "auto" }} disabled title={title}>
+          {label}
+        </button>
+      );
+    }
+
+    return (
+      <Link className="button secondary" style={{ width: "auto" }} to={to}>
+        {label}
+      </Link>
+    );
+  }
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
@@ -293,6 +321,8 @@ function CenterDashboardPage() {
         )}
       </div>
 
+      <CenterCapacityPanel snapshot={capacitySnapshot} loading={capacityLoading} error={capacityError} onRetry={retryCapacity} />
+
       <AnomalyPanel anomalies={intel?.anomalies} loading={intelLoading} />
 
       <div className="intel-grid">
@@ -306,13 +336,19 @@ function CenterDashboardPage() {
       <div className="card" style={{ display: "grid", gap: 8 }}>
         <div className="section-header"><span className="section-header__text">⚡ Quick Actions</span></div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link className="button secondary" style={{ width: "auto" }} to="/center/students">➕ Add Student</Link>
-          <Link className="button secondary" style={{ width: "auto" }} to="/center/teachers">➕ Add Teacher</Link>
+          {renderQuickAction({ label: "➕ Add Student", to: "/center/students", disabled: studentActionsLocked, title: studentLimitMessage })}
+          {renderQuickAction({ label: "⬆ Bulk Import", to: "/center/students", disabled: studentActionsLocked, title: studentLimitMessage })}
+          {renderQuickAction({ label: "➕ Add Teacher", to: "/center/teachers", disabled: teacherActionsLocked, title: teacherLimitMessage })}
           <Link className="button secondary" style={{ width: "auto" }} to="/center/batches">➕ Create Batch</Link>
           <Link className="button secondary" style={{ width: "auto" }} to="/center/attendance">📅 Take Attendance</Link>
           <Link className="button secondary" style={{ width: "auto" }} to="/center/enrollments">📋 Manage Enrollments</Link>
           <Link className="button secondary" style={{ width: "auto" }} to="/center/reports">📊 View Reports</Link>
         </div>
+        {studentActionsLocked || teacherActionsLocked ? (
+          <div className="capacity-dashboard-warning" role="status">
+            {studentActionsLocked ? studentLimitMessage : teacherLimitMessage}
+          </div>
+        ) : null}
       </div>
 
       {/* Recent Attendance Sessions */}
@@ -358,6 +394,16 @@ function CenterDashboardPage() {
       <div className="card" style={{ display: "grid", gap: 8 }}>
         <h3 style={{ marginTop: 0 }}>Center Profile</h3>
         <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Read-only center identity and status.</div>
+
+        {centerProfile?.logoUrl ? (
+          <img
+            src={centerProfile.logoUrl}
+            alt="Center logo"
+            style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover" }}
+          />
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>No logo configured. Logo is managed by SuperAdmin.</div>
+        )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
           <div>

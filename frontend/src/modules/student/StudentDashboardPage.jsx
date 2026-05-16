@@ -1,601 +1,377 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { SkeletonLoader } from "../../components/SkeletonLoader";
-import { MetricCard } from "../../components/MetricCard";
 import { EmptyState } from "../../components/EmptyState";
+import { MetricCard } from "../../components/MetricCard";
 import { PageHeader } from "../../components/PageHeader";
-import { InsightPanel } from "../../components/InsightCard";
-import { StreakBar, DailyMission, WeeklyPlan, ReadinessGauge, MilestoneCard, PerformanceExplainer } from "../../components/StudentCoach";
-import { getInsights } from "../../services/insightsService";
-import { getCoachDashboard } from "../../services/studentCoachService";
+import { ReportActionButtons } from "../../components/ReportActionButtons";
+import { SkeletonLoader } from "../../components/SkeletonLoader";
 import {
-  getStudentFees,
-  getStudentMe,
-  getStudentPracticeReport,
-  getStudentWeakTopics,
-  listStudentAttendance,
-  listStudentExamEnrollments,
-  listStudentEnrollments,
-  listStudentWorksheets
-} from "../../services/studentPortalService";
-import { StudentAiCoach } from "../../components/AiNarrativeSurfaces";
+  getStudentDashboardAchievements,
+  getStudentDashboardAttendanceTrends,
+  getStudentDashboardOverview,
+  getStudentDashboardPracticeTrends,
+  getStudentDashboardReminders,
+  getStudentDashboardStreaks,
+  getStudentDashboardWeakTopics
+} from "../../services/studentDashboardService";
+import {
+  BandBadge,
+  MiniBarChart,
+  MiniSparkline,
+  ProgressStrip,
+  ReminderList,
+  SectionCard,
+  formatBandLabel,
+  formatDate,
+  formatPercent,
+  formatRelativeDayLabel,
+  formatScore
+} from "../common/EngagementDashboardShared";
 
-function formatExamStatus(status) {
-  if (!status) return "—";
-  if (status === "APPROVED") return "Approved";
-  if (status === "REJECTED") return "Rejected";
-  if (status === "NOT_SELECTED") return "Not Selected";
-  if (status === "NOT_IN_COMBINED_LIST") return "Pending (Center not prepared)";
-  return status;
-}
-
-function formatCenterLabel({ name, code }) {
-  if (!name && !code) return "—";
-  if (name && code) return `${name} (${code})`;
-  return name || code || "—";
-}
-
-function formatAge(dateOfBirth) {
-  if (!dateOfBirth) return "";
-  const dob = new Date(dateOfBirth);
-  if (Number.isNaN(dob.getTime())) return "";
-  const today = new Date();
-  let age = today.getFullYear() - dob.getFullYear();
-  const m = today.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < dob.getDate())) {
-    age -= 1;
-  }
-  if (!Number.isFinite(age) || age < 0) return "";
-  return `${age} yrs`;
-}
-
-function formatCourseLevel({ courseCode, levelTitle, level }) {
-  const course = courseCode || (level ? `AB-L${level}` : "—");
-  const lvl = levelTitle || (level ? `Level ${level}` : "—");
-  return `${course} / ${lvl}`;
+function unwrapEnvelope(response) {
+  const payload = response?.data?.data;
+  return {
+    data: payload?.data || null,
+    meta: payload?.meta || null
+  };
 }
 
 function StudentDashboardPage() {
-  const [me, setMe] = useState(null);
-  const [report, setReport] = useState(null);
-  const [activeEnrollment, setActiveEnrollment] = useState(null);
-  const [allEnrollments, setAllEnrollments] = useState([]);
-  const [nextWorksheet, setNextWorksheet] = useState(null);
-  const [attendance, setAttendance] = useState([]);
-  const [weakTopics, setWeakTopics] = useState([]);
-  const [fees, setFees] = useState(null);
-  const [examEnrollments, setExamEnrollments] = useState([]);
-  const [error, setError] = useState("");
+  const [dashboard, setDashboard] = useState({
+    overview: null,
+    streaks: null,
+    achievements: null,
+    practice: null,
+    attendance: null,
+    weakTopics: null,
+    reminders: null,
+    meta: null
+  });
   const [loading, setLoading] = useState(true);
-  const [insights, setInsights] = useState([]);
-  const [insightsLoading, setInsightsLoading] = useState(true);
-  const [coach, setCoach] = useState(null);
-  const [coachLoading, setCoachLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    setError("");
 
-    Promise.allSettled([
-      getStudentMe(),
-      getStudentPracticeReport(),
-      listStudentEnrollments(),
-      listStudentExamEnrollments(),
-      listStudentWorksheets({ page: 1, pageSize: 20 }),
-      listStudentAttendance({ limit: 7 }),
-      getStudentWeakTopics({ threshold: 60 }),
-      getStudentFees()
-    ])
-      .then(([meRes, reportRes, enrollRes, examEnrollRes, worksheetsRes, attendanceRes, weakTopicsRes, feesRes]) => {
+    async function loadDashboard() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const responses = await Promise.all([
+          getStudentDashboardOverview(),
+          getStudentDashboardStreaks(),
+          getStudentDashboardAchievements(),
+          getStudentDashboardPracticeTrends(),
+          getStudentDashboardAttendanceTrends(),
+          getStudentDashboardWeakTopics({ threshold: 60, lookback: 20 }),
+          getStudentDashboardReminders({ limit: 8 })
+        ]);
+
         if (cancelled) {
           return;
         }
-        const meData = meRes.status === "fulfilled" ? meRes.value.data?.data || null : null;
-        const reportData = reportRes.status === "fulfilled" ? reportRes.value.data?.data || null : null;
-        const enrollments =
-          enrollRes.status === "fulfilled" && Array.isArray(enrollRes.value.data?.data)
-            ? enrollRes.value.data.data
-            : [];
-        const examRows =
-          examEnrollRes.status === "fulfilled" && Array.isArray(examEnrollRes.value.data?.data)
-            ? examEnrollRes.value.data.data
-            : [];
-        const worksheets =
-          worksheetsRes.status === "fulfilled" && Array.isArray(worksheetsRes.value.data?.data?.items)
-            ? worksheetsRes.value.data.data.items
-            : [];
-        const attendanceRows =
-          attendanceRes.status === "fulfilled" && Array.isArray(attendanceRes.value.data?.data)
-            ? attendanceRes.value.data.data
-            : [];
-        const weakTopicRows =
-          weakTopicsRes.status === "fulfilled" && Array.isArray(weakTopicsRes.value.data?.data)
-            ? weakTopicsRes.value.data.data
-            : [];
-        const feesData = feesRes.status === "fulfilled" ? feesRes.value.data?.data || null : null;
 
-        setMe(meData);
-        setReport(reportData);
+        const overviewEnvelope = unwrapEnvelope(responses[0]);
+        const streaksEnvelope = unwrapEnvelope(responses[1]);
+        const achievementsEnvelope = unwrapEnvelope(responses[2]);
+        const practiceEnvelope = unwrapEnvelope(responses[3]);
+        const attendanceEnvelope = unwrapEnvelope(responses[4]);
+        const weakTopicsEnvelope = unwrapEnvelope(responses[5]);
+        const remindersEnvelope = unwrapEnvelope(responses[6]);
 
-        const assignedCourses = Array.isArray(meData?.assignedCourses) ? meData.assignedCourses : [];
-        const existingCourseCodes = new Set(enrollments.map((e) => e.courseCode));
-        const assignedAsEnrollments = assignedCourses
-          .filter((c) => c && !existingCourseCodes.has(c.courseCode))
-          .map((c) => ({
-            enrollmentId: `assigned-${c.courseId}`,
-            courseId: c.courseId,
-            courseCode: c.courseCode || null,
-            level: null,
-            levelTitle: null,
-            status: "ASSIGNED",
-            assignedTeacherId: null,
-            assignedTeacherName: null,
-            centerId: meData?.centerId || null,
-            centerName: meData?.centerName || null,
-            centerCode: meData?.centerCode || null,
-            batchId: null,
-            batchName: null,
-            startedAt: null,
-            dueDate: null
-          }));
-
-        const combined = [...enrollments, ...assignedAsEnrollments];
-        setAllEnrollments(combined);
-        const current = combined.find((en) => en?.status === "ACTIVE") || combined[0] || null;
-        setActiveEnrollment(current);
-
-        const candidate =
-          worksheets.find((w) => w?.status === "IN_PROGRESS") ||
-          worksheets.find((w) => w?.status === "NOT_STARTED") ||
-          null;
-        setNextWorksheet(candidate);
-
-        setAttendance(attendanceRows);
-        setWeakTopics(weakTopicRows);
-        setFees(feesData);
-        setExamEnrollments(examRows);
-
-        const hasAnyFailure = [meRes, reportRes, enrollRes, examEnrollRes, worksheetsRes, attendanceRes, weakTopicsRes, feesRes]
-          .some((result) => result.status === "rejected");
-
-        if (hasAnyFailure) {
-          setError(meData ? "Some dashboard panels could not be loaded." : "Some dashboard data could not be loaded.");
+        setDashboard({
+          overview: overviewEnvelope.data,
+          streaks: streaksEnvelope.data,
+          achievements: achievementsEnvelope.data,
+          practice: practiceEnvelope.data,
+          attendance: attendanceEnvelope.data,
+          weakTopics: weakTopicsEnvelope.data,
+          reminders: remindersEnvelope.data,
+          meta: overviewEnvelope.meta
+        });
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load the student engagement dashboard.");
         }
-      })
-      .finally(() => {
-        if (cancelled) {
-          return;
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
         }
-        setLoading(false);
-      });
+      }
+    }
+
+    loadDashboard();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshToken]);
 
-  useEffect(() => {
-    setInsightsLoading(true);
-    getInsights()
-      .then((res) => setInsights(res.data?.insights || []))
-      .catch(() => {})
-      .finally(() => setInsightsLoading(false));
-  }, []);
+  const overview = dashboard.overview?.overview || {};
+  const student = dashboard.overview?.student || dashboard.meta?.scope || {};
+  const streaks = dashboard.streaks || dashboard.overview?.streaks || {};
+  const achievements = dashboard.achievements || { items: [], newlyEarned: [], nextHints: [], summary: {} };
+  const practice = dashboard.practice || { items: [], summary: {} };
+  const attendance = dashboard.attendance || { items: [], summary: {} };
+  const weakTopics = dashboard.weakTopics || { items: [], summary: {} };
+  const reminders = dashboard.reminders || { items: [], total: 0, unreadCount: 0 };
 
-  useEffect(() => {
-    setCoachLoading(true);
-    getCoachDashboard()
-      .then((res) => setCoach(res.data?.data || null))
-      .catch(() => {})
-      .finally(() => setCoachLoading(false));
-  }, []);
+  const weeklyMomentumCards = useMemo(() => ([
+    {
+      label: "Practice cadence",
+      value: `${streaks?.practice?.weeklyCurrent ?? 0} active weeks`,
+      detail: `${overview.practiceActiveDays ?? 0} active days in the current window`
+    },
+    {
+      label: "Attendance cadence",
+      value: `${streaks?.attendance?.weeklyCurrent ?? 0} weekly runs`,
+      detail: `${formatPercent(attendance.summary?.attendanceRate)} attendance consistency`
+    },
+    {
+      label: "Exam readiness",
+      value: `${overview.examParticipationCount ?? 0} exam cycles`,
+      detail: `${overview.pendingWorksheetCount ?? 0} pending worksheets still open`
+    }
+  ]), [attendance.summary?.attendanceRate, overview.examParticipationCount, overview.pendingWorksheetCount, overview.practiceActiveDays, streaks?.attendance?.weeklyCurrent, streaks?.practice?.weeklyCurrent]);
 
-  const kpis = useMemo(() => {
-    return [
-      {
-        label: "Active Enrollments",
-        value: me?.activeEnrollmentsCount ?? "—",
-        icon: "📚",
-        accent: "var(--role-student)"
-      },
-      {
-        label: "Assigned Worksheets",
-        value: me?.assignedWorksheetsCount ?? "—",
-        icon: "📝"
-      },
-      {
-        label: "Total Attempts",
-        value: report?.totalAttempts ?? "—",
-        icon: "🎯"
-      },
-      {
-        label: "Avg Score",
-        value: report?.avgScore == null ? "—" : `${report.avgScore}%`,
-        icon: "📊",
-        accent: report?.avgScore >= 70 ? "#16a34a" : report?.avgScore >= 40 ? "#d97706" : undefined
-      }
-    ];
-  }, [me, report]);
-
-  const latestResult = report?.recent?.length ? report.recent[0] : null;
+  const achievementItems = Array.isArray(achievements.items) ? achievements.items.slice(0, 8) : [];
+  const practiceTrendItems = Array.isArray(practice.items) ? practice.items.slice(-8) : [];
+  const attendanceTrendItems = Array.isArray(attendance.items) ? attendance.items.slice(-8) : [];
+  const weakTopicItems = Array.isArray(weakTopics.items) ? weakTopics.items : [];
 
   if (loading) {
     return (
-      <section className="dash-section">
+      <div style={{ display: "grid", gap: 16 }}>
+        <SkeletonLoader variant="detail" />
         <SkeletonLoader variant="card" count={4} />
         <SkeletonLoader variant="detail" />
-        <SkeletonLoader variant="table" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="card engagement-dashboard__error-card">
+        <h2>Student Dashboard</h2>
+        <p>{error}</p>
+        <button className="button" type="button" style={{ width: "auto" }} onClick={() => setRefreshToken((value) => value + 1)}>
+          Retry dashboard
+        </button>
       </section>
     );
   }
 
   return (
-    <section className="dash-section">
+    <div className="engagement-dashboard">
       <PageHeader
         title="Student Dashboard"
-        subtitle="Your profile and current enrollment details."
-        actions={
-          <>
-            <Link className="button secondary" style={{ width: "auto" }} to="/change-password">Change Password</Link>
-            <Link className="button secondary" style={{ width: "auto" }} to="/student/abacus-practice">Abacus Practice</Link>
-            <Link className="button" style={{ width: "auto" }} to="/student/worksheets">Worksheets</Link>
-          </>
-        }
+        subtitle="Interactive engagement pulse for streaks, practice rhythm, weak-topic recovery, achievements, and operational reminders."
+        actions={(
+          <div className="engagement-dashboard__header-actions">
+            <ReportActionButtons reportKey="student-engagement" />
+            <Link className="button secondary" style={{ width: "auto" }} to="/student/weak-topics">Review weak topics</Link>
+            <Link className="button" style={{ width: "auto" }} to="/student/practice">Resume practice</Link>
+          </div>
+        )}
       />
 
-      {error ? (
-        <div className="card">
-          <p className="error" style={{ margin: 0 }}>
-            {error}
+      <section className="card engagement-dashboard__hero engagement-dashboard__hero--student">
+        <div className="engagement-dashboard__hero-copy">
+          <span className="engagement-dashboard__eyebrow">Engagement overview</span>
+          <div className="engagement-dashboard__hero-title-row">
+            <h3>{student.studentName || "Student engagement snapshot"}</h3>
+            <BandBadge band={overview.engagementBand} />
+          </div>
+          <p className="engagement-dashboard__hero-subtitle">
+            {student.levelName ? `${student.levelName}` : "Active learning track"}
+            {student.hierarchyNodeName ? ` • ${student.hierarchyNodeName}` : ""}
+            {dashboard.meta?.source?.mode ? ` • ${String(dashboard.meta.source.mode).replace(/-/g, " ")}` : ""}
           </p>
+          <div className="engagement-dashboard__chip-row">
+            <span className="engagement-dashboard__chip">{student.studentCode || "No code"}</span>
+            <span className="engagement-dashboard__chip">{formatBandLabel(overview.engagementBand)}</span>
+            <span className="engagement-dashboard__chip">{formatRelativeDayLabel(overview.lastActivityAt)}</span>
+          </div>
         </div>
-      ) : null}
+        <div className="engagement-dashboard__hero-score-panel">
+          <div className="engagement-dashboard__hero-score-value">{formatScore(overview.engagementScore)}</div>
+          <div className="engagement-dashboard__hero-score-label">Engagement score</div>
+          <div className="engagement-dashboard__hero-score-hint">Momentum {formatScore(overview.momentumScore)}</div>
+        </div>
+      </section>
 
-      <InsightPanel
-        insights={insights}
-        loading={insightsLoading}
-        onDismiss={(id) => setInsights((prev) => prev.filter((i) => i.id !== id))}
-      />
-
-      <StudentAiCoach />
-
-      <StreakBar streaks={coach?.streaks} />
-
-      <div className="coach-grid">
-        <DailyMission missions={coach?.dailyMission} loading={coachLoading} />
-        <WeeklyPlan plan={coach?.weeklyPlan} loading={coachLoading} />
+      <div className="engagement-dashboard__metric-grid">
+        <MetricCard label="Engagement band" value={formatBandLabel(overview.engagementBand)} sublabel={`${formatScore(overview.engagementScore)} / 100`} icon="⚡" accent="#0f766e" />
+        <MetricCard label="Daily streak" value={`${streaks?.practice?.current ?? 0} days`} sublabel={`Target ${streaks?.practice?.target ?? 14} days`} icon="🔥" accent="#ea580c" />
+        <MetricCard label="Attendance consistency" value={formatPercent(attendance.summary?.attendanceRate)} sublabel={`${attendance.summary?.presentCount ?? 0} present of ${attendance.summary?.totalSessions ?? 0}`} icon="🗓️" accent="#2563eb" />
+        <MetricCard label="Achievement gallery" value={String(achievements.summary?.total ?? achievementItems.length ?? 0)} sublabel={`${achievements.newlyEarned?.length ?? 0} newly earned`} icon="🏆" accent="#7c3aed" />
+        <MetricCard label="Weak-topic watchlist" value={String(weakTopics.summary?.weakTopicCount ?? weakTopicItems.length ?? 0)} sublabel={weakTopics.summary?.weakestTopic || "No topic risk detected"} icon="🎯" accent="#dc2626" />
+        <MetricCard label="Operational reminders" value={String(reminders.unreadCount ?? 0)} sublabel={`${reminders.total ?? 0} active reminders`} icon="🔔" accent="#0f766e" />
       </div>
 
-      <div className="dash-kpi-grid">
-        {kpis.map((kpi) => (
-          <MetricCard key={kpi.label} label={kpi.label} value={kpi.value} icon={kpi.icon} accent={kpi.accent} />
-        ))}
-      </div>
+      <div className="engagement-dashboard__content-grid">
+        <div className="engagement-dashboard__content-main">
+          <SectionCard title="Daily streak card" subtitle="Track how practice and attendance are building current momentum.">
+            <div className="engagement-dashboard__dual-grid">
+              <article className="engagement-dashboard__surface">
+                <div className="engagement-dashboard__surface-topline">
+                  <strong>Practice streak</strong>
+                  <span>{streaks?.practice?.current ?? 0} days</span>
+                </div>
+                <ProgressStrip value={streaks?.practice?.current ?? 0} target={streaks?.practice?.target ?? 14} color="#ea580c" />
+                <div className="engagement-dashboard__surface-meta">
+                  <span>Best run {streaks?.practice?.best ?? 0} days</span>
+                  <span>{overview.practiceActiveDays ?? 0} active days this window</span>
+                </div>
+              </article>
 
-      <div className="dash-grid-2">
-        <div className="card dash-card">
-          <div className="dash-card__title">Student Dashboard</div>
-          <div className="dash-card__subtitle">Your profile and current enrollment details.</div>
-
-          <div className="info-grid">
-            <div className="info-grid__label">Full Name</div>
-            <div className="info-grid__value">{me?.fullName || "—"}</div>
-
-            <div className="info-grid__label">Student Code</div>
-            <div className="info-grid__value">{me?.studentCode || "—"}</div>
-
-            <div className="info-grid__label">Username</div>
-            <div className="info-grid__value">{me?.username || "—"}</div>
-
-            <div className="info-grid__label">Status</div>
-            <div className="info-grid__value">{me?.status || "—"}</div>
-
-            <div className="info-grid__label">Assigned Course</div>
-            <div className="info-grid__value">
-              {me?.courseName
-                ? `${me.courseName}${me.courseCode ? ` (${me.courseCode})` : ""}`
-                : "—"}
+              <article className="engagement-dashboard__surface">
+                <div className="engagement-dashboard__surface-topline">
+                  <strong>Attendance streak</strong>
+                  <span>{streaks?.attendance?.current ?? 0} sessions</span>
+                </div>
+                <ProgressStrip value={streaks?.attendance?.current ?? 0} target={streaks?.attendance?.target ?? 30} color="#2563eb" />
+                <div className="engagement-dashboard__surface-meta">
+                  <span>Best run {streaks?.attendance?.best ?? 0} sessions</span>
+                  <span>{attendance.summary?.lateCount ?? 0} late marks in recent history</span>
+                </div>
+              </article>
             </div>
+          </SectionCard>
 
-            <div className="info-grid__label">Level</div>
-            <div className="info-grid__value">{me?.levelTitle || "—"}</div>
-
-            <div className="info-grid__label">DOB / Age</div>
-            <div className="info-grid__value">
-              {me?.dateOfBirth ? new Date(me.dateOfBirth).toISOString().slice(0, 10) : "—"}
-              {me?.dateOfBirth ? ` (${formatAge(me.dateOfBirth)})` : ""}
+          <SectionCard title="Weekly streak summary" subtitle="Use weekly cadence to catch rhythm drops before the streak breaks.">
+            <div className="engagement-dashboard__summary-grid">
+              {weeklyMomentumCards.map((item) => (
+                <article key={item.label} className="engagement-dashboard__summary-card">
+                  <span className="engagement-dashboard__summary-label">{item.label}</span>
+                  <strong className="engagement-dashboard__summary-value">{item.value}</strong>
+                  <span className="engagement-dashboard__summary-detail">{item.detail}</span>
+                </article>
+              ))}
             </div>
+          </SectionCard>
 
-            <div className="info-grid__label">Guardian Name</div>
-            <div className="info-grid__value">{me?.guardianName || "—"}</div>
-
-            <div className="info-grid__label">Guardian Phone</div>
-            <div className="info-grid__value">{me?.guardianPhone || "—"}</div>
-
-            <div className="info-grid__label">Email</div>
-            <div className="info-grid__value">{me?.email || "—"}</div>
-          </div>
-        </div>
-
-        <div className="card dash-card">
-          <div className="dash-card__title">Current Enrollment</div>
-          <div className="dash-card__subtitle">Active enrollment and assigned teacher.</div>
-
-          <div className="info-grid">
-            <div className="info-grid__label">Course / Level</div>
-            <div className="info-grid__value">
-              {activeEnrollment
-                ? formatCourseLevel({
-                    courseCode: activeEnrollment.courseCode,
-                    levelTitle: activeEnrollment.levelTitle,
-                    level: activeEnrollment.level
-                  })
-                : "—"}
-            </div>
-
-            <div className="info-grid__label">Assigned Teacher</div>
-            <div className="info-grid__value">{activeEnrollment?.assignedTeacherName || "—"}</div>
-
-            <div className="info-grid__label">Center</div>
-            <div className="info-grid__value">
-              {activeEnrollment
-                ? formatCenterLabel({ name: activeEnrollment.centerName, code: activeEnrollment.centerCode })
-                : formatCenterLabel({ name: me?.centerName, code: me?.centerCode })}
-            </div>
-
-            <div className="info-grid__label">Batch</div>
-            <div className="info-grid__value">{activeEnrollment?.batchName || "No batch assigned"}</div>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
-            <Link className="button secondary" style={{ width: "auto" }} to="/student/enrollments">
-              View Enrollments
-            </Link>
-          </div>
-        </div>
-
-        <div className="card dash-card">
-          <div className="dash-card__title">Exam Enrollment</div>
-          <div className="dash-card__subtitle">Your exam enrollment status (notification).</div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
-            <Link className="button secondary" style={{ width: "auto" }} to="/student/exams">
-              View Exams
-            </Link>
-          </div>
-
-          <div className="dash-table-wrap" style={{ marginTop: 8 }}>
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>Exam</th>
-                  <th>Status</th>
-                  <th>Exam Starts</th>
-                </tr>
-              </thead>
-              <tbody>
-                {examEnrollments.length ? (
-                  examEnrollments.slice(0, 5).map((r) => (
-                    <tr key={r.entryId}>
-                      <td>{r?.examCycle ? `${r.examCycle.name} (${r.examCycle.code})` : "—"}</td>
-                      <td>{formatExamStatus(r?.status)}</td>
-                      <td>{r?.examCycle?.examStartsAt ? new Date(r.examCycle.examStartsAt).toLocaleDateString() : "—"}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={3} className="muted">
-                      —
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="card dash-card">
-        <div className="dash-card__title">Learning Summary</div>
-        <div className="dash-card__subtitle">What to do next.</div>
-
-        <div className="info-grid">
-          <div className="info-grid__label">Next Worksheet</div>
-          <div className="info-grid__value">
-            {nextWorksheet ? (
-              <Link to={`/student/worksheets/${nextWorksheet.worksheetId}`}>{nextWorksheet.title}</Link>
+          <SectionCard
+            title="Achievement gallery"
+            subtitle="Milestones stay visible so recent wins reinforce the next practice cycle."
+            aside={<Link to="/student/certificates" className="button secondary" style={{ width: "auto" }}>Certificates</Link>}
+          >
+            {achievementItems.length ? (
+              <div className="engagement-dashboard__achievement-grid">
+                {achievementItems.map((item) => (
+                  <article key={item.key} className="engagement-dashboard__achievement-card">
+                    <div className="engagement-dashboard__achievement-icon">{item.icon || "🏅"}</div>
+                    <div>
+                      <strong>{item.title}</strong>
+                      <p>{item.description || "Achievement unlocked from consistent engagement."}</p>
+                      <span>{formatDate(item.earnedAt)}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
             ) : (
-              "—"
+              <EmptyState icon="🏅" title="Achievement gallery" description="Complete more sessions to unlock your first engagement achievements." />
             )}
-          </div>
 
-          <div className="info-grid__label">Latest Result</div>
-          <div className="info-grid__value">
-            {latestResult?.worksheetTitle ? (
-              <span>
-                {latestResult.worksheetTitle} — {latestResult.score == null ? "—" : `${latestResult.score}%`}
-              </span>
+            {(achievements.newlyEarned?.length || achievements.nextHints?.length) ? (
+              <div className="engagement-dashboard__callout-grid">
+                {achievements.newlyEarned?.length ? (
+                  <article className="engagement-dashboard__callout">
+                    <strong>Newly earned</strong>
+                    <p>{achievements.newlyEarned.map((item) => item?.title || item?.key).filter(Boolean).join(", ")}</p>
+                  </article>
+                ) : null}
+                {achievements.nextHints?.length ? (
+                  <article className="engagement-dashboard__callout">
+                    <strong>Next milestone hints</strong>
+                    <p>{achievements.nextHints.map((item) => item?.title || item?.hint || item?.description).filter(Boolean).join(" • ")}</p>
+                  </article>
+                ) : null}
+              </div>
+            ) : null}
+          </SectionCard>
+
+          <SectionCard
+            title="Practice trends"
+            subtitle="Daily completions and scores show where repetition is building real consistency."
+            aside={<Link to="/student/progress" className="button secondary" style={{ width: "auto" }}>View full progress</Link>}
+          >
+            <div className="engagement-dashboard__chart-grid">
+              <div>
+                <MiniBarChart
+                  items={practiceTrendItems}
+                  valueKey="completedCount"
+                  color="#0f766e"
+                  emptyLabel="Practice trend data will appear after more worksheet submissions."
+                />
+              </div>
+              <div className="engagement-dashboard__stat-list">
+                <div className="engagement-dashboard__stat-row"><span>Completed worksheets</span><strong>{practice.summary?.totalCompleted ?? 0}</strong></div>
+                <div className="engagement-dashboard__stat-row"><span>Average score</span><strong>{formatPercent(practice.summary?.averageScore)}</strong></div>
+                <div className="engagement-dashboard__stat-row"><span>Pending assignments</span><strong>{practice.summary?.pendingAssignments ?? 0}</strong></div>
+                <div className="engagement-dashboard__stat-row"><span>Last submission</span><strong>{formatDate(practice.summary?.lastSubmissionAt)}</strong></div>
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Attendance consistency" subtitle="Attendance stability keeps the academic rhythm intact across the recent session window.">
+            <div className="engagement-dashboard__chart-grid">
+              <div>
+                <MiniSparkline items={attendanceTrendItems} valueKey="attendanceRate" color="#2563eb" emptyLabel="Attendance trend will appear once session history is available." />
+              </div>
+              <div className="engagement-dashboard__stat-list">
+                <div className="engagement-dashboard__stat-row"><span>Attendance rate</span><strong>{formatPercent(attendance.summary?.attendanceRate)}</strong></div>
+                <div className="engagement-dashboard__stat-row"><span>Present sessions</span><strong>{attendance.summary?.presentCount ?? 0}</strong></div>
+                <div className="engagement-dashboard__stat-row"><span>Late sessions</span><strong>{attendance.summary?.lateCount ?? 0}</strong></div>
+                <div className="engagement-dashboard__stat-row"><span>Absent sessions</span><strong>{attendance.summary?.absentCount ?? 0}</strong></div>
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        <div className="engagement-dashboard__content-side">
+          <SectionCard
+            title="Weak-topic insights"
+            subtitle="The lowest-accuracy operations stay in view so you can recover with deliberate practice."
+            aside={<Link to="/student/weak-topics" className="button secondary" style={{ width: "auto" }}>Open weak topics</Link>}
+          >
+            {weakTopicItems.length ? (
+              <div className="engagement-dashboard__insight-list">
+                {weakTopicItems.map((item) => (
+                  <article key={item.topic} className="engagement-dashboard__insight-card">
+                    <div className="engagement-dashboard__insight-topline">
+                      <strong>{item.topic}</strong>
+                      <span>{formatPercent(item.accuracy, 1)}</span>
+                    </div>
+                    <ProgressStrip value={item.accuracy ?? 0} target={100} color="#dc2626" />
+                    <div className="engagement-dashboard__surface-meta">
+                      <span>{item.correct ?? 0} correct</span>
+                      <span>{item.attempted ?? 0} attempted</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
             ) : (
-              "—"
+              <EmptyState icon="🎯" title="Weak-topic insights" description="No weak-topic risk has been detected in the current lookback window." />
             )}
-          </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Operational reminders"
+            subtitle="These reminders are scoped to student engagement operations only."
+            aside={<Link to="/notifications" className="button secondary" style={{ width: "auto" }}>Notifications</Link>}
+          >
+            <ReminderList
+              items={Array.isArray(reminders.items) ? reminders.items : []}
+              emptyTitle="Operational reminders"
+              emptyDescription="No student engagement reminders need your attention right now."
+            />
+          </SectionCard>
         </div>
       </div>
-
-      <div className="card dash-card">
-        <div className="dash-card__title">All Assigned Courses</div>
-        <div className="dash-card__subtitle">All your enrollments across course levels.</div>
-
-        {allEnrollments.length ? (
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>Course / Level</th>
-                  <th>Teacher</th>
-                  <th>Center</th>
-                  <th>Batch</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allEnrollments.map((en) => (
-                  <tr key={en.enrollmentId}>
-                    <td>
-                      {formatCourseLevel({
-                        courseCode: en.courseCode,
-                        levelTitle: en.levelTitle,
-                        level: en.level
-                      })}
-                    </td>
-                    <td>{en.assignedTeacherName || "—"}</td>
-                    <td>{formatCenterLabel({ name: en.centerName, code: en.centerCode })}</td>
-                    <td>{en.batchName || "No batch assigned"}</td>
-                    <td>{en.status || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState icon="📚" title="No enrollments" description="You don't have any course enrollments yet." />
-        )}
-      </div>
-
-      <div className="card dash-card">
-        <div className="dash-card__title">Practice Weak Topics</div>
-        <div className="dash-card__subtitle">Topics with accuracy below 60%.</div>
-
-        {weakTopics.length ? (
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>Topic</th>
-                  <th>Accuracy</th>
-                  <th>Attempts</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weakTopics.map((t) => (
-                  <tr key={t.topic}>
-                    <td>{t.topic}</td>
-                    <td>
-                      <span className={`badge-v2 ${t.accuracy < 40 ? "badge-v2--danger" : "badge-v2--warning"}`}>
-                        {t.accuracy}%
-                      </span>
-                    </td>
-                    <td>{t.attempted}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <EmptyState icon="🎉" title="No weak topics" description="Great job! Keep practicing to stay sharp." />
-        )}
-      </div>
-
-      <div className="card dash-card">
-        <div className="dash-card__title">Attendance</div>
-        <div className="dash-card__subtitle">Your last 7 attendance records.</div>
-
-        {attendance.length ? (
-          <div className="dash-table-wrap">
-            <table className="dash-table">
-              <thead>
-                <tr>
-                  <th>
-                    Date
-                  </th>
-                  <th>
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {attendance.map((row, idx) => (
-                  <tr key={`${row.date || "unknown"}-${idx}`}>
-                    <td>{row.date ? new Date(row.date).toLocaleDateString() : "—"}</td>
-                    <td>{row.status || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="muted">No attendance records yet.</div>
-        )}
-      </div>
-
-      <div className="card dash-card">
-        <div className="dash-card__title">Fees</div>
-        <div className="dash-card__subtitle">Payment summary and history.</div>
-
-        <div className="info-grid">
-          <div className="info-grid__label">Total Fee</div>
-          <div className="info-grid__value">{fees?.summary?.totalFee ?? "—"}</div>
-
-          <div className="info-grid__label">Paid</div>
-          <div className="info-grid__value">{fees?.summary?.paid ?? "—"}</div>
-
-          <div className="info-grid__label">Pending</div>
-          <div className="info-grid__value">{fees?.summary?.pending ?? "—"}</div>
-
-          <div className="info-grid__label">Status</div>
-          <div className="info-grid__value">{fees?.summary?.status ?? "—"}</div>
-        </div>
-
-        {fees?.message ? <div className="muted">{fees.message}</div> : null}
-
-        <div className="dash-table-wrap">
-          <table className="dash-table">
-            <thead>
-              <tr>
-                <th>
-                  Date
-                </th>
-                <th>
-                  Amount
-                </th>
-                <th>
-                  Mode
-                </th>
-                <th>
-                  Reference
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {fees?.payments?.length ? (
-                fees.payments.map((p, idx) => (
-                  <tr key={`${p.date || "unknown"}-${idx}`}>
-                    <td>{p.date ? new Date(p.date).toLocaleDateString() : "—"}</td>
-                    <td>{p.amount ?? "—"}</td>
-                    <td>{p.mode || "—"}</td>
-                    <td>{p.reference || "—"}</td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="muted">
-                    No payments recorded yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="coach-grid">
-        <ReadinessGauge readiness={coach?.readiness} loading={coachLoading} />
-        <MilestoneCard milestones={coach?.milestones} loading={coachLoading} />
-      </div>
-
-      <PerformanceExplainer data={coach?.performanceExplainer} loading={coachLoading} />
-    </section>
+    </div>
   );
 }
 

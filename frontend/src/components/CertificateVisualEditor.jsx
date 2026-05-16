@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { resolveAssetUrl } from "../utils/assetUrls";
 
 // A4 landscape ratio: 297mm x 210mm. We render at a fixed pixel canvas.
 const A4_W = 297;
@@ -20,7 +21,7 @@ const DEFAULT_ELEMENTS = {
   completionText:  { x: 297 / 2,  y: 106, w: 0,  h: 0,  visible: true, label: "\"has successfully completed\"", fontSize: 14 },
   levelName:       { x: 297 / 2,  y: 120, w: 0,  h: 0,  visible: true, label: "Level Name", fontSize: 20 },
   certMeta:        { x: 297 / 2,  y: 145, w: 0,  h: 0,  visible: true, label: "Certificate # & Date", fontSize: 10 },
-  signature:       { x: 55,       y: 155, w: 40, h: 15, visible: true, label: "Signature" },
+  signature:       { x: 55,       y: 155, w: 40, h: 15, showDate: false, visible: true, label: "Signature" },
   signatoryInfo:   { x: 75,       y: 175, w: 0,  h: 0,  visible: true, label: "Signatory Name/Title", fontSize: 9 },
   stamp:           { x: 297 - 90, y: 152, w: 30, h: 30, visible: true, label: "Stamp / Seal" },
   qrCode:          { x: 297 - 45, y: 210 - 45, w: 25, h: 25, visible: true, label: "QR Code" },
@@ -60,18 +61,27 @@ function withAlpha(color, alpha) {
   return `${normalized}${alpha}`;
 }
 
+function buildElementsFromLayout(layout) {
+  const base = {};
+  for (const [key, value] of Object.entries(DEFAULT_ELEMENTS)) {
+    base[key] = { ...value, ...(layout?.[key] || {}) };
+  }
+  return base;
+}
+
 function CertificateVisualEditor({ layout, onChange, template }) {
   const canvasRef = useRef(null);
-  const [elements, setElements] = useState(() => {
-    const base = {};
-    for (const [k, v] of Object.entries(DEFAULT_ELEMENTS)) {
-      base[k] = { ...v, ...(layout?.[k] || {}) };
-    }
-    return base;
-  });
+  const [elements, setElements] = useState(() => buildElementsFromLayout(layout));
   const [selected, setSelected] = useState(null);
   const [dragging, setDragging] = useState(null);
   const [resizing, setResizing] = useState(null);
+
+  useEffect(() => {
+    setElements(buildElementsFromLayout(layout));
+    setSelected(null);
+    setDragging(null);
+    setResizing(null);
+  }, [layout]);
 
   // Sync outward on element change
   useEffect(() => {
@@ -80,11 +90,11 @@ function CertificateVisualEditor({ layout, onChange, template }) {
 
   // Build image map from template URLs for preview
   const imageUrls = {
-    bpLogo: template?.bpLogoUrl || null,
-    affiliationLogo: template?.affiliationLogoUrl || null,
-    signature: template?.signatureImageUrl || null,
-    stamp: template?.stampImageUrl || null,
-    background: template?.backgroundImageUrl || null,
+    bpLogo: resolveAssetUrl(template?.bpLogoUrl) || null,
+    affiliationLogo: resolveAssetUrl(template?.affiliationLogoUrl) || null,
+    signature: resolveAssetUrl(template?.signatureImageUrl) || null,
+    stamp: resolveAssetUrl(template?.stampImageUrl) || null,
+    background: resolveAssetUrl(template?.backgroundImageUrl) || null,
     qrCode: null // will show placeholder
   };
 
@@ -165,11 +175,7 @@ function CertificateVisualEditor({ layout, onChange, template }) {
   };
 
   const resetAll = () => {
-    const base = {};
-    for (const [k, v] of Object.entries(DEFAULT_ELEMENTS)) {
-      base[k] = { ...v };
-    }
-    setElements(base);
+    setElements(buildElementsFromLayout(null));
   };
 
   const renderElement = (key) => {
@@ -242,6 +248,7 @@ function CertificateVisualEditor({ layout, onChange, template }) {
     const width = mmToPx(el.w);
     const height = mmToPx(el.h);
     const imgUrl = imageUrls[key];
+    const signatureDateEnabled = key === "signature" && el.showDate === true;
 
     return (
       <div
@@ -262,7 +269,7 @@ function CertificateVisualEditor({ layout, onChange, template }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          overflow: "hidden",
+          overflow: signatureDateEnabled ? "visible" : "hidden",
           zIndex: isSel ? 20 : 3
         }}
       >
@@ -271,6 +278,28 @@ function CertificateVisualEditor({ layout, onChange, template }) {
         ) : (
           <span style={{ fontSize: 9, color, fontWeight: 600, textAlign: "center", lineHeight: 1.1, pointerEvents: "none" }}>{el.label}</span>
         )}
+        {signatureDateEnabled ? (
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: "100%",
+              transform: "translateX(-50%)",
+              marginTop: 6,
+              paddingTop: 4,
+              borderTop: "1px solid #9ca3af",
+              minWidth: 88,
+              textAlign: "center",
+              fontSize: 9,
+              fontWeight: 500,
+              color: "#6b7280",
+              background: "transparent",
+              pointerEvents: "none"
+            }}
+          >
+            09/05/2026
+          </div>
+        ) : null}
         {/* Resize handle */}
         {isSel ? (
           <div
@@ -396,6 +425,12 @@ function CertificateVisualEditor({ layout, onChange, template }) {
                   <input type="number" step="1" min="6" max="60" value={sel.fontSize || 14}
                     onChange={(e) => updateElement(selected, { fontSize: Number(e.target.value) })}
                     style={{ padding: "4px 8px", border: "1px solid var(--color-border-strong)", borderRadius: 4, fontSize: 12, width: "100%", background: "var(--color-bg-card)", color: "var(--color-text-primary)" }} />
+                </label>
+              ) : null}
+              {selected === "signature" ? (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input type="checkbox" checked={sel.showDate === true} onChange={(e) => updateElement(selected, { showDate: e.target.checked })} />
+                  <span>Show issued date below signature</span>
                 </label>
               ) : null}
               <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>

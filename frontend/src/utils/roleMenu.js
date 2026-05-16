@@ -5,6 +5,7 @@ const roleMenus = {
     { section: "Overview" },
     { label: "🏠 Dashboard", to: "/superadmin/dashboard" },
     { label: "📊 Reports", to: "/superadmin/reports" },
+    { label: "🛠 Export Operations", to: "/superadmin/export-operations" },
     { section: "Hierarchy" },
     { label: "🤝 Business Partners", to: "/superadmin/business-partners" },
     { label: "🏢 Franchises", to: "/superadmin/franchises" },
@@ -47,6 +48,7 @@ const roleMenus = {
     { label: "📅 Attendance", to: "/center/attendance" },
     { label: "📋 Attendance History", to: "/center/attendance-history" },
     { label: "📊 Analytics", to: "/center/analytics" },
+    { label: "🧭 Academic Workflows", to: "/center/workflows" },
     { section: "Finance" },
     { label: "📊 Reports", to: "/center/reports" },
     { label: "💰 Settlements", to: "/center/settlements" },
@@ -70,6 +72,8 @@ const roleMenus = {
     { label: "🧮 Virtual Abacus", to: "/teacher/virtual-abacus" },
     { label: "🎯 Exams", to: "/teacher/exam-cycles" },
     { label: "📊 Analytics", to: "/teacher/analytics" },
+    { section: "Execution" },
+    { label: "🧭 Workflow Queue", to: "/teacher/workflows" },
     { section: "System" },
     { label: "🔔 Notifications", to: "/notifications" }
   ],
@@ -114,6 +118,8 @@ const roleMenus = {
     { label: "📊 Reports", to: "/franchise/reports" },
     { label: "📑 Margins", to: "/franchise/margins" },
     { label: "🏦 Settlements", to: "/franchise/settlements" },
+    { section: "Governance" },
+    { label: "🧭 Operational Workflows", to: "/franchise/workflows" },
     { section: "System" },
     { label: "🔔 Notifications", to: "/notifications" }
   ],
@@ -142,6 +148,12 @@ const roleMenus = {
     { label: "💰 Fees", to: "/student/fees" },
     { label: "📋 Enrollments", to: "/student/enrollments" },
     { label: "🤖 AI Playground", to: "/student/ai-playground" },
+    { label: "🔔 Notifications", to: "/notifications" }
+  ],
+  [ROLES.PARENT]: [
+    { section: "Home" },
+    { label: "🏠 Dashboard", to: "/parent/dashboard" },
+    { section: "Visibility" },
     { label: "🔔 Notifications", to: "/notifications" }
   ]
 };

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { LoadingState } from "../../components/LoadingState";
-import { getMyBusinessPartner } from "../../services/businessPartnersService";
-import { updatePartnerProfile } from "../../services/partnerService";
+import { getPartnerProfile, updatePartnerProfile } from "../../services/partnerService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { resolveAssetUrl } from "../../utils/assetUrls";
 
@@ -25,8 +24,9 @@ function BusinessPartnerProfilePage() {
   const load = async () => {
     setError("");
     try {
-      const data = await getMyBusinessPartner();
+      const data = await getPartnerProfile({ _suppressErrorLogging: true });
       const p = data.data || null;
+
       setPartner(p);
       if (p) {
         setDisplayName(p.displayName || "");
@@ -108,19 +108,37 @@ function BusinessPartnerProfilePage() {
         <div className="card"><p className="error" style={{ margin: 0 }}>{error}</p></div>
       ) : null}
 
-      {resolveAssetUrl(partner.logoUrl) ? (
-        <div className="card" style={{ display: "flex", gap: 12, alignItems: "center" }}>
-          <img
-            src={resolveAssetUrl(partner.logoUrl)}
-            alt="Partner logo"
-            style={{ width: 48, height: 48, borderRadius: 10, objectFit: "contain", background: "#fff" }}
-          />
-          <div style={{ display: "grid", gap: 4 }}>
-            <div style={{ fontWeight: 700 }}>{partner.displayName || partner.name}</div>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Logo</div>
-          </div>
+      <div className="card" style={{ display: "grid", gap: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Partner Branding</h3>
+          <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
+            Branding assets are managed centrally by SuperAdmin and automatically applied only within this business partner hierarchy.
+          </p>
         </div>
-      ) : null}
+
+        {resolveAssetUrl(partner.logoUrl) ? (
+          <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+            <img
+              src={resolveAssetUrl(partner.logoUrl)}
+              alt="Partner logo"
+              style={{ width: 48, height: 48, borderRadius: 10, objectFit: "contain", background: "#fff" }}
+            />
+            <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ fontWeight: 700 }}>{partner.displayName || partner.name}</div>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Active logo managed by SuperAdmin</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>No partner logo configured.</div>
+        )}
+
+        <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+          <div><strong>Governance:</strong> SuperAdmin only</div>
+          <div><strong>Propagation Scope:</strong> Franchises, centers, teachers, students, and parent portals in this BP hierarchy only</div>
+          <div><strong>Last Branding Update:</strong> {partner.brandingUpdatedAt ? new Date(partner.brandingUpdatedAt).toLocaleString() : "-"}</div>
+          <div><strong>Updated By:</strong> {partner.brandingUpdatedBy?.email || partner.brandingUpdatedBy?.username || "-"}</div>
+        </div>
+      </div>
 
       {!editing ? (
         <div className="card" style={{ display: "grid", gap: 10 }}>

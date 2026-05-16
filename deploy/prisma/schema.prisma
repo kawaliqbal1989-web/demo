@@ -97,6 +97,46 @@ enum NotificationCategory {
   SYSTEM
 }
 
+enum OperationalNotificationType {
+  LOW_ATTENDANCE
+  CRITICAL_ATTENDANCE
+  REVENUE_DROP
+  LOW_COLLECTIONS
+  NO_ADMISSIONS
+  WEAK_GROWTH
+  UNHEALTHY_CENTER
+  PENDING_SETTLEMENT
+  SETTLEMENT_APPROVED
+  SETTLEMENT_REJECTED
+  SETTLEMENT_ESCALATION_TRIGGERED
+  SETTLEMENT_ESCALATION_SEVERITY_INCREASED
+  SETTLEMENT_PAYOUT_DELAY
+  SETTLEMENT_REPEATED_REJECTION
+  SNAPSHOT_FAILURE
+  SCHEDULER_FAILURE
+}
+
+enum OperationalNotificationSeverity {
+  CRITICAL
+  HIGH
+  WARNING
+  INFO
+}
+
+enum OperationalNotificationStatus {
+  ACTIVE
+  RESOLVED
+  SUPPRESSED
+  EXPIRED
+}
+
+enum OperationalNotificationSourceKind {
+  SNAPSHOT
+  LIVE_FALLBACK
+  SCHEDULER
+  SYSTEM
+}
+
 enum ExamEnrollmentStatus {
   DRAFT
   SUBMITTED_TO_CENTER
@@ -198,6 +238,26 @@ enum BusinessType {
 enum PartnerAccessMode {
   ALL
   SELECTIVE
+}
+
+enum BusinessPartnerOwnershipType {
+  PRIMARY
+  SHARED
+  ADVISORY
+  TEMPORARY
+}
+
+enum BusinessPartnerScopeType {
+  DIRECT
+  INHERITED
+  OVERRIDE
+}
+
+enum BusinessPartnerScopeStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+  EXPIRED
 }
 
 enum PracticeFeatureKey {
@@ -325,6 +385,11 @@ model Tenant {
   refreshTokens                    RefreshToken[]
   auditLogs                        AuditLog[]
   businessPartners                 BusinessPartner[]
+  businessPartnerFranchises        BusinessPartnerFranchise[]
+  businessPartnerCenterScopes      BusinessPartnerCenterScope[]
+  analyticsDailySnapshots          AnalyticsDailySnapshot[]
+  franchiseAnalyticsSnapshots      FranchiseAnalyticsSnapshot[]
+  centerAnalyticsSnapshots         CenterAnalyticsSnapshot[]
   margins                          Margin[]
   settlements                      Settlement[]
   levelRules                       LevelRule[]
@@ -337,6 +402,9 @@ model Tenant {
   abuseFlags                       AbuseFlag[]
   notifications                    Notification[]
   notificationPreferences          NotificationPreference[]
+  operationalNotifications         OperationalNotification[]
+  operationalNotificationTargets   OperationalNotificationTarget[]
+  operationalNotificationRuleStates OperationalNotificationRuleState[]
   financialTransactions            FinancialTransaction[]
   feeInstallments                  StudentFeeInstallment[]
   certificates                     Certificate[]
@@ -423,6 +491,7 @@ model AuthUser {
   resolvedAbuseFlags             AbuseFlag[]                      @relation("AbuseResolvedBy")
   notificationsReceived          Notification[]                   @relation("NotificationRecipient")
   notificationPreferences        NotificationPreference[]         @relation("NotificationPreferences")
+  operationalNotificationTargets OperationalNotificationTarget[]
   superadminProfile              Superadmin?
   promotedProgressions           StudentLevelProgressionHistory[]
   financialTransactions          FinancialTransaction[]
@@ -534,6 +603,116 @@ model NotificationPreference {
   @@unique([tenantId, userId, type])
   @@index([tenantId, userId])
   @@map("notificationpreference")
+}
+
+model OperationalNotification {
+  id                 String                            @id @default(cuid())
+  tenantId           String
+  businessPartnerId  String
+  franchiseId        String?
+  centerId           String?
+  type               OperationalNotificationType
+  category           NotificationCategory             @default(OPERATIONS)
+  severity           OperationalNotificationSeverity
+  status             OperationalNotificationStatus    @default(ACTIVE)
+  title              String
+  message            String                            @db.Text
+  metricKey          String?
+  thresholdValue     Float?
+  observedValue      Float?
+  deltaPercent       Float?
+  sourceKind         OperationalNotificationSourceKind
+  sourceSnapshotDate DateTime?
+  sourceWindowKey    String?
+  fingerprint        String
+  activeFingerprint  String?
+  cooldownUntil      DateTime?
+  firstTriggeredAt   DateTime
+  lastTriggeredAt    DateTime
+  resolvedAt         DateTime?
+  expiresAt          DateTime?
+  occurrenceCount    Int                               @default(1)
+  deepLinkPath       String?
+  metadata           Json?
+  createdAt          DateTime                          @default(now())
+  updatedAt          DateTime                          @updatedAt
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner BusinessPartner   @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+  franchise       FranchiseProfile? @relation(fields: [franchiseId], references: [id], onDelete: SetNull)
+  center          CenterProfile?    @relation(fields: [centerId], references: [id], onDelete: SetNull)
+  targets         OperationalNotificationTarget[]
+
+  @@unique([tenantId, activeFingerprint], map: "opn_t_actfp_uq")
+  @@index([tenantId, businessPartnerId, status, severity], map: "opn_t_bp_stsev_i")
+  @@index([tenantId, franchiseId, status], map: "opn_t_fr_st_i")
+  @@index([tenantId, centerId, status], map: "opn_t_ct_st_i")
+  @@index([tenantId, cooldownUntil], map: "opn_t_cool_i")
+  @@index([tenantId, status, lastTriggeredAt], map: "opn_t_st_last_i")
+  @@index([tenantId, businessPartnerId, fingerprint], map: "opn_t_bp_fp_i")
+  @@index([tenantId, sourceKind, sourceSnapshotDate], map: "opn_t_srcsnap_i")
+  @@map("operationalnotification")
+}
+
+model OperationalNotificationTarget {
+  id                 String   @id @default(cuid())
+  tenantId           String
+  notificationId     String
+  recipientUserId    String
+  recipientRole      Role
+  businessPartnerId  String?
+  franchiseId        String?
+  centerId           String?
+  targetKey          String
+  readAt             DateTime?
+  deliveredAt        DateTime?
+  reopenedAt         DateTime?
+  dismissedAt        DateTime?
+  lastSeenAt         DateTime?
+  actionPathOverride String?
+  metadata           Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  tenant          Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  notification    OperationalNotification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  recipientUser   AuthUser                @relation(fields: [recipientUserId], references: [id], onDelete: Cascade)
+  businessPartner BusinessPartner?        @relation(fields: [businessPartnerId], references: [id], onDelete: SetNull)
+  franchise       FranchiseProfile?       @relation(fields: [franchiseId], references: [id], onDelete: SetNull)
+  center          CenterProfile?          @relation(fields: [centerId], references: [id], onDelete: SetNull)
+
+  @@unique([notificationId, targetKey], map: "opnt_nt_tkey_uq")
+  @@index([tenantId, recipientUserId, readAt, dismissedAt], map: "opnt_t_usr_unrd_i")
+  @@index([tenantId, recipientUserId, deliveredAt], map: "opnt_t_usr_del_i")
+  @@index([tenantId, recipientUserId, createdAt], map: "opnt_t_usr_ct_i")
+  @@index([tenantId, businessPartnerId, recipientRole], map: "opnt_t_bp_role_i")
+  @@index([tenantId, franchiseId, recipientRole], map: "opnt_t_fr_role_i")
+  @@index([tenantId, centerId, recipientRole], map: "opnt_t_ct_role_i")
+  @@map("operationalnotificationtarget")
+}
+
+model OperationalNotificationRuleState {
+  id                String    @id @default(cuid())
+  tenantId          String
+  businessPartnerId String?
+  scopeKey          String
+  ruleKey           String
+  lastWindowKey     String?
+  lastRunAt         DateTime?
+  lastSuccessAt     DateTime?
+  lastFailureAt     DateTime?
+  lastError         String?   @db.Text
+  failureCount      Int       @default(0)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner BusinessPartner? @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, scopeKey, ruleKey], map: "oprs_t_scope_rule_uq")
+  @@index([tenantId, businessPartnerId, updatedAt], map: "oprs_t_bp_upd_i")
+  @@index([tenantId, lastFailureAt, failureCount], map: "oprs_t_fail_i")
+  @@map("operationalnotificationrulestate")
 }
 
 model Superadmin {
@@ -1595,6 +1774,14 @@ model BusinessPartner {
   margins               Margin[]
   settlements           Settlement[]
   franchiseProfiles     FranchiseProfile[]
+  franchiseScopes       BusinessPartnerFranchise[]
+  centerScopes          BusinessPartnerCenterScope[]
+  analyticsSnapshots    AnalyticsDailySnapshot[]
+  franchiseSnapshots    FranchiseAnalyticsSnapshot[]
+  centerSnapshots       CenterAnalyticsSnapshot[]
+  operationalNotifications OperationalNotification[]
+  operationalNotificationTargets OperationalNotificationTarget[]
+  operationalNotificationRuleStates OperationalNotificationRuleState[]
   examCycles            ExamCycle[]
   competitionMappings   CompetitionBusinessPartner[]
   practiceEntitlements  BusinessPartnerPracticeEntitlement[]
@@ -1636,6 +1823,11 @@ model FranchiseProfile {
   authUser        AuthUser          @relation(fields: [authUserId], references: [id], onDelete: Cascade)
   address         FranchiseAddress?
   centerProfiles  CenterProfile[]
+  bpOwnerships    BusinessPartnerFranchise[]
+  operationalNotifications OperationalNotification[]
+  operationalNotificationTargets OperationalNotificationTarget[]
+  analyticsSnapshots FranchiseAnalyticsSnapshot[]
+  centerAnalyticsSnapshots CenterAnalyticsSnapshot[]
 
   @@unique([tenantId, code])
   @@index([tenantId, businessPartnerId, status, isActive])
@@ -1694,6 +1886,10 @@ model CenterProfile {
   franchiseProfile FranchiseProfile @relation(fields: [franchiseProfileId], references: [id], onDelete: Cascade)
   authUser         AuthUser         @relation(fields: [authUserId], references: [id], onDelete: Cascade)
   address          CenterAddress?
+  bpScopes         BusinessPartnerCenterScope[]
+  operationalNotifications OperationalNotification[]
+  operationalNotificationTargets OperationalNotificationTarget[]
+  analyticsSnapshots CenterAnalyticsSnapshot[]
 
   @@unique([tenantId, code])
   @@index([tenantId, franchiseProfileId, status, isActive])
@@ -1722,6 +1918,142 @@ model CenterAddress {
   @@index([city])
   @@index([state])
    @@map("centeraddress")
+}
+
+model BusinessPartnerFranchise {
+  id                String                       @id @default(cuid())
+  tenantId          String
+  businessPartnerId String
+  franchiseId       String
+  ownershipType     BusinessPartnerOwnershipType @default(PRIMARY)
+  status            BusinessPartnerScopeStatus   @default(ACTIVE)
+  activeFrom        DateTime                     @default(now())
+  activeTo          DateTime?
+  notes             String?                      @db.Text
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner   BusinessPartner  @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+  franchise         FranchiseProfile @relation(fields: [franchiseId], references: [id], onDelete: Cascade)
+
+  @@unique([businessPartnerId, franchiseId])
+  @@index([tenantId, businessPartnerId, status])
+  @@index([tenantId, franchiseId, status])
+  @@index([tenantId, businessPartnerId, activeFrom, activeTo])
+  @@map("businesspartnerfranchise")
+}
+
+model BusinessPartnerCenterScope {
+  id                String                    @id @default(cuid())
+  tenantId          String
+  businessPartnerId String
+  centerId          String
+  scopeType         BusinessPartnerScopeType   @default(DIRECT)
+  status            BusinessPartnerScopeStatus @default(ACTIVE)
+  activeFrom        DateTime                  @default(now())
+  activeTo          DateTime?
+  notes             String?                   @db.Text
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner   BusinessPartner @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+  center            CenterProfile   @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@unique([businessPartnerId, centerId])
+  @@index([tenantId, businessPartnerId, status])
+  @@index([tenantId, centerId, status])
+  @@index([tenantId, businessPartnerId, activeFrom, activeTo])
+  @@map("businesspartnercenterscope")
+}
+
+model AnalyticsDailySnapshot {
+  id                   String          @id @default(cuid())
+  tenantId             String
+  businessPartnerId    String
+  snapshotDate         DateTime
+  totalStudents        Int             @default(0)
+  activeStudents       Int             @default(0)
+  totalFranchises      Int             @default(0)
+  activeCenters        Int             @default(0)
+  monthlyCollections   Decimal         @default(0) @db.Decimal(14, 2)
+  pendingFees          Decimal         @default(0) @db.Decimal(14, 2)
+  newAdmissions        Int             @default(0)
+  attendancePercent    Decimal         @default(0) @db.Decimal(8, 2)
+  studentGrowthPercent Decimal         @default(0) @db.Decimal(8, 2)
+  healthScore          Decimal         @default(0) @db.Decimal(8, 2)
+  createdAt            DateTime        @default(now())
+  updatedAt            DateTime        @updatedAt
+
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner   BusinessPartner @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+
+  @@unique([businessPartnerId, snapshotDate])
+  @@index([tenantId, businessPartnerId, snapshotDate], map: "ads_tenant_bp_date_idx")
+  @@index([tenantId, snapshotDate], map: "ads_tenant_date_idx")
+  @@index([tenantId, businessPartnerId, snapshotDate, healthScore], map: "ads_tenant_bp_health_idx")
+  @@map("analyticsdailysnapshot")
+}
+
+model FranchiseAnalyticsSnapshot {
+  id                   String           @id @default(cuid())
+  tenantId             String
+  businessPartnerId    String
+  franchiseId          String
+  snapshotDate         DateTime
+  studentCount         Int              @default(0)
+  activeStudents       Int              @default(0)
+  centerCount          Int              @default(0)
+  teacherCount         Int              @default(0)
+  monthlyCollections   Decimal          @default(0) @db.Decimal(14, 2)
+  pendingFees          Decimal          @default(0) @db.Decimal(14, 2)
+  attendancePercent    Decimal          @default(0) @db.Decimal(8, 2)
+  studentGrowthPercent Decimal          @default(0) @db.Decimal(8, 2)
+  healthScore          Decimal          @default(0) @db.Decimal(8, 2)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner   BusinessPartner  @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+  franchise         FranchiseProfile @relation(fields: [franchiseId], references: [id], onDelete: Cascade)
+
+  @@unique([franchiseId, snapshotDate])
+  @@index([tenantId, businessPartnerId, snapshotDate], map: "fas_tenant_bp_date_idx")
+  @@index([tenantId, franchiseId, snapshotDate], map: "fas_tenant_fr_date_idx")
+  @@index([tenantId, businessPartnerId, snapshotDate, healthScore], map: "fas_tenant_bp_health_idx")
+  @@map("franchiseanalyticssnapshot")
+}
+
+model CenterAnalyticsSnapshot {
+  id                   String           @id @default(cuid())
+  tenantId             String
+  businessPartnerId    String
+  franchiseId          String
+  centerId             String
+  snapshotDate         DateTime
+  activeStudents       Int              @default(0)
+  attendancePercent    Decimal          @default(0) @db.Decimal(8, 2)
+  monthlyRevenue       Decimal          @default(0) @db.Decimal(14, 2)
+  pendingFees          Decimal          @default(0) @db.Decimal(14, 2)
+  teacherCount         Int              @default(0)
+  studentGrowthPercent Decimal          @default(0) @db.Decimal(8, 2)
+  retentionPercent     Decimal          @default(0) @db.Decimal(8, 2)
+  healthScore          Decimal          @default(0) @db.Decimal(8, 2)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  businessPartner   BusinessPartner  @relation(fields: [businessPartnerId], references: [id], onDelete: Cascade)
+  franchise         FranchiseProfile @relation(fields: [franchiseId], references: [id], onDelete: Cascade)
+  center            CenterProfile    @relation(fields: [centerId], references: [id], onDelete: Cascade)
+
+  @@unique([centerId, snapshotDate])
+  @@index([tenantId, businessPartnerId, snapshotDate], map: "cas_tenant_bp_date_idx")
+  @@index([tenantId, franchiseId, snapshotDate], map: "cas_tenant_fr_date_idx")
+  @@index([tenantId, centerId, snapshotDate], map: "cas_tenant_center_date_idx")
+  @@index([tenantId, businessPartnerId, snapshotDate, healthScore], map: "cas_tenant_bp_health_idx")
+  @@map("centeranalyticssnapshot")
 }
 
 model BusinessPartnerAddress {

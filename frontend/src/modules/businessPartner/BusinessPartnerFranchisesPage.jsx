@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -376,7 +377,15 @@ function BusinessPartnerFranchisesPage() {
 
   const columns = [
     { key: "code", header: "Franchise Code", render: (r) => r.code || "" },
-    { key: "name", header: "Franchise Name", render: (r) => r.name || "" },
+    {
+      key: "name",
+      header: "Franchise Name",
+      render: (r) => (
+        <Link className="bpdash-table__link" to={`/bp/franchises/${r.id}`}>
+          {r.name || ""}
+        </Link>
+      )
+    },
     { key: "username", header: "Username", render: (r) => r.authUser?.username || "" },
     { key: "email", header: "Email", render: (r) => r.authUser?.email || "" },
     { key: "phone", header: "Phone", render: (r) => r.phonePrimary || "" },
@@ -390,6 +399,9 @@ function BusinessPartnerFranchisesPage() {
       header: "Actions",
       render: (r) => (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <Link className="button secondary" style={{ width: "auto" }} to={`/bp/franchises/${r.id}`}>
+            Open Dashboard
+          </Link>
           <button
             className="button secondary"
             style={{ width: "auto" }}

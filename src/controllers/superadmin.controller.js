@@ -7,6 +7,7 @@ import { generateUsername } from "../utils/username-generator.js";
 import { parsePagination } from "../utils/pagination.js";
 import { buildHierarchyDashboardSummary } from "../services/hierarchy-dashboard.service.js";
 import { cascadeSetBusinessPartnerActiveState } from "../services/business-partner-cascade.service.js";
+import { resolveBrandingForCenter } from "../services/branding.service.js";
 
 /* ── Normalize helpers (local to superadmin scope) ── */
 function parseISODateOnly(value) {
@@ -30,6 +31,9 @@ function normalizeBoolean(value, fallback = false) {
   if (["false", "0", "no", "n"].includes(n)) return false;
   return fallback;
 }
+
+const CENTER_BRANDING_MODES = new Set(["INHERIT_FRANCHISE", "CUSTOM_CENTER"]);
+const CENTER_COMMERCIALIZATION_TIERS = new Set(["STANDARD_CENTER", "MINI_CENTER", "PREMIUM_CENTER"]);
 
 const listSuperadmins = asyncHandler(async (req, res) => {
   const data = await prisma.superadmin.findMany({
@@ -1227,9 +1231,15 @@ const saGetCenterDetail = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
   const center = await prisma.centerProfile.findFirst({
-    where: { id, tenantId: req.auth.tenantId },
+    where: {
+      tenantId: req.auth.tenantId,
+      OR: [{ id }, { authUserId: id }]
+    },
     include: {
       address: true,
+      brandingApprovedBy: {
+        select: { id: true, username: true, email: true }
+      },
       authUser: {
         select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
       },
@@ -1252,9 +1262,125 @@ const saGetCenterDetail = asyncHandler(async (req, res) => {
       : Promise.resolve(0)
   ]);
 
+  const effectiveBranding = await resolveBrandingForCenter(center.id, req.auth.tenantId);
+
   return res.apiSuccess("Center detail loaded", {
     ...center,
+    effectiveBranding,
     metrics: { studentsCount, teachersCount, batchesCount }
+  });
+});
+
+const saUpdateCenterBranding = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const existing = await prisma.centerProfile.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      OR: [{ id }, { authUserId: id }]
+    },
+    include: {
+      brandingApprovedBy: {
+        select: { id: true, username: true, email: true }
+      }
+    }
+  });
+
+  if (!existing) {
+    return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
+  }
+
+  const brandingMode = req.body.brandingMode
+    ? String(req.body.brandingMode).trim().toUpperCase()
+    : existing.brandingMode;
+  const commercializationTier = req.body.commercializationTier
+    ? String(req.body.commercializationTier).trim().toUpperCase()
+    : existing.commercializationTier;
+
+  if (!CENTER_BRANDING_MODES.has(brandingMode)) {
+    return res.apiError(400, "Invalid brandingMode", "VALIDATION_ERROR");
+  }
+  if (!CENTER_COMMERCIALIZATION_TIERS.has(commercializationTier)) {
+    return res.apiError(400, "Invalid commercializationTier", "VALIDATION_ERROR");
+  }
+
+  if (existing.brandingLocked && req.body.brandingLocked === undefined) {
+    return res.apiError(409, "Branding is locked for this center", "CENTER_BRANDING_LOCKED");
+  }
+
+  const nextCustomLogoUrl = req.body.customLogoUrl !== undefined
+    ? normalizeString(req.body.customLogoUrl)
+    : existing.customLogoUrl;
+  const nextCustomBrandName = req.body.customBrandName !== undefined
+    ? normalizeString(req.body.customBrandName)
+    : existing.customBrandName;
+  const nextBrandingNotes = req.body.brandingNotes !== undefined
+    ? normalizeString(req.body.brandingNotes)
+    : existing.brandingNotes;
+  const nextBrandingActive = req.body.brandingActive !== undefined
+    ? normalizeBoolean(req.body.brandingActive, existing.brandingActive)
+    : existing.brandingActive;
+  const nextBrandingLocked = req.body.brandingLocked !== undefined
+    ? normalizeBoolean(req.body.brandingLocked, existing.brandingLocked)
+    : existing.brandingLocked;
+
+  const updated = await prisma.centerProfile.update({
+    where: { id: existing.id },
+    data: {
+      brandingMode,
+      inheritBranding: brandingMode !== "CUSTOM_CENTER",
+      customLogoUrl: nextCustomLogoUrl,
+      customBrandName: nextCustomBrandName,
+      brandingApprovedAt: new Date(),
+      brandingApprovedById: req.auth.userId,
+      brandingNotes: nextBrandingNotes,
+      brandingActive: nextBrandingActive,
+      brandingLocked: nextBrandingLocked,
+      commercializationTier,
+      logoUrl: brandingMode === "CUSTOM_CENTER" ? nextCustomLogoUrl : existing.logoUrl
+    },
+    include: {
+      brandingApprovedBy: {
+        select: { id: true, username: true, email: true }
+      },
+      franchiseProfile: { select: { id: true, code: true, name: true } },
+      authUser: {
+        select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
+      },
+      address: true
+    }
+  });
+
+  await recordAudit({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    role: req.auth.role,
+    action: "SA_UPDATE_CENTER_BRANDING",
+    entityType: "CENTER_PROFILE",
+    entityId: existing.id,
+    metadata: {
+      before: {
+        brandingMode: existing.brandingMode,
+        customBrandName: existing.customBrandName,
+        customLogoUrl: existing.customLogoUrl,
+        brandingActive: existing.brandingActive,
+        brandingLocked: existing.brandingLocked,
+        commercializationTier: existing.commercializationTier
+      },
+      after: {
+        brandingMode: updated.brandingMode,
+        customBrandName: updated.customBrandName,
+        customLogoUrl: updated.customLogoUrl,
+        brandingActive: updated.brandingActive,
+        brandingLocked: updated.brandingLocked,
+        commercializationTier: updated.commercializationTier
+      }
+    }
+  });
+
+  res.locals.entityId = updated.id;
+  return res.apiSuccess("Center branding updated", {
+    ...updated,
+    effectiveBranding: await resolveBrandingForCenter(updated.id, req.auth.tenantId)
   });
 });
 
@@ -1273,5 +1399,6 @@ export {
   saGetFranchiseDetail,
   saCreateCenter,
   saSetCenterStatus,
-  saGetCenterDetail
+  saGetCenterDetail,
+  saUpdateCenterBranding
 };

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../lib/prisma-compat.js";
 
 function createHttpError(statusCode, message, errorCode) {
   const error = new Error(message);

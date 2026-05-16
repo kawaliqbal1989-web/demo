@@ -4,6 +4,28 @@ import { listStudentCertificates, getStudentMe } from "../../services/studentPor
 import { getMyBranding } from "../../services/brandingService";
 import { generateCertificatePdf, preloadTemplateImages, generateQrDataUrl } from "../../utils/pdfExport";
 
+async function fetchLatestCertificateTemplate() {
+  const brandingRes = await getMyBranding({ fresh: true, _skipGlobalLoading: true, _suppressErrorLogging: true });
+  const certTemplate = brandingRes?.data?.certificateTemplate;
+  if (!certTemplate) {
+    return null;
+  }
+  return preloadTemplateImages(certTemplate);
+}
+
+async function resolveCertificateTemplate(cert, fallbackTemplate) {
+  const snapshotTemplate = cert?.certificateTemplate || cert?.brandingSnapshot?.certificateTemplate || null;
+  if (snapshotTemplate) {
+    return preloadTemplateImages(snapshotTemplate).catch(() => snapshotTemplate);
+  }
+
+  if (fallbackTemplate) {
+    return fallbackTemplate;
+  }
+
+  return fetchLatestCertificateTemplate().catch(() => null);
+}
+
 function CertificateCard({ cert, studentName, template, onPrint, onDownloadPdf }) {
   const isRevoked = cert.status === "REVOKED";
   const certTitle = template?.title || "Certificate of Achievement";
@@ -134,21 +156,53 @@ function StudentCertificatesPage() {
   const printRef = useRef(null);
 
   useEffect(() => {
-    Promise.all([listStudentCertificates(), getStudentMe(), getMyBranding()])
-      .then(([certsRes, meRes, brandingRes]) => {
-        setCerts(Array.isArray(certsRes.data?.data) ? certsRes.data.data : []);
+    let cancelled = false;
+
+    async function loadCertificates() {
+      try {
+        const [certsRes, meRes, brandingRes] = await Promise.all([listStudentCertificates(), getStudentMe(), getMyBranding()]);
         const me = meRes.data?.data;
-        setStudentName(me?.fullName || "Student");
+        const certItems = Array.isArray(certsRes.data?.data) ? certsRes.data.data : [];
         const certTemplate = brandingRes?.data?.certificateTemplate;
-        if (certTemplate) {
-          preloadTemplateImages(certTemplate).then(setTemplate).catch(() => setTemplate(null));
+        const fallbackTemplate = certTemplate
+          ? await preloadTemplateImages(certTemplate).catch(() => certTemplate)
+          : null;
+
+        const hydratedCertificates = await Promise.all(
+          certItems.map(async (cert) => ({
+            ...cert,
+            _template: await resolveCertificateTemplate(cert, fallbackTemplate)
+          }))
+        );
+
+        if (cancelled) {
+          return;
         }
-      })
-      .catch(() => setError("Failed to load certificates."))
-      .finally(() => setLoading(false));
+
+        setCerts(hydratedCertificates);
+        setStudentName(me?.fullName || "Student");
+        setTemplate(fallbackTemplate);
+      } catch {
+        if (!cancelled) {
+          setError("Failed to load certificates.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadCertificates();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const handlePrint = (cert) => {
+  const handlePrint = async (cert) => {
+    const activeTemplate = await resolveCertificateTemplate(cert, template);
+
     const printWindow = window.open("", "_blank", "width=900,height=650");
     if (!printWindow) return;
 
@@ -160,14 +214,14 @@ function StudentCertificatesPage() {
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
 
-    const certTitle = esc(template?.title || "Certificate of Achievement");
-    const bgImg = template?._backgroundImageData || "";
-    const bpLogo = template?._bpLogoData || "";
-    const affLogo = template?._affiliationLogoData || "";
-    const sigImg = template?._signatureImageData || "";
-    const stampImg = template?._stampImageData || "";
-    const sigName = esc(template?.signatoryName || "");
-    const sigDesignation = esc(template?.signatoryDesignation || "Director");
+    const certTitle = esc(activeTemplate?.title || "Certificate of Achievement");
+    const bgImg = activeTemplate?._backgroundImageData || "";
+    const bpLogo = activeTemplate?._bpLogoData || "";
+    const affLogo = activeTemplate?._affiliationLogoData || "";
+    const sigImg = activeTemplate?._signatureImageData || "";
+    const stampImg = activeTemplate?._stampImageData || "";
+    const sigName = esc(activeTemplate?.signatoryName || "");
+    const sigDesignation = esc(activeTemplate?.signatoryDesignation || "Director");
     const escapedStudentName = esc(studentName);
     const escapedLevelName = esc(cert.levelName);
     const escapedCertNumber = esc(cert.certificateNumber);
@@ -257,6 +311,8 @@ function StudentCertificatesPage() {
   };
 
   const handleDownloadPdf = async (cert) => {
+    const activeTemplate = await resolveCertificateTemplate(cert, template);
+
     let qrDataUrl = null;
     if (cert.verificationToken) {
       const verifyUrl = `${window.location.origin}/verify/${cert.verificationToken}`;
@@ -267,7 +323,7 @@ function StudentCertificatesPage() {
       levelName: cert.levelName,
       certificateNumber: cert.certificateNumber,
       issuedAt: cert.issuedAt,
-      template,
+      template: activeTemplate,
       qrDataUrl
     });
     doc.save(`Certificate_${cert.certificateNumber}.pdf`);
@@ -292,7 +348,7 @@ function StudentCertificatesPage() {
       {issued.length ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
           {issued.map((c) => (
-            <CertificateCard key={c.id} cert={c} studentName={studentName} template={template} onPrint={handlePrint} onDownloadPdf={handleDownloadPdf} />
+            <CertificateCard key={c.id} cert={c} studentName={studentName} template={c._template || template} onPrint={handlePrint} onDownloadPdf={handleDownloadPdf} />
           ))}
         </div>
       ) : null}
@@ -302,7 +358,7 @@ function StudentCertificatesPage() {
           <div style={{ fontWeight: 700, color: "var(--color-text-muted)", fontSize: 14 }}>Revoked Certificates</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
             {revoked.map((c) => (
-              <CertificateCard key={c.id} cert={c} studentName={studentName} template={template} onPrint={handlePrint} onDownloadPdf={handleDownloadPdf} />
+              <CertificateCard key={c.id} cert={c} studentName={studentName} template={c._template || template} onPrint={handlePrint} onDownloadPdf={handleDownloadPdf} />
             ))}
           </div>
         </div>

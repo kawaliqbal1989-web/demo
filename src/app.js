@@ -80,7 +80,7 @@ app.use(
     // Certificate assets must be publicly accessible (used in print flows via <img> tags).
     // Branding logos are also public because image tags cannot attach Authorization headers.
     // All other upload subdirectories require a valid JWT.
-    const publicPrefixes = ["/certificate-", "/business-partner-logos/", "/teacher-photos/", "/student-photos/"];
+    const publicPrefixes = ["/certificate-", "/business-partner-logos/", "/logos/", "/teacher-photos/", "/student-photos/"];
     const isPublic = publicPrefixes.some((p) => req.path.startsWith(p));
     if (isPublic) return next();
 

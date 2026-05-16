@@ -272,6 +272,10 @@ const createFranchise = asyncHandler(async (req, res) => {
 
 const updateFranchise = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  if (req.body.inheritBranding !== undefined || req.body.logoUrl !== undefined) {
+    return res.apiError(403, "Franchise branding can only be changed by superadmin", "FORBIDDEN");
+  }
+
   const {
     name,
     displayName,
@@ -469,39 +473,7 @@ const deleteFranchise = asyncHandler(async (req, res) => {
 });
 
 const uploadFranchiseLogo = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const existing = await prisma.franchiseProfile.findFirst({
-    where: {
-      tenantId: req.auth.tenantId,
-      businessPartnerId: req.bpScope.businessPartner.id,
-      authUserId: id
-    },
-    select: { id: true }
-  });
-
-  if (!existing) {
-    return res.apiError(404, "Franchise not found", "FRANCHISE_NOT_FOUND");
-  }
-
-  const file = req.file;
-  if (!file) {
-    return res.apiError(400, "file is required", "FILE_REQUIRED");
-  }
-
-  const url = buildUploadUrl(req, `/uploads/franchise-logos/${file.filename}`);
-
-  const updated = await prisma.franchiseProfile.update({
-    where: { id: existing.id },
-    data: {
-      logoPath: file.filename,
-      logoUrl: url,
-      inheritBranding: false
-    }
-  });
-
-  res.locals.entityId = updated.id;
-  return res.apiSuccess("Franchise logo updated", updated);
+  return res.apiError(403, "Franchise branding can only be changed by superadmin", "FORBIDDEN");
 });
 
 export { listFranchises, createFranchise, updateFranchise, deleteFranchise, uploadFranchiseLogo };

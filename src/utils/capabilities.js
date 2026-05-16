@@ -196,6 +196,41 @@ function getRoleCapabilities(role) {
     };
   }
 
+  if (role === "PARENT") {
+    return {
+      canViewDashboard: true,
+      canViewReports: false,
+      canViewHierarchy: false,
+      canViewCatalog: false,
+      canManageTeachers: false,
+      canManageStudents: false,
+      canEnrollStudents: false,
+      canManageBatches: false,
+      canManageAttendance: false,
+      canViewAssignedStudents: false,
+      canWriteNotes: false,
+      canViewMyCourses: false,
+      canViewMyWorksheets: false,
+      canAttemptWorksheets: false,
+      canSeeResults: true,
+      canViewStudentsOverview: false,
+      canManagePartnerProfile: false,
+      canCreateBusinessPartner: false,
+      canManageBusinessPartners: false,
+      canCreateFranchise: false,
+      canCreateCenter: false,
+      canManageCourses: false,
+      canManageExams: false,
+      canManageCompetitions: false,
+      canManageCompetitionRequests: false,
+      canViewPartnerCourses: false,
+      canViewParentDashboard: true,
+      canViewChildAttendance: true,
+      canViewChildEngagement: true,
+      canViewChildAchievements: true
+    };
+  }
+
   return {};
 }
 

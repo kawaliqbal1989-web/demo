@@ -140,11 +140,45 @@ async function saGetCenterDetail(id) {
   return response.data;
 }
 
+async function saUpdateCenterBranding(id, data) {
+  const response = await apiClient.patch(`/superadmin/centers/${id}/branding`, data);
+  return response.data;
+}
+
+async function saUploadCenterLogo(id, file, { onProgress } = {}) {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await apiClient.post(`/superadmin/centers/${id}/logo`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data"
+    },
+    _skipGlobalLoading: true,
+    onUploadProgress: (event) => {
+      if (!event?.total || typeof onProgress !== "function") {
+        return;
+      }
+
+      onProgress(Math.min(100, Math.max(0, Math.round((event.loaded / event.total) * 100))));
+    }
+  });
+
+  return response.data;
+}
+
+async function saDeleteCenterLogo(id) {
+  const response = await apiClient.delete(`/superadmin/centers/${id}/logo`, {
+    _skipGlobalLoading: true
+  });
+  return response.data;
+}
+
 export {
   getKpis, recordDashboardAction, listUsersByRole, updateUserRole, createSuperadminUser,
   listSuperadminCertificates, revokeSuperadminCertificate, exportSuperadminCertificatesCsv,
   getSuperadminBpCertificateTemplate, updateSuperadminBpCertificateTemplate,
   getHierarchyTree, getHierarchyDashboard, getSystemHealth,
   saCreateFranchise, saSetFranchiseStatus, saGetFranchiseDetail,
-  saCreateCenter, saSetCenterStatus, saGetCenterDetail
+  saCreateCenter, saSetCenterStatus, saGetCenterDetail, saUpdateCenterBranding,
+  saUploadCenterLogo, saDeleteCenterLogo
 };

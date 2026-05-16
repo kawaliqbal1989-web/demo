@@ -1,7 +1,20 @@
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
+import { versionAssetUrl } from "../utils/request-url.js";
+
+function readCertificateBrandingSnapshot(cert) {
+  return cert?.brandingSnapshot || cert?.metadata?.brandingSnapshot || null;
+}
+
+function formatStudentName(student) {
+  return [student?.firstName, student?.lastName]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .join(" ") || null;
+}
 
 const verifyCertificate = asyncHandler(async (req, res) => {
+  res.set("Cache-Control", "no-store");
   const { token } = req.params;
 
   if (!token || typeof token !== "string" || token.length > 100) {
@@ -15,8 +28,10 @@ const verifyCertificate = asyncHandler(async (req, res) => {
       status: true,
       issuedAt: true,
       revokedAt: true,
+      brandingSnapshot: true,
+      metadata: true,
       student: {
-        select: { fullName: true }
+        select: { firstName: true, lastName: true }
       },
       level: {
         select: { name: true }
@@ -28,7 +43,8 @@ const verifyCertificate = asyncHandler(async (req, res) => {
             take: 1,
             select: {
               name: true,
-              logoUrl: true
+              logoUrl: true,
+              updatedAt: true
             }
           }
         }
@@ -40,15 +56,21 @@ const verifyCertificate = asyncHandler(async (req, res) => {
     return res.apiError(404, "Certificate not found", "CERTIFICATE_NOT_FOUND");
   }
 
+  const brandingSnapshot = readCertificateBrandingSnapshot(cert);
+
   return res.apiSuccess("Certificate verified", {
     certificateNumber: cert.certificateNumber,
     status: cert.status,
-    studentName: cert.student.fullName,
+    studentName: formatStudentName(cert.student),
     levelName: cert.level.name,
     issuedAt: cert.issuedAt,
     revokedAt: cert.revokedAt,
-    organizationName: cert.tenant?.businessPartners?.[0]?.name || cert.tenant?.name || null,
-    organizationLogoUrl: cert.tenant?.businessPartners?.[0]?.logoUrl || null
+    organizationName: brandingSnapshot?.organizationName || cert.tenant?.businessPartners?.[0]?.name || cert.tenant?.name || null,
+    organizationLogoUrl: brandingSnapshot?.organizationLogoUrl || versionAssetUrl(
+      cert.tenant?.businessPartners?.[0]?.logoUrl,
+      cert.tenant?.businessPartners?.[0]?.updatedAt
+    ) || null,
+    brandingSnapshot
   });
 });
 

@@ -128,8 +128,43 @@ async function updatePartnerProfile(data) {
   return response.data;
 }
 
-async function getCertificateTemplate() {
-  const response = await apiClient.get("/partner/certificate-template");
+async function getPartnerProfile(config = {}) {
+  const brandingResponse = await apiClient
+    .get("/branding/me", { ...config, _suppressErrorLogging: true })
+    .catch(() => null);
+
+  const brandingData = brandingResponse?.data;
+  const brandingPartner = brandingData?.data?.businessPartner || brandingData?.businessPartner || null;
+  if (brandingPartner) {
+    return {
+      success: true,
+      message: "Partner profile fetched",
+      data: brandingPartner
+    };
+  }
+
+  try {
+    const response = await apiClient.get("/partner/profile", config);
+    return response.data;
+  } catch (error) {
+    const status = error?.response?.status;
+    const code = error?.response?.data?.error_code;
+    const shouldFallback =
+      status === 500 ||
+      (status === 404 && (code === "BP_NOT_FOUND" || code === "BUSINESS_PARTNER_NOT_FOUND"));
+
+    if (!shouldFallback) {
+      throw error;
+    }
+
+    throw error;
+  }
+}
+
+async function getCertificateTemplate(options = {}) {
+  const response = await apiClient.get("/partner/certificate-template", {
+    params: options.fresh ? { _ts: Date.now() } : undefined
+  });
   return response.data;
 }
 
@@ -167,6 +202,7 @@ export {
   forwardPartnerCompetitionRequest,
   listPartnerCourses,
   listPartnerHierarchy,
+  getPartnerProfile,
   updatePartnerProfile,
   getCertificateTemplate,
   upsertCertificateTemplate,

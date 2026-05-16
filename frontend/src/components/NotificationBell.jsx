@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   listNotifications,
@@ -9,30 +9,32 @@ import {
 import { useAuth } from "../hooks/useAuth";
 import { getFriendlyErrorMessage } from "../utils/apiErrors";
 import { isTokenExpiringSoon } from "../utils/jwt";
-
-function timeAgo(dateStr) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString();
-}
+import {
+  getOperationalNotifications,
+  getOperationalUnreadCounts,
+  markAllOperationalNotificationsRead,
+  markOperationalNotificationRead
+} from "../modules/common/services/operationalNotificationService";
+import {
+  getOperationalLocationLabel,
+  resolveOperationalDeepLink,
+  timeAgo
+} from "../modules/common/operationalNotifications.shared";
 
 function NotificationBell() {
-  const { accessToken, isAuthenticated, mustChangePassword, refreshSession, authBootstrapPending } = useAuth();
+  const navigate = useNavigate();
+  const { accessToken, isAuthenticated, mustChangePassword, refreshSession, authBootstrapPending, role } = useAuth();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
+  const [operationalItems, setOperationalItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [hasCriticalUnread, setHasCriticalUnread] = useState(false);
+  const [hasOperationalUnread, setHasOperationalUnread] = useState(false);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
   const unauthorizedRef = useRef(false);
   const refreshInFlightRef = useRef(null);
+  const canUseOperationalNotifications = role === "BP";
 
   const fetchNotifications = useCallback(async () => {
     if (authBootstrapPending || !isAuthenticated || mustChangePassword || unauthorizedRef.current) {
@@ -47,16 +49,28 @@ function NotificationBell() {
       }
 
       setLoading(true);
-      const res = await listNotifications({ limit: 10 });
-      const data = res?.data?.data;
+      const notificationsRes = await listNotifications({ limit: 10 });
+      const [operationalUnreadCounts, operationalList] = canUseOperationalNotifications
+        ? await Promise.all([
+            getOperationalUnreadCounts(),
+            getOperationalNotifications({ limit: 5, unread: true })
+          ])
+        : [{ totalUnread: 0, criticalUnread: 0, highUnread: 0 }, { items: [] }];
+      const data = notificationsRes?.data?.data;
       const list = Array.isArray(data?.items) ? data.items : Array.isArray(data) ? data : [];
-      setItems(list);
-      const count =
+      const genericUnreadCount =
         typeof data?.unreadCount === "number"
           ? data.unreadCount
           : list.filter((n) => !n.isRead).length;
-      setUnreadCount(count);
-      const hasCritical = list.some(n => !n.isRead && (n.priority === "CRITICAL" || n.priority === "HIGH"));
+
+      setItems(list.map((item) => ({ ...item, notificationKind: "generic", timestamp: item.createdAt || null })));
+      setOperationalItems(operationalList.items || []);
+      setUnreadCount(genericUnreadCount + (operationalUnreadCounts.totalUnread || 0));
+      setHasOperationalUnread(canUseOperationalNotifications && (operationalUnreadCounts.totalUnread || 0) > 0);
+      const hasCritical =
+        list.some((n) => !n.isRead && (n.priority === "CRITICAL" || n.priority === "HIGH"))
+        || (canUseOperationalNotifications && (operationalUnreadCounts.criticalUnread || 0) > 0)
+        || (canUseOperationalNotifications && (operationalUnreadCounts.highUnread || 0) > 0);
       setHasCriticalUnread(hasCritical);
     } catch (error) {
       refreshInFlightRef.current = null;
@@ -64,13 +78,15 @@ function NotificationBell() {
         unauthorizedRef.current = true;
         setOpen(false);
         setItems([]);
+        setOperationalItems([]);
         setUnreadCount(0);
+        setHasOperationalUnread(false);
       }
       // silent
     } finally {
       setLoading(false);
     }
-  }, [accessToken, authBootstrapPending, isAuthenticated, mustChangePassword, refreshSession]);
+  }, [accessToken, authBootstrapPending, canUseOperationalNotifications, isAuthenticated, mustChangePassword, refreshSession]);
 
   useEffect(() => {
     if (!authBootstrapPending && isAuthenticated && !mustChangePassword) {
@@ -80,8 +96,10 @@ function NotificationBell() {
 
     setOpen(false);
     setItems([]);
+    setOperationalItems([]);
     setUnreadCount(0);
     setHasCriticalUnread(false);
+    setHasOperationalUnread(false);
     setLoading(false);
   }, [authBootstrapPending, isAuthenticated, mustChangePassword]);
 
@@ -132,20 +150,51 @@ function NotificationBell() {
     }
   };
 
+  const handleOperationalClick = async (item) => {
+    try {
+      if (item.isUnread) {
+        await markOperationalNotificationRead(item.notificationId);
+        setOperationalItems((prev) =>
+          prev.map((currentItem) =>
+            currentItem.notificationId === item.notificationId
+              ? { ...currentItem, isUnread: false, readAt: new Date().toISOString() }
+              : currentItem
+          )
+        );
+        setUnreadCount((count) => Math.max(0, count - 1));
+      }
+
+      navigate(resolveOperationalDeepLink(item));
+      setOpen(false);
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || "Failed to open operational notification.");
+    }
+  };
+
   const handleMarkAllRead = async () => {
     try {
-      await markAllNotificationsRead();
+      await Promise.all([
+        markAllNotificationsRead(),
+        canUseOperationalNotifications ? markAllOperationalNotificationsRead() : Promise.resolve()
+      ]);
       setItems((prev) => prev.map((n) => ({ ...n, isRead: true })));
+      setOperationalItems((prev) => prev.map((item) => ({ ...item, isUnread: false, readAt: new Date().toISOString() })));
       setUnreadCount(0);
+      setHasCriticalUnread(false);
+      setHasOperationalUnread(false);
     } catch (err) {
       toast.error(getFriendlyErrorMessage(err) || "Failed to mark all notifications as read.");
     }
   };
 
+  const combinedItems = [...operationalItems, ...items]
+    .sort((left, right) => new Date(right.timestamp || right.createdAt || 0).getTime() - new Date(left.timestamp || left.createdAt || 0).getTime())
+    .slice(0, 10);
+
   return (
     <div className="notif-bell-wrap" ref={dropdownRef}>
       <button
-        className="notif-bell-btn"
+        className={`notif-bell-btn ${hasOperationalUnread ? "notif-bell-btn--operational" : ""}`}
         onClick={handleToggle}
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
         title="Notifications"
@@ -160,6 +209,7 @@ function NotificationBell() {
             {unreadCount > 99 ? "99+" : unreadCount}
           </span>
         )}
+        {hasOperationalUnread && <span className="notif-bell-operational-indicator" aria-hidden="true" />}
       </button>
 
       {open && (
@@ -177,36 +227,54 @@ function NotificationBell() {
           </div>
 
           <div className="notif-dropdown__list">
-            {loading && items.length === 0 && (
+            {loading && combinedItems.length === 0 && (
               <div className="notif-empty">Loading...</div>
             )}
-            {!loading && items.length === 0 && (
+            {!loading && combinedItems.length === 0 && (
               <div className="notif-empty">No notifications</div>
             )}
-            {items.map((n) => (
-              <div
-                key={n.id}
-                className={`notif-item ${n.isRead ? "" : "notif-item--unread"} ${n.priority === "CRITICAL" ? "notif-item--critical" : n.priority === "HIGH" ? "notif-item--high" : ""}`}
-                onClick={() => !n.isRead && handleMarkRead(n.id)}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(e) => e.key === "Enter" && !n.isRead && handleMarkRead(n.id)}
-              >
-                <div className="notif-item__top">
-                  <div className="notif-item__title">{n.title || n.type}</div>
-                  {n.priority && n.priority !== "NORMAL" && (
-                    <span className={`notif-priority-dot notif-priority-dot--${n.priority.toLowerCase()}`} />
-                  )}
+            {combinedItems.map((item) => {
+              const isOperational = item.notificationKind === "operational";
+              const isUnread = isOperational ? item.isUnread : !item.isRead;
+              const severity = isOperational ? item.severity : item.priority;
+              const locationLabel = isOperational ? getOperationalLocationLabel(item) : null;
+
+              return (
+                <div
+                  key={`${item.notificationKind}:${item.notificationId || item.id}`}
+                  className={`notif-item ${isUnread ? "notif-item--unread" : ""} ${severity === "CRITICAL" ? "notif-item--critical" : severity === "HIGH" ? "notif-item--high" : ""}`}
+                  onClick={() => (isOperational ? handleOperationalClick(item) : !item.isRead && handleMarkRead(item.id))}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") {
+                      return;
+                    }
+                    if (isOperational) {
+                      handleOperationalClick(item);
+                    } else if (!item.isRead) {
+                      handleMarkRead(item.id);
+                    }
+                  }}
+                >
+                  <div className="notif-item__top">
+                    <div className="notif-item__title">{item.title || item.type}</div>
+                    {severity && severity !== "NORMAL" && (
+                      <span className={`notif-priority-dot notif-priority-dot--${severity.toLowerCase()}`} />
+                    )}
+                    {isOperational && <span className="notif-item__kind">Ops</span>}
+                  </div>
+                  <div className="notif-item__msg">{item.message}</div>
+                  <div className="notif-item__meta">
+                    <span className="notif-item__time">{timeAgo(item.timestamp || item.createdAt)}</span>
+                    {item.category && item.category !== "SYSTEM" && (
+                      <span className="notif-item__cat">{item.category.toLowerCase()}</span>
+                    )}
+                    {locationLabel && <span className="notif-item__cat">{locationLabel}</span>}
+                  </div>
                 </div>
-                <div className="notif-item__msg">{n.message}</div>
-                <div className="notif-item__meta">
-                  <span className="notif-item__time">{timeAgo(n.createdAt)}</span>
-                  {n.category && n.category !== "SYSTEM" && (
-                    <span className="notif-item__cat">{n.category.toLowerCase()}</span>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <Link

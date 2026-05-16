@@ -6,6 +6,8 @@ import crypto from "crypto";
 import { transitionForward } from "../services/competition-workflow.service.js";
 import { buildHierarchyDashboardSummary } from "../services/hierarchy-dashboard.service.js";
 import { logger } from "../lib/logger.js";
+import { buildCertificateBrandingSnapshotForStudent } from "../services/branding.service.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 function parseStatus(status) {
   if (!status) {
@@ -49,6 +51,24 @@ async function safeCertificateCount(args) {
     }
     throw error;
   }
+}
+
+function mergeCertificateMetadata(metadata, brandingSnapshot) {
+  if (!brandingSnapshot) {
+    return metadata || null;
+  }
+
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    return {
+      ...metadata,
+      brandingSnapshot
+    };
+  }
+
+  return {
+    brandingSnapshot,
+    ...(metadata === undefined || metadata === null ? {} : { legacyMetadata: metadata })
+  };
 }
 
 const getPartnerDashboard = asyncHandler(async (req, res) => {
@@ -482,6 +502,11 @@ const issuePartnerCertificate = asyncHandler(async (req, res) => {
     return res.apiError(404, "Level not found", "LEVEL_NOT_FOUND");
   }
 
+  const brandingSnapshot = await buildCertificateBrandingSnapshotForStudent(
+    student.id,
+    req.auth.tenantId
+  );
+
   const created = await prisma.certificate.create({
     data: {
       tenantId: req.auth.tenantId,
@@ -491,7 +516,8 @@ const issuePartnerCertificate = asyncHandler(async (req, res) => {
       levelId: level.id,
       issuedByUserId: req.auth.userId,
       reason: reason ? String(reason).trim() : null,
-      metadata: metadata || null,
+      brandingSnapshot,
+      metadata: mergeCertificateMetadata(metadata, brandingSnapshot),
       verificationToken: crypto.randomUUID()
     }
   });
@@ -545,6 +571,14 @@ const bulkIssuePartnerCertificates = asyncHandler(async (req, res) => {
 
   const toIssue = [...validStudentIds].filter((id) => !alreadyIssuedIds.has(id));
 
+  const brandingSnapshots = new Map();
+  await Promise.all(
+    toIssue.map(async (studentId) => {
+      const snapshot = await buildCertificateBrandingSnapshotForStudent(studentId, tenantId);
+      brandingSnapshots.set(studentId, snapshot);
+    })
+  );
+
   const created = await prisma.$transaction(
     toIssue.map((studentId) =>
       prisma.certificate.create({
@@ -556,6 +590,8 @@ const bulkIssuePartnerCertificates = asyncHandler(async (req, res) => {
           levelId: level.id,
           issuedByUserId: req.auth.userId,
           reason: reason ? String(reason).trim() : null,
+          brandingSnapshot: brandingSnapshots.get(studentId) || null,
+          metadata: mergeCertificateMetadata(null, brandingSnapshots.get(studentId) || null),
           verificationToken: crypto.randomUUID()
         }
       })
@@ -767,18 +803,38 @@ const exportPartnerCertificatesCsv = asyncHandler(async (req, res) => {
 });
 
 const getPartnerProfile = asyncHandler(async (req, res) => {
-  const partner = await prisma.businessPartner.findFirst({
-    where: {
-      id: req.bpScope.businessPartner.id,
-      tenantId: req.auth.tenantId
-    },
-    include: {
-      address: true,
-      operationalStates: true,
-      operationalDistricts: true,
-      operationalCities: true
+  const where = {
+    id: req.bpScope.businessPartner.id,
+    tenantId: req.auth.tenantId
+  };
+
+  let partner;
+  try {
+    partner = await prisma.businessPartner.findFirst({
+      where,
+      include: {
+        address: true,
+        operationalStates: true,
+        operationalDistricts: true,
+        operationalCities: true
+      }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, [
+      "businesspartneraddress",
+      "partneroperationalstate",
+      "partneroperationaldistrict",
+      "partneroperationalcity",
+      "operationalstates",
+      "operationaldistricts",
+      "operationalcities",
+      "address"
+    ])) {
+      throw error;
     }
-  });
+
+    partner = await prisma.businessPartner.findFirst({ where });
+  }
 
   if (!partner) {
     return res.apiError(404, "Business partner not found", "BP_NOT_FOUND");

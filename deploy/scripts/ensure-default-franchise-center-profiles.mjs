@@ -36,7 +36,7 @@ async function main() {
     where: {
       tenantId_code: {
         tenantId: tenant.id,
-        code: "FR-001"
+        code: "FR001"
       }
     },
     update: {
@@ -49,7 +49,7 @@ async function main() {
       tenantId: tenant.id,
       businessPartnerId: bp.id,
       authUserId: franchiseAuth.id,
-      code: "FR-001",
+      code: "FR001",
       name: "Default Franchise",
       displayName: "Default Franchise",
       status: "ACTIVE",
@@ -63,7 +63,7 @@ async function main() {
     update: {
       tenantId: tenant.id,
       franchiseProfileId: franchiseProfile.id,
-      code: "CE-001",
+      code: "CE001",
       name: "Default Center",
       status: "ACTIVE",
       isActive: true
@@ -72,7 +72,7 @@ async function main() {
       tenantId: tenant.id,
       franchiseProfileId: franchiseProfile.id,
       authUserId: centerAuth.id,
-      code: "CE-001",
+      code: "CE001",
       name: "Default Center",
       displayName: "Default Center",
       status: "ACTIVE",

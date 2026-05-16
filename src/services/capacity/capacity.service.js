@@ -38,6 +38,21 @@ function isCapacityStorageMissingError(error) {
   );
 }
 
+function isSchemaDriftPrismaError(error) {
+  const code = String(error?.code || "");
+  if (!["P2021", "P2022", "P2010"].includes(code)) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("does not exist") ||
+    message.includes("unknown column") ||
+    message.includes("no such table") ||
+    message.includes("unknown table")
+  );
+}
+
 function isCapacityEnforcementError(error) {
   return ["TEACHER_CAPACITY_EXCEEDED", "STUDENT_CAPACITY_EXCEEDED"].includes(String(error?.errorCode || ""));
 }
@@ -271,17 +286,62 @@ async function assertCenterCapacityAvailable({
 
 async function getCenterCapacity({ tenantId, hierarchyNodeId, auditLimit }) {
   const tx = prisma;
-  const center = await resolveCenterByHierarchyNodeId({ tx, tenantId, hierarchyNodeId });
-  if (!center) {
-    throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
-  }
+  try {
+    const center = await resolveCenterByHierarchyNodeId({ tx, tenantId, hierarchyNodeId });
+    if (!center) {
+      throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+    }
 
-  return buildCenterSnapshot({
-    tx,
-    tenantId,
-    center,
-    auditLimit: normalizeAuditLimit(auditLimit)
-  });
+    return buildCenterSnapshot({
+      tx,
+      tenantId,
+      center,
+      auditLimit: normalizeAuditLimit(auditLimit)
+    });
+  } catch (error) {
+    if (!isSchemaDriftPrismaError(error)) {
+      throw error;
+    }
+
+    const fallbackCenter = await tx.centerProfile.findFirst({
+      where: {
+        tenantId,
+        authUser: {
+          is: {
+            hierarchyNodeId
+          }
+        }
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        displayName: true
+      }
+    });
+
+    if (!fallbackCenter) {
+      throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+    }
+
+    const usage = await loadCenterCapacityUsage({
+      tx,
+      tenantId,
+      hierarchyNodeId
+    });
+
+    return buildCenterCapacitySnapshot({
+      center: {
+        ...fallbackCenter,
+        authUser: { hierarchyNodeId },
+        franchiseProfile: null
+      },
+      capacity: null,
+      teacherCount: usage.teacherCount,
+      studentCount: usage.studentCount,
+      auditHistory: []
+    });
+  }
 }
 
 function assertBpCenterAccess({ tenantId, bpScope, centerId }) {

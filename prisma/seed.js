@@ -370,7 +370,7 @@ async function main() {
     where: {
       tenantId_code: {
         tenantId: tenant.id,
-        code: "FR-001"
+        code: "FR001"
       }
     },
     update: {
@@ -383,7 +383,7 @@ async function main() {
       tenantId: tenant.id,
       businessPartnerId: partner.id,
       authUserId: franchiseAuth.id,
-      code: "FR-001",
+      code: "FR001",
       name: "North Franchise",
       displayName: "North Franchise",
       status: "ACTIVE",
@@ -396,7 +396,7 @@ async function main() {
     update: {
       tenantId: tenant.id,
       franchiseProfileId: franchiseProfile.id,
-      code: "CE-001",
+      code: "CE001",
       name: "Abacus Public School",
       status: "ACTIVE",
       isActive: true,
@@ -406,7 +406,7 @@ async function main() {
       tenantId: tenant.id,
       franchiseProfileId: franchiseProfile.id,
       authUserId: centerAuth.id,
-      code: "CE-001",
+      code: "CE001",
       name: "Abacus Public School",
       displayName: "Abacus Public School",
       status: "ACTIVE",

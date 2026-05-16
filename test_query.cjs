@@ -1,6 +1,7 @@
-const { PrismaClient } = require('@prisma/client');
-const p = new PrismaClient();
 (async () => {
+  const { createPrismaClient } = await import('./src/lib/prisma-client.js');
+  const p = createPrismaClient();
+
   const enrollCount = await p.enrollment.count();
   console.log('Total enrollments:', enrollCount);
   if (enrollCount > 0) {
@@ -22,7 +23,7 @@ const p = new PrismaClient();
   const ce = await p.authUser.findFirst({ where: { username: 'CE001' }, select: { id: true, hierarchyNodeId: true, role: true } });
   console.log('CE001:', JSON.stringify(ce));
   if (ce) {
-    const cp = await p.centerProfile.findFirst({ where: { userId: ce.id } });
+    const cp = await p.centerProfile.findFirst({ where: { authUserId: ce.id } });
     console.log('CE001 CenterProfile:', JSON.stringify(cp));
   }
   

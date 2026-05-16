@@ -1,4 +1,23 @@
 import { prisma } from "../lib/prisma.js";
+function isNotificationStorageMissingError(error) {
+  const code = String(error?.code || "");
+  if (!["P2021", "P2022", "P2010"].includes(code)) {
+    return false;
+  }
+
+  const modelName = String(error?.meta?.modelName || "").toLowerCase();
+  const table = String(error?.meta?.table || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    modelName.includes("notification") ||
+    table.includes("notification") ||
+    message.includes("notification") ||
+    message.includes("unknown column") ||
+    message.includes("does not exist")
+  );
+}
+
 import { getCenterHealthScore, getAttendanceAnomalies, getFeeCollectionPulse, getTeacherWorkload } from "./leadership-intel.service.js";
 
 /**
@@ -604,14 +623,26 @@ async function runAllAutomationRules(tenantId) {
 
 // ── Cleanup: Remove expired notifications ──
 async function cleanupExpiredNotifications(tenantId) {
-  const result = await prisma.notification.deleteMany({
-    where: {
-      tenantId,
-      expiresAt: { not: null, lt: new Date() },
-      isRead: true
+  try {
+    const result = await prisma.notification.deleteMany({
+      where: {
+        tenantId,
+        expiresAt: { not: null, lt: new Date() },
+        isRead: true
+      }
+    });
+    return { deleted: result.count };
+  } catch (error) {
+    if (!isNotificationStorageMissingError(error)) {
+      throw error;
     }
-  });
-  return { deleted: result.count };
+
+    return {
+      deleted: 0,
+      skipped: true,
+      reason: "NOTIFICATION_STORAGE_UNAVAILABLE"
+    };
+  }
 }
 
 // ── Notification Preferences ──

@@ -31,7 +31,7 @@ describe("REVENUE SPLIT VALIDATION", () => {
     partner = await prisma.businessPartner.findFirstOrThrow({
       where: {
         tenantId: tenant.id,
-        code: "BP-001"
+        code: "BP001"
       }
     });
   });

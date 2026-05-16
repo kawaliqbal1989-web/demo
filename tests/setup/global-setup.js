@@ -5,11 +5,46 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function run(command, env) {
+function run(command, env, { input } = {}) {
   execSync(command, {
     stdio: "inherit",
-    env
+    env,
+    ...(input ? { input } : {})
   });
+}
+
+function escapeShellArgument(value) {
+  return `"${String(value).replaceAll('"', '\\"')}"`;
+}
+
+function getBootstrapDatabaseUrl(databaseUrl) {
+  const parsed = new URL(databaseUrl);
+  parsed.pathname = "/mysql";
+  return parsed.toString();
+}
+
+function getDatabaseName(databaseUrl) {
+  const parsed = new URL(databaseUrl);
+  return parsed.pathname.replace(/^\//, "");
+}
+
+function buildCreateDatabaseSql(databaseName) {
+  return `CREATE DATABASE IF NOT EXISTS \`${String(databaseName).replaceAll("`", "``")}\`;`;
+}
+
+function ensureDatabaseExists(databaseUrl, env) {
+  const databaseName = getDatabaseName(databaseUrl);
+  if (!databaseName) {
+    return;
+  }
+
+  run(
+    `npx prisma db execute --url ${escapeShellArgument(getBootstrapDatabaseUrl(databaseUrl))} --stdin`,
+    env,
+    {
+      input: buildCreateDatabaseSql(databaseName)
+    }
+  );
 }
 
 async function runWithRetry(command, env, { retries = 3, retryDelayMs = 400 } = {}) {
@@ -26,7 +61,9 @@ async function runWithRetry(command, env, { retries = 3, retryDelayMs = 400 } = 
       const stdoutText = err?.stdout ? String(err.stdout) : "";
       const combinedText = `${msg}\n${stderrText}\n${stdoutText}`;
       const isPrismaGenerate = command.includes("prisma generate");
+      const isPrismaDbPush = command.includes("prisma db push");
       const isWindowsRenameEperm = /EPERM: operation not permitted, rename/i.test(combinedText);
+      const isMissingDatabase = /P1003/i.test(combinedText);
 
       // Windows sometimes fails to rename the query engine DLL during prisma generate due to file locking.
       // If the client is already generated, continuing is usually safe for tests.
@@ -36,6 +73,10 @@ async function runWithRetry(command, env, { retries = 3, retryDelayMs = 400 } = 
           "[jest globalSetup] prisma generate failed on Windows (likely query engine DLL lock); continuing (client likely already generated)"
         );
         return;
+      }
+
+      if (isPrismaDbPush && isMissingDatabase && env?.DATABASE_URL) {
+        ensureDatabaseExists(env.DATABASE_URL, env);
       }
 
       if (attempt < retries) {

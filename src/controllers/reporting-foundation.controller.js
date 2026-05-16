@@ -151,6 +151,203 @@ function buildExportQueuedResponse({ job, coalesced }) {
     job: serializeExportJob(job)
   };
 }
+    function normalizeWindowHours(value, fallback = 24) {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        return fallback;
+      }
+      return Math.min(parsed, 24 * 30);
+    }
+
+    function buildOperationsDashboardFallback(windowHours, reason) {
+      const now = new Date();
+      const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
+      const emptyChart = Array.from({ length: normalizedWindowHours }, (_, index) => ({
+        label: String(index).padStart(2, "0") + ":00",
+        startAt: new Date(now.getTime() - (normalizedWindowHours - index) * 60 * 60 * 1000).toISOString(),
+        value: 0
+      }));
+
+      return {
+        generatedAt: now,
+        windowHours: normalizedWindowHours,
+        thresholds: {
+          queuedMs: 0,
+          processingMs: 0,
+          staleHeartbeatMs: 0
+        },
+        backlog: {
+          statusCounts: {},
+          formatCounts: {},
+          queueCounts: {},
+          oldestQueuedAt: null,
+          oldestQueuedAgeMs: 0,
+          nextRetryAt: null,
+          retryWaitCount: 0
+        },
+        throughput: {
+          completedCount: 0,
+          failedCount: 0,
+          retriedCount: 0,
+          averageQueueMs: 0,
+          averageProcessingMs: 0,
+          averageEndToEndMs: 0,
+          totalCompletedBytes: 0,
+          averageCompletedBytes: 0,
+          queueSlaBreachesCompleted: 0,
+          processingSlaBreachesCompleted: 0
+        },
+        charts: {
+          throughput: emptyChart,
+          saturation: emptyChart,
+          workerUtilization: emptyChart
+        },
+        distributions: {
+          duration: [],
+          queueNames: [],
+          reportKeys: [],
+          scopeRoles: [],
+          retryHeatmap: []
+        },
+        workers: {
+          active: [],
+          counts: {
+            activeWorkers: 0,
+            staleWorkers: 0,
+            staleProcessingJobs: 0
+          }
+        },
+        artifacts: {
+          statusCounts: {},
+          availableCount: 0,
+          availableBytes: 0,
+          expiringSoonCount: 0,
+          overdueExpiredCount: 0,
+          expiringSoon: [],
+          overdueExpired: []
+        },
+        schedules: {
+          statusCounts: {},
+          dueSoonCount: 0,
+          dueSoon: []
+        },
+        sla: {
+          queuedBreaches: 0,
+          processingBreaches: 0,
+          staleLeaseBreaches: 0,
+          incidents: []
+        },
+        recent: {
+          jobs: [],
+          activity: [],
+          downloads: []
+        },
+        skipped: true,
+        reason
+      };
+    }
+
+    function buildProductionReadinessFallback(windowHours, reason) {
+      const now = new Date();
+      const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
+
+      return {
+        generatedAt: now,
+        windowHours: normalizedWindowHours,
+        summary: {
+          overallScore: 0,
+          productionCertified: false,
+          openRecommendations: 1,
+          queuedBreaches: 0,
+          processingBreaches: 0
+        },
+        deployments: {
+          countsByCheckpoint: {},
+          recent: [],
+          latest: null
+        },
+        backups: {
+          recent: [],
+          latest: null,
+          restoreValidatedCount: 0,
+          integrityFailures: 0
+        },
+        recovery: {
+          recent: [],
+          latest: null,
+          averageContinuityScore: 0
+        },
+        failover: {
+          recent: [],
+          latest: null,
+          passCount: 0,
+          averageScore: 0
+        },
+        security: {
+          status: "UNKNOWN",
+          score: 0,
+          checks: [],
+          recommendations: []
+        },
+        diagnostics: {
+          runtime: {
+            summary: {
+              statusCounts: {},
+              queuedSlaBreaches: 0,
+              processingSlaBreaches: 0,
+              retryWaitCount: 0,
+              expiredArtifacts: 0,
+              thresholds: {
+                queuedMs: 0,
+                processingMs: 0
+              }
+            },
+            backlog: {
+              statusCounts: {},
+              formatCounts: {},
+              queueCounts: {},
+              oldestQueuedAt: null,
+              oldestQueuedAgeMs: 0,
+              nextRetryAt: null,
+              retryWaitCount: 0
+            },
+            throughput: {
+              completedCount: 0,
+              failedCount: 0,
+              retriedCount: 0,
+              averageQueueMs: 0,
+              averageProcessingMs: 0,
+              averageEndToEndMs: 0,
+              totalCompletedBytes: 0,
+              averageCompletedBytes: 0,
+              queueSlaBreachesCompleted: 0,
+              processingSlaBreachesCompleted: 0
+            },
+            workers: {
+              active: [],
+              counts: {
+                activeWorkers: 0,
+                staleWorkers: 0,
+                staleProcessingJobs: 0
+              }
+            },
+            artifacts: {
+              statusCounts: {},
+              availableCount: 0,
+              availableBytes: 0,
+              expiringSoonCount: 0,
+              overdueExpiredCount: 0,
+              expiringSoon: [],
+              overdueExpired: []
+            },
+            incidents: []
+          },
+          recommendations: ["Production dashboard fallback active until export operations storage is available."]
+        },
+        skipped: true,
+        reason
+      };
+    }
 
 function buildScheduleViewerWhere(auth) {
   const where = {

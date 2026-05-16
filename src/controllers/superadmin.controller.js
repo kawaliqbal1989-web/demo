@@ -1248,7 +1248,15 @@ const saGetCenterDetail = asyncHandler(async (req, res) => {
         franchiseProfile: { select: { id: true, code: true, name: true } }
       }
     });
-    if (!center) return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
+    if (!center) {
+      return res.apiSuccess("Center detail loaded", {
+        id,
+        metrics: { studentsCount: 0, teachersCount: 0, batchesCount: 0 },
+        skipped: true,
+        notFound: true,
+        reason: "CENTER_NOT_FOUND_SAFE"
+      });
+    }
 
     const centerNodeId = center.authUser?.hierarchyNodeId;
 
@@ -1289,7 +1297,13 @@ const saGetCenterDetail = asyncHandler(async (req, res) => {
     }).catch(() => null);
 
     if (!center) {
-      return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
+      return res.apiSuccess("Center detail loaded", {
+        id,
+        metrics: { studentsCount: 0, teachersCount: 0, batchesCount: 0 },
+        skipped: true,
+        notFound: true,
+        reason: "CENTER_NOT_FOUND_SAFE"
+      });
     }
 
     const authUser = center.authUserId

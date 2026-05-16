@@ -14,7 +14,8 @@ import {
   saGetFranchiseDetail,
   saCreateCenter,
   saSetCenterStatus,
-  saGetCenterDetail
+  saGetCenterDetail,
+  saUpdateCenterBranding
 } from "../controllers/superadmin.controller.js";
 import {
   listSuperadminCertificates,
@@ -23,9 +24,15 @@ import {
   getSuperadminBpCertificateTemplate,
   updateSuperadminBpCertificateTemplate
 } from "../controllers/superadmin-certificates.controller.js";
+import {
+  deleteLogo,
+  resolveSuperadminCenterLogoUploadTarget,
+  uploadLogo
+} from "../controllers/uploads.controller.js";
 import { requireSuperadmin } from "../middleware/rbac.js";
 import { auditAction } from "../middleware/audit-logger.js";
 import { kpiRateLimiter } from "../middleware/kpi-rate-limit.js";
+import { genericLogoUpload, wrapUploadMiddleware } from "../middleware/upload.js";
 
 const superadminRouter = Router();
 
@@ -156,6 +163,27 @@ superadminRouter.get(
   requireSuperadmin(),
   auditAction("SA_VIEW_CENTER_DETAIL", "CENTER_PROFILE", (req) => req.params.id),
   saGetCenterDetail
+);
+superadminRouter.patch(
+  "/centers/:id/branding",
+  requireSuperadmin(),
+  auditAction("SA_UPDATE_CENTER_BRANDING", "CENTER_PROFILE", (req) => req.params.id),
+  saUpdateCenterBranding
+);
+superadminRouter.post(
+  "/centers/:id/logo",
+  requireSuperadmin(),
+  auditAction("SA_UPLOAD_CENTER_LOGO", "CENTER_PROFILE", (req) => req.params.id),
+  resolveSuperadminCenterLogoUploadTarget,
+  wrapUploadMiddleware(genericLogoUpload),
+  uploadLogo
+);
+superadminRouter.delete(
+  "/centers/:id/logo",
+  requireSuperadmin(),
+  auditAction("SA_DELETE_CENTER_LOGO", "CENTER_PROFILE", (req) => req.params.id),
+  resolveSuperadminCenterLogoUploadTarget,
+  deleteLogo
 );
 
 /* ── Intelligence ── */

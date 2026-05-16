@@ -1,5 +1,5 @@
 import { prisma } from "../lib/prisma.js";
-import { resolveBusinessPartnerForUser } from "./financial-reporting.service.js";
+import { resolveBusinessPartnerScope } from "./bp-scope.service.js";
 import { resolveHierarchyNodeIdsFromRoot } from "./hierarchy-cascade.service.js";
 
 async function resolveActorExamScope({ tenantId, actor }) {
@@ -23,23 +23,18 @@ async function resolveActorExamScope({ tenantId, actor }) {
   }
 
   if (role === "BP") {
-    const partner = await resolveBusinessPartnerForUser({ tenantId, userId });
-    if (!partner) {
+    const scope = await resolveBusinessPartnerScope({ tenantId, userId });
+    if (!scope?.businessPartner) {
       const error = new Error("Business partner scope not resolved");
       error.statusCode = 403;
       error.errorCode = "BP_SCOPE_REQUIRED";
       throw error;
     }
 
-    // Node IDs are resolved via partner.hierarchyNodeId cascading in partner-scope middleware; replicate lightweight here.
-    const hierarchyNodeIds = partner.hierarchyNodeId
-      ? await resolveHierarchyNodeIdsFromRoot({ tenantId, rootId: partner.hierarchyNodeId })
-      : [];
-
     return {
       role,
-      businessPartnerId: partner.id,
-      hierarchyNodeIds
+      businessPartnerId: scope.businessPartner.id,
+      hierarchyNodeIds: scope.hierarchyNodeIds
     };
   }
 

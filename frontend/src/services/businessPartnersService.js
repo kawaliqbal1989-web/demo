@@ -22,23 +22,44 @@ async function getBusinessPartner(id) {
   return response.data;
 }
 
+async function getAdminBusinessPartnerBranding(id) {
+  const response = await apiClient.get(`/admin/bp/${id}/branding`);
+  return response.data;
+}
+
 async function updateBusinessPartner({ id, data }) {
   const response = await apiClient.patch(`/business-partners/${id}`, data);
   return response.data;
 }
 
-async function uploadBusinessPartnerLogo({ id, file }) {
+async function uploadBusinessPartnerLogo({ id, file, onProgress } = {}) {
   const formData = new FormData();
   formData.append("file", file);
 
-  const response = await apiClient.post(`/business-partners/${id}/logo`, formData, {
+  const response = await apiClient.post(`/admin/bp/${id}/branding/upload`, formData, {
     headers: {
       "Content-Type": "multipart/form-data"
     },
+    onUploadProgress: typeof onProgress === "function"
+      ? (event) => {
+          if (!event.total) {
+            return;
+          }
+
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      : undefined,
     // Upload is already visually obvious; avoid blocking the whole app with a global loader.
     _skipGlobalLoading: true
   });
 
+  return response.data;
+}
+
+async function deleteBusinessPartnerLogo(id) {
+  const response = await apiClient.delete(`/admin/bp/${id}/branding/remove`, {
+    _skipGlobalLoading: true
+  });
   return response.data;
 }
 
@@ -96,8 +117,10 @@ export {
   listBusinessPartners,
   createBusinessPartner,
   getBusinessPartner,
+  getAdminBusinessPartnerBranding,
   updateBusinessPartner,
   uploadBusinessPartnerLogo,
+  deleteBusinessPartnerLogo,
   setBusinessPartnerStatus,
   resetBusinessPartnerPassword,
   renewBusinessPartner,

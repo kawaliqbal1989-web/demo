@@ -4,7 +4,9 @@ import toast from "react-hot-toast";
 import {
   createBusinessPartner,
   getBusinessPartner,
+  getAdminBusinessPartnerBranding,
   uploadBusinessPartnerLogo,
+  deleteBusinessPartnerLogo,
   updateBusinessPartner,
   getBPPracticeEntitlements,
   updateBPPracticeEntitlements,
@@ -72,6 +74,7 @@ function SuperadminBusinessPartnerProfilePage() {
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreviewUrl, setLogoPreviewUrl] = useState("");
   const [logoUploading, setLogoUploading] = useState(false);
+  const [brandingMeta, setBrandingMeta] = useState(null);
 
   const [initialForm, setInitialForm] = useState(null);
   const [form, setForm] = useState(() => ({
@@ -79,7 +82,6 @@ function SuperadminBusinessPartnerProfilePage() {
     name: "",
     displayName: "",
     status: "ACTIVE",
-    logoUrl: "",
 
     primaryPhone: "",
     alternatePhone: "",
@@ -136,7 +138,7 @@ function SuperadminBusinessPartnerProfilePage() {
   const [practiceLoading, setPracticeLoading] = useState(false);
   const [practiceSaving, setPracticeSaving] = useState(false);
 
-  const resolvedLogoPreviewUrl = logoPreviewUrl || resolveAssetUrl(form.logoUrl);
+  const resolvedLogoPreviewUrl = logoPreviewUrl || resolveAssetUrl(brandingMeta?.logoUrl);
 
   useEffect(() => {
     listCourses({ limit: 200, offset: 0 })
@@ -220,8 +222,12 @@ function SuperadminBusinessPartnerProfilePage() {
       setLoading(true);
       setError("");
       try {
-        const result = await getBusinessPartner(id);
+        const [result, brandingResult] = await Promise.all([
+          getBusinessPartner(id),
+          getAdminBusinessPartnerBranding(id)
+        ]);
         const partner = result?.data;
+        setBrandingMeta(brandingResult?.data || null);
 
         const assignedCourseIds = (partner?.courseAccesses || []).map((ca) => ca.courseId || ca.course?.id).filter(Boolean);
 
@@ -231,7 +237,6 @@ function SuperadminBusinessPartnerProfilePage() {
           name: partner?.name || "",
           displayName: partner?.displayName || "",
           status: partner?.status || "ACTIVE",
-          logoUrl: partner?.logoUrl || "",
 
           primaryPhone: partner?.primaryPhone || "",
           alternatePhone: partner?.alternatePhone || "",
@@ -311,7 +316,7 @@ function SuperadminBusinessPartnerProfilePage() {
     }
 
     if (!file.type.startsWith("image/")) {
-      toast.error("Please select a PNG/JPG image file.");
+      toast.error("Please select a PNG/JPG/JPEG/WEBP image file.");
       return;
     }
 
@@ -324,15 +329,13 @@ function SuperadminBusinessPartnerProfilePage() {
       setLogoUploading(true);
       try {
         const result = await uploadBusinessPartnerLogo({ id, file });
-        const partner = result?.data;
-        if (partner?.logoUrl) {
-          setForm((p) => ({ ...p, logoUrl: partner.logoUrl }));
-        }
+        setBrandingMeta(result?.data || null);
         setLogoFile(null);
         if (logoPreviewUrl) {
           URL.revokeObjectURL(logoPreviewUrl);
           setLogoPreviewUrl("");
         }
+        toast.success("Partner branding logo updated.");
       } catch (err) {
         setError(getFriendlyErrorMessage(err) || "Failed to upload logo.");
       } finally {
@@ -357,12 +360,28 @@ function SuperadminBusinessPartnerProfilePage() {
     });
   };
 
-  const buildUpdatePayload = ({ omitLogoUrl = false } = {}) => {
+  const handleLogoRemove = async () => {
+    if (!id || readOnly) {
+      return;
+    }
+
+    setLogoUploading(true);
+    try {
+      const result = await deleteBusinessPartnerLogo(id);
+      setBrandingMeta(result?.data || null);
+      toast.success("Partner branding logo removed.");
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to remove logo.");
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const buildUpdatePayload = () => {
     const payload = {
       name: form.name,
       displayName: form.displayName,
       status: form.status,
-      ...(omitLogoUrl ? {} : { logoUrl: form.logoUrl }),
 
       primaryPhone: form.primaryPhone,
       alternatePhone: form.alternatePhone,
@@ -462,7 +481,7 @@ function SuperadminBusinessPartnerProfilePage() {
           }
         }
 
-        const updatePayload = buildUpdatePayload({ omitLogoUrl: Boolean(logoFile) });
+        const updatePayload = buildUpdatePayload();
         await updateBusinessPartner({ id: partnerId, data: updatePayload });
 
         navigate(`/superadmin/business-partners/${partnerId}?mode=view`);
@@ -516,6 +535,9 @@ function SuperadminBusinessPartnerProfilePage() {
             <div style={{ display: "grid", gap: 4 }}>
               <div style={{ fontWeight: 700 }}>{form.displayName || form.name || "Business Partner"}</div>
               <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Logo preview</div>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>
+                Last update: {brandingMeta?.brandingUpdatedAt ? new Date(brandingMeta.brandingUpdatedAt).toLocaleString() : "-"}
+              </div>
             </div>
           </div>
         ) : null}
@@ -540,13 +562,23 @@ function SuperadminBusinessPartnerProfilePage() {
               </select>
             </label>
             <label>
-              Logo Upload (PNG/JPG)
-              <input className="input" type="file" accept="image/png,image/jpeg" onChange={handleLogoFile} disabled={readOnly || logoUploading || saving} />
+              Logo Upload (PNG/JPG/JPEG/WEBP)
+              <input className="input" type="file" accept="image/png,image/jpeg,image/webp" onChange={handleLogoFile} disabled={readOnly || logoUploading || saving} />
             </label>
-            <label>
-              Logo URL (optional)
-              <input className="input" placeholder="https://" value={form.logoUrl} onChange={onChange("logoUrl")} disabled={readOnly} />
-            </label>
+            <div style={{ display: "grid", gap: 6, alignContent: "center" }}>
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                Branding is controlled centrally by SuperAdmin and propagates only inside this BP hierarchy.
+              </div>
+              <button
+                type="button"
+                className="button secondary"
+                onClick={handleLogoRemove}
+                disabled={readOnly || logoUploading || !brandingMeta?.logoUrl}
+                style={{ width: "fit-content" }}
+              >
+                Remove Logo
+              </button>
+            </div>
           </div>
         </div>
 

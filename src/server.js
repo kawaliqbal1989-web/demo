@@ -2,12 +2,17 @@ import { app } from "./app.js";
 import { env } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
 import { logger } from "./lib/logger.js";
+import { startAnalyticsJobScheduler } from "./services/analytics-job-runner.service.js";
+import { startReportExportInfrastructure } from "./services/report-export-runner.service.js";
 
 const server = app.listen(env.port, () => {
   logger.info("server_started", {
     port: env.port
   });
 });
+
+const analyticsScheduler = startAnalyticsJobScheduler({ loggerOverride: logger });
+const reportExportInfrastructure = startReportExportInfrastructure({ loggerOverride: logger });
 
 let shuttingDown = false;
 
@@ -21,6 +26,8 @@ function shutdown(signal) {
 
   server.close(async () => {
     try {
+      analyticsScheduler?.stop?.();
+      reportExportInfrastructure?.stop?.();
       await prisma.$disconnect();
       logger.info("shutdown_completed", { signal });
       process.exit(0);

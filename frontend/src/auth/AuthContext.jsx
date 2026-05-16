@@ -36,7 +36,6 @@ import {
   clearStoredFranchiseId
 } from "./sessionStorage";
 import { meRequest } from "../services/authService";
-import { getMyBusinessPartner } from "../services/businessPartnersService";
 import { getMyBranding } from "../services/brandingService";
 import { clearStoredBranding, getStoredBranding, setStoredBranding } from "./sessionStorage";
 
@@ -73,6 +72,29 @@ function AuthProvider({ children }) {
   const isAuthenticated = Boolean(accessToken && refreshTokenValue && !isTokenExpired(accessToken));
   const requiresPasswordChange = Boolean(mustChangePassword || getStoredMustChangePassword());
   const authBootstrapPending = authBootstrapStatus !== "ready";
+
+  const storeBranding = useCallback((nextBranding) => {
+    setBranding(nextBranding);
+    setStoredBranding(nextBranding);
+    return nextBranding;
+  }, []);
+
+  const refreshBranding = useCallback(async (options = {}) => {
+    const token = getStoredAccessToken();
+    const nextRole = getRoleFromToken(token);
+
+    if (!canFetchBrandingForRole(nextRole)) {
+      return storeBranding(null);
+    }
+
+    const brandingData = await getMyBranding({
+      fresh: options.fresh ?? true,
+      _skipGlobalLoading: true,
+      _suppressErrorLogging: options.suppressErrorLogging ?? true
+    });
+
+    return storeBranding(brandingData?.data?.businessPartner || null);
+  }, [storeBranding]);
 
   const applyTokens = ({ accessToken: nextAccess, refreshToken: nextRefresh }) => {
     setAccessToken(nextAccess);
@@ -269,9 +291,7 @@ function AuthProvider({ children }) {
       try {
         const [meData, scopedIdentity, brandingData] = await Promise.all([
           meRequest({ _skipGlobalLoading: true, _suppressErrorLogging: true }),
-          roleFromToken === "BP"
-            ? getMyBusinessPartner({ _skipGlobalLoading: true, _suppressErrorLogging: true }).catch(() => null)
-            : roleFromToken === "FRANCHISE"
+          roleFromToken === "FRANCHISE"
               ? getMyFranchise({ _skipGlobalLoading: true, _suppressErrorLogging: true }).catch(() => null)
               : Promise.resolve(null),
           canFetchBrandingForRole(roleFromToken)
@@ -295,7 +315,7 @@ function AuthProvider({ children }) {
         setDisplayName(disp);
 
         if (roleFromToken === "BP") {
-          const id = scopedIdentity?.data?.id || null;
+          const id = brandingData?.data?.businessPartner?.id || null;
           setPartnerId(id);
           setStoredPartnerId(id);
           setStoredFranchiseId(null);
@@ -311,9 +331,7 @@ function AuthProvider({ children }) {
           }
         }
 
-        const nextBranding = brandingData?.data?.businessPartner || null;
-        setBranding(nextBranding);
-        setStoredBranding(nextBranding);
+        storeBranding(brandingData?.data?.businessPartner || null);
       } catch (error) {
         if (cancelled) {
           return;
@@ -335,7 +353,7 @@ function AuthProvider({ children }) {
     return () => {
       cancelled = true;
     };
-  }, [apiReady, accessToken, refreshTokenValue, refreshSession, clearSessionState]);
+  }, [apiReady, accessToken, refreshTokenValue, refreshSession, clearSessionState, storeBranding]);
 
   const value = {
     accessToken,
@@ -350,6 +368,7 @@ function AuthProvider({ children }) {
     capabilities,
     partnerId,
     branding,
+    refreshBranding,
     userId,
     displayName,
     loading,

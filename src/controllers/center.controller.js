@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { parsePagination } from "../utils/pagination.js";
 import { ensureTenantCourseCatalog } from "../services/course-bootstrap.service.js";
+import { getCenterDashboardOverview } from "../services/center-dashboard.service.js";
 import {
   listReassignmentRequests as svcListReassignments,
   reviewReassignmentRequest as svcReviewReassignment,
@@ -77,35 +78,14 @@ const getCenterMe = asyncHandler(async (req, res) => {
 });
 
 const getCenterDashboard = asyncHandler(async (req, res) => {
-  const tenantId = req.auth.tenantId;
-  const centerId = req.auth.hierarchyNodeId;
-
-  if (!tenantId || !centerId) {
-    return res.apiError(400, "Center scope missing", "CENTER_SCOPE_REQUIRED");
-  }
-
-  const now = new Date();
-  const since7 = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-
-  const [activeStudents, activeTeachers, newAdmissions7d, activeEnrollments] = await Promise.all([
-    prisma.student.count({ where: { tenantId, hierarchyNodeId: centerId, isActive: true } }),
-    prisma.authUser.count({ where: { tenantId, hierarchyNodeId: centerId, role: "TEACHER", isActive: true } }),
-    prisma.student.count({
-      where: {
-        tenantId,
-        hierarchyNodeId: centerId,
-        createdAt: { gte: since7 }
-      }
-    }),
-    prisma.enrollment.count({ where: { tenantId, hierarchyNodeId: centerId, status: "ACTIVE" } })
-  ]);
-
-  return res.apiSuccess("Center dashboard fetched", {
-    activeStudents,
-    activeTeachers,
-    newAdmissions7d,
-    activeEnrollments
+  const data = await getCenterDashboardOverview({
+    tenantId: req.auth?.tenantId,
+    authUserId: req.auth?.userId,
+    hierarchyNodeId: req.auth?.hierarchyNodeId,
+    query: req.query
   });
+
+  return res.apiSuccess("Center dashboard fetched", data);
 });
 
 const listMockTests = asyncHandler(async (req, res) => {

@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../lib/prisma-compat.js";
 import { prisma } from "../lib/prisma.js";
 
 function toNumber(value) {

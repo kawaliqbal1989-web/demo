@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
-import { buildUploadUrl } from "../utils/request-url.js";
+import { buildUploadUrl, versionAssetUrl } from "../utils/request-url.js";
 
 const CREATE_CERTIFICATE_TEMPLATE_TABLE_SQL = `
 CREATE TABLE IF NOT EXISTS \`certificatetemplate\` (
@@ -37,7 +37,13 @@ const selectCertificateTemplate = {
   affiliationLogoUrl: true,
   stampImageUrl: true,
   backgroundImageUrl: true,
-  layout: true
+  layout: true,
+  updatedAt: true
+};
+
+const selectBusinessPartnerLogo = {
+  logoUrl: true,
+  updatedAt: true
 };
 
 async function ensureCertificateTemplateStorage() {
@@ -48,6 +54,13 @@ async function findCertificateTemplate(businessPartnerId) {
   return prisma.certificateTemplate.findUnique({
     where: { businessPartnerId },
     select: selectCertificateTemplate
+  });
+}
+
+async function findBusinessPartnerLogo(businessPartnerId) {
+  return prisma.businessPartner.findUnique({
+    where: { id: businessPartnerId },
+    select: selectBusinessPartnerLogo
   });
 }
 
@@ -68,17 +81,55 @@ function buildDefaultCertificateTemplate() {
     affiliationLogoUrl: null,
     stampImageUrl: null,
     backgroundImageUrl: null,
+    bpLogoUrl: null,
     layout: null,
     schemaMissing: true
   };
 }
 
+function serializeCertificateTemplate({ template, businessPartner }) {
+  const templateVersion = template?.updatedAt || null;
+  const bpLogoUrl = versionAssetUrl(businessPartner?.logoUrl, businessPartner?.updatedAt) || null;
+
+  if (!template) {
+    return {
+      ...buildDefaultCertificateTemplate(),
+      bpLogoUrl,
+      schemaMissing: false
+    };
+  }
+
+  return {
+    id: template.id,
+    title: template.title || "Certificate of Achievement",
+    signatoryName: template.signatoryName ?? null,
+    signatoryDesignation: template.signatoryDesignation ?? null,
+    signatureImageUrl: versionAssetUrl(template.signatureImageUrl, templateVersion) || null,
+    affiliationLogoUrl: versionAssetUrl(template.affiliationLogoUrl, templateVersion) || null,
+    stampImageUrl: versionAssetUrl(template.stampImageUrl, templateVersion) || null,
+    backgroundImageUrl: versionAssetUrl(template.backgroundImageUrl, templateVersion) || null,
+    bpLogoUrl,
+    layout: template.layout || null,
+    updatedAt: template.updatedAt
+  };
+}
+
+async function loadCertificateTemplateSnapshot(businessPartnerId) {
+  const [template, businessPartner] = await Promise.all([
+    findCertificateTemplate(businessPartnerId),
+    findBusinessPartnerLogo(businessPartnerId)
+  ]);
+
+  return serializeCertificateTemplate({ template, businessPartner });
+}
+
 const getCertificateTemplate = asyncHandler(async (req, res) => {
+  res.set("Cache-Control", "no-store");
   const businessPartnerId = req.bpScope.businessPartner.id;
 
   let template = null;
   try {
-    template = await findCertificateTemplate(businessPartnerId);
+    template = await loadCertificateTemplateSnapshot(businessPartnerId);
   } catch (error) {
     if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
       throw error;
@@ -86,7 +137,7 @@ const getCertificateTemplate = asyncHandler(async (req, res) => {
 
     try {
       await ensureCertificateTemplateStorage();
-      template = await findCertificateTemplate(businessPartnerId);
+      template = await loadCertificateTemplateSnapshot(businessPartnerId);
     } catch (retryError) {
       if (!isSchemaMismatchError(retryError, ["certificatetemplate"])) {
         throw retryError;
@@ -95,11 +146,19 @@ const getCertificateTemplate = asyncHandler(async (req, res) => {
   }
 
   return res.apiSuccess("Certificate template fetched", {
-    template: template || buildDefaultCertificateTemplate()
+    template: template || serializeCertificateTemplate({
+      template: null,
+      businessPartner: await findBusinessPartnerLogo(businessPartnerId)
+    })
   });
 });
 
 const upsertCertificateTemplate = asyncHandler(async (req, res) => {
+  if (req.auth?.role !== "SUPERADMIN") {
+    return res.apiError(403, "Only superadmin can mutate certificate branding", "FORBIDDEN");
+  }
+
+  res.set("Cache-Control", "no-store");
   const tenantId = req.auth.tenantId;
   const businessPartnerId = req.bpScope.businessPartner.id;
   const { title, signatoryName, signatoryDesignation, layout } = req.body;
@@ -112,7 +171,8 @@ const upsertCertificateTemplate = asyncHandler(async (req, res) => {
 
   let template;
   try {
-    template = await saveCertificateTemplateRecord({ tenantId, businessPartnerId, data });
+    await saveCertificateTemplateRecord({ tenantId, businessPartnerId, data });
+    template = await loadCertificateTemplateSnapshot(businessPartnerId);
   } catch (error) {
     if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
       throw error;
@@ -120,7 +180,8 @@ const upsertCertificateTemplate = asyncHandler(async (req, res) => {
 
     try {
       await ensureCertificateTemplateStorage();
-      template = await saveCertificateTemplateRecord({ tenantId, businessPartnerId, data });
+      await saveCertificateTemplateRecord({ tenantId, businessPartnerId, data });
+      template = await loadCertificateTemplateSnapshot(businessPartnerId);
     } catch (retryError) {
       if (!isSchemaMismatchError(retryError, ["certificatetemplate"])) {
         throw retryError;
@@ -135,6 +196,11 @@ const upsertCertificateTemplate = asyncHandler(async (req, res) => {
 
 function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
   return asyncHandler(async (req, res) => {
+    if (req.auth?.role !== "SUPERADMIN") {
+      return res.apiError(403, "Only superadmin can mutate certificate branding", "FORBIDDEN");
+    }
+
+    res.set("Cache-Control", "no-store");
     const tenantId = req.auth.tenantId;
     const businessPartnerId = req.bpScope.businessPartner.id;
 
@@ -147,7 +213,7 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
 
     let template;
     try {
-      template = await saveCertificateTemplateRecord({
+      await saveCertificateTemplateRecord({
         tenantId,
         businessPartnerId,
         data: {
@@ -155,6 +221,7 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
           [fieldUrl]: url
         }
       });
+      template = await loadCertificateTemplateSnapshot(businessPartnerId);
     } catch (error) {
       if (!isSchemaMismatchError(error, ["certificatetemplate"])) {
         throw error;
@@ -162,7 +229,7 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
 
       try {
         await ensureCertificateTemplateStorage();
-        template = await saveCertificateTemplateRecord({
+        await saveCertificateTemplateRecord({
           tenantId,
           businessPartnerId,
           data: {
@@ -170,6 +237,7 @@ function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
             [fieldUrl]: url
           }
         });
+        template = await loadCertificateTemplateSnapshot(businessPartnerId);
       } catch (retryError) {
         if (!isSchemaMismatchError(retryError, ["certificatetemplate"])) {
           throw retryError;

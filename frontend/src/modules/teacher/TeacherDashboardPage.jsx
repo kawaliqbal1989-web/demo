@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { Link } from "react-router-dom";
+import { ReportActionButtons } from "../../components/ReportActionButtons";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { MetricCard } from "../../components/MetricCard";
 import { PageHeader } from "../../components/PageHeader";
@@ -80,6 +81,8 @@ function TeacherDashboardPage() {
         subtitle="Your assigned students and enrollments."
         actions={
           <>
+            <ReportActionButtons reportKey="teacher-productivity" />
+            <Link className="button secondary" style={{ width: "auto" }} to="/teacher/workflows">Workflow Queue</Link>
             <Link className="button secondary" style={{ width: "auto" }} to="/teacher/notes">Notes</Link>
             <Link className="button" style={{ width: "auto" }} to="/teacher/students">Assigned Students</Link>
           </>

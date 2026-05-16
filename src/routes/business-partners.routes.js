@@ -4,7 +4,6 @@ import {
   getMyBusinessPartner,
   getBusinessPartner,
   listBusinessPartners,
-  uploadBusinessPartnerLogo,
   updateBusinessPartner,
   setBusinessPartnerStatus,
   resetBusinessPartnerPassword,
@@ -16,7 +15,8 @@ import {
 } from "../controllers/business-partners.controller.js";
 import { requireRole, requireSuperadmin } from "../middleware/rbac.js";
 import { auditAction } from "../middleware/audit-logger.js";
-import { businessPartnerLogoUpload } from "../middleware/upload.js";
+import { genericLogoUpload, wrapUploadMiddleware } from "../middleware/upload.js";
+import { resolveAdminBusinessPartnerLogoUploadTarget, uploadLogo, deleteLogo } from "../controllers/uploads.controller.js";
 
 const businessPartnersRouter = Router();
 
@@ -42,10 +42,17 @@ businessPartnersRouter.post(
   "/:id/logo",
   requireSuperadmin(),
   auditAction("UPLOAD_BUSINESS_PARTNER_LOGO", "BUSINESS_PARTNER", (req) => req.params.id),
-  (req, res, next) => {
-    businessPartnerLogoUpload(req, res, next);
-  },
-  uploadBusinessPartnerLogo
+  resolveAdminBusinessPartnerLogoUploadTarget,
+  wrapUploadMiddleware(genericLogoUpload),
+  uploadLogo
+);
+
+businessPartnersRouter.delete(
+  "/:id/logo",
+  requireSuperadmin(),
+  auditAction("DELETE_BUSINESS_PARTNER_LOGO", "BUSINESS_PARTNER", (req) => req.params.id),
+  resolveAdminBusinessPartnerLogoUploadTarget,
+  deleteLogo
 );
 
 businessPartnersRouter.patch(

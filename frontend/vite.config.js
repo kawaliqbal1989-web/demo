@@ -6,6 +6,12 @@ export default defineConfig({
   resolve: {
     dedupe: ["react", "react-dom"]
   },
+  server: {
+    host: '127.0.0.1',
+    hmr: {
+      host: '127.0.0.1'
+    }
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./src/test/setupTests.js"],

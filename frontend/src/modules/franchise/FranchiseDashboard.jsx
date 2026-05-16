@@ -334,6 +334,7 @@ function FranchiseDashboard() {
           { label: "Competition Enrollments", value: performance.activeCompetitionEnrollments ?? 0 }
         ]}
         links={[
+          { label: "Operational Workflows", to: "/franchise/workflows" },
           { label: "Competition Queue", to: "/franchise/competition-requests" },
           { label: "Exam Cycles", to: "/franchise/exam-cycles" },
           { label: "Notifications", to: "/notifications" }

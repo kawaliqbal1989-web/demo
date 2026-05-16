@@ -8,6 +8,7 @@ function BusinessPartnerCentersPage() {
   const [rows, setRows] = useState([]);
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -19,6 +20,7 @@ function BusinessPartnerCentersPage() {
       setRows(data.data.items || []);
       setLimit(data.data.limit);
       setOffset(data.data.offset);
+      setTotal(data.data.total || 0);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load centers.");
     } finally {
@@ -56,6 +58,7 @@ function BusinessPartnerCentersPage() {
         limit={limit}
         offset={offset}
         count={rows.length}
+        total={total}
         onChange={(next) => {
           setLimit(next.limit);
           setOffset(next.offset);

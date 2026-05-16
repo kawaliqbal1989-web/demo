@@ -65,6 +65,51 @@ async function resolveDisplayName({ tenantId, userId, role, studentId }) {
     return mergeNameParts(student?.firstName, student?.lastName) || null;
   }
 
+  if (role === "PARENT") {
+    const user = await prisma.authUser.findFirst({
+      where: {
+        tenantId,
+        id: userId,
+        role: "PARENT",
+        isActive: true
+      },
+      select: {
+        username: true,
+        email: true,
+        parentStudentLinks: {
+          where: {
+            tenantId,
+            isActive: true,
+            student: {
+              is: {
+                tenantId,
+                isActive: true
+              }
+            }
+          },
+          orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+          take: 1,
+          select: {
+            student: {
+              select: {
+                guardianName: true,
+                firstName: true,
+                lastName: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const linkedStudent = user?.parentStudentLinks?.[0]?.student;
+    return linkedStudent?.guardianName
+      || mergeNameParts(linkedStudent?.firstName, linkedStudent?.lastName)
+      || user?.username
+      || user?.email
+      || null;
+  }
+
   return null;
 }
 
@@ -230,6 +275,44 @@ async function isRoleScopeActive({ user }) {
           return false;
         }
       }
+    }
+  }
+
+  if (user.role === "PARENT") {
+    const links = await prisma.parentStudentLink.findMany({
+      where: {
+        tenantId: user.tenantId,
+        parentUserId: user.id,
+        isActive: true,
+        student: {
+          is: {
+            tenantId: user.tenantId,
+            isActive: true
+          }
+        }
+      },
+      select: {
+        student: {
+          select: {
+            hierarchyNodeId: true
+          }
+        }
+      }
+    });
+
+    if (!links.length) {
+      return false;
+    }
+
+    const hierarchyStates = await Promise.all(
+      links.map((link) => isHierarchyPathActive({
+        tenantId: user.tenantId,
+        hierarchyNodeId: link.student?.hierarchyNodeId || null
+      }))
+    );
+
+    if (!hierarchyStates.some(Boolean)) {
+      return false;
     }
   }
 

@@ -11,6 +11,10 @@ const FRIENDLY_BY_CODE = {
   LEVEL_SKIP_NOT_ALLOWED: "You can’t skip levels. Promote the student one level at a time.",
   WORKFLOW_STAGE_CONFLICT: "This action isn’t allowed in the competition’s current stage.",
   WORKFLOW_REJECTED: "This competition was rejected and can’t be progressed.",
+  WORKFLOW_VERSION_CONFLICT: "This settlement changed before your action completed. Refresh and try again.",
+  INVALID_TRANSITION: "This workflow action is not allowed for the settlement’s current state.",
+  WORKFLOW_PERMISSION_DENIED: "Your account cannot perform that settlement workflow action.",
+  SETTLEMENT_NOT_FOUND: "This settlement was not found. Refresh the queue and try again.",
   REJECT_REASON_REQUIRED: "Please provide a reason to reject this competition.",
   COMPETITION_RESULT_STATUS_MIGRATION_REQUIRED: "Competition result publishing is unavailable until result status migration is applied.",
 

@@ -5,7 +5,6 @@ import { recordAudit } from "../utils/audit.js";
 import { generatePartnerCode } from "../utils/partner-code.js";
 import { parsePagination } from "../utils/pagination.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
-import { buildUploadUrl } from "../utils/request-url.js";
 import {
   cascadeSetBusinessPartnerActiveState,
   resolveBusinessPartnerHierarchyNodeIds
@@ -86,30 +85,6 @@ function validatePanNumber(panNumber) {
     const error = new Error("Invalid PAN number format");
     error.statusCode = 400;
     error.errorCode = "PAN_INVALID";
-    throw error;
-  }
-}
-
-function validateLogoUrl(logoUrl) {
-  if (!logoUrl) {
-    return;
-  }
-
-  const value = String(logoUrl).trim();
-  if (!value) {
-    return;
-  }
-
-  if (value.toLowerCase().startsWith("data:")) {
-    // Allow small data URIs (base64) to be stored directly for quick admin uploads.
-    // They are still subject to the length check below to avoid accidental huge payloads.
-  }
-
-  // TEXT column can hold more, but extremely large values are almost always accidental.
-  if (value.length > 20000) {
-    const error = new Error("logoUrl is too long");
-    error.statusCode = 400;
-    error.errorCode = "LOGO_URL_TOO_LONG";
     throw error;
   }
 }
@@ -313,42 +288,6 @@ const listBusinessPartners = asyncHandler(async (req, res) => {
   });
 });
 
-const uploadBusinessPartnerLogo = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const existing = await prisma.businessPartner.findFirst({
-    where: {
-      id,
-      ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
-    },
-    select: {
-      id: true
-    }
-  });
-
-  if (!existing) {
-    return res.apiError(404, "Business partner not found", "BUSINESS_PARTNER_NOT_FOUND");
-  }
-
-  const file = req.file;
-  if (!file) {
-    return res.apiError(400, "file is required", "FILE_REQUIRED");
-  }
-
-  const url = buildUploadUrl(req, `/uploads/business-partner-logos/${file.filename}`);
-
-  const updated = await prisma.businessPartner.update({
-    where: { id: existing.id },
-    data: {
-      logoPath: file.filename,
-      logoUrl: url
-    }
-  });
-
-  res.locals.entityId = updated.id;
-  return res.apiSuccess("Business partner logo updated", updated);
-});
-
 const getBusinessPartner = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
@@ -397,8 +336,19 @@ const updateBusinessPartner = asyncHandler(async (req, res) => {
   validateGstNumber(req.body.gstNumber);
   validatePanNumber(req.body.panNumber);
 
-  const logoUrlNormalized = req.body.logoUrl !== undefined ? normalizeString(req.body.logoUrl) : undefined;
-  validateLogoUrl(logoUrlNormalized);
+  if (
+    req.body.logoUrl !== undefined
+    || req.body.logoPath !== undefined
+    || req.body.logoFilePath !== undefined
+    || req.body.brandingUpdatedAt !== undefined
+    || req.body.brandingUpdatedByUserId !== undefined
+  ) {
+    return res.apiError(
+      400,
+      "Business partner branding assets must be managed through the admin branding upload API",
+      "BP_BRANDING_UPLOAD_REQUIRED"
+    );
+  }
 
   const subscriptionStatus = req.body.subscriptionStatus
     ? String(req.body.subscriptionStatus).trim().toUpperCase()
@@ -441,8 +391,6 @@ const updateBusinessPartner = asyncHandler(async (req, res) => {
         ...(req.body.displayName !== undefined ? { displayName: normalizeString(req.body.displayName) } : {}),
         status: req.body.status ? String(req.body.status).trim().toUpperCase() : undefined,
         isActive: req.body.isActive === undefined ? undefined : normalizeBoolean(req.body.isActive, true),
-        ...(req.body.logoPath !== undefined ? { logoPath: normalizeString(req.body.logoPath) } : {}),
-        ...(req.body.logoUrl !== undefined ? { logoUrl: logoUrlNormalized } : {}),
         ...(req.body.primaryPhone !== undefined ? { primaryPhone: normalizeString(req.body.primaryPhone) } : {}),
         ...(req.body.alternatePhone !== undefined ? { alternatePhone: normalizeString(req.body.alternatePhone) } : {}),
         ...(req.body.contactEmail !== undefined ? { contactEmail: normalizeString(req.body.contactEmail) } : {}),
@@ -716,29 +664,102 @@ const resetBusinessPartnerPassword = asyncHandler(async (req, res) => {
 const getMyBusinessPartner = asyncHandler(async (req, res) => {
   const criteria = [];
   if (req.auth.hierarchyNodeId) {
-    criteria.push({ hierarchyNodeId: req.auth.hierarchyNodeId });
+    criteria.push({
+      where: { hierarchyNodeId: req.auth.hierarchyNodeId },
+      mismatchNeedles: ["hierarchynodeid"]
+    });
   }
 
   if (req.auth.username) {
-    criteria.push({ code: String(req.auth.username).trim() });
+    const username = String(req.auth.username).trim();
+    const usernameVariants = Array.from(new Set([username, username.toLowerCase(), username.toUpperCase()]));
+    criteria.push({
+      where:
+        usernameVariants.length === 1
+          ? { code: usernameVariants[0] }
+          : {
+              OR: usernameVariants.map((value) => ({ code: value }))
+            },
+      mismatchNeedles: ["code"]
+    });
   }
 
   if (req.auth.email) {
-    criteria.push({ contactEmail: String(req.auth.email).trim().toLowerCase() });
+    const email = String(req.auth.email).trim();
+    const emailVariants = Array.from(new Set([email, email.toLowerCase(), email.toUpperCase()]));
+    criteria.push({
+      where:
+        emailVariants.length === 1
+          ? { contactEmail: emailVariants[0] }
+          : {
+              OR: emailVariants.map((value) => ({ contactEmail: value }))
+            },
+      mismatchNeedles: ["contactemail"]
+    });
   }
 
   if (!criteria.length) {
     return res.apiError(400, "BP scope could not be resolved", "BP_SCOPE_REQUIRED");
   }
 
-  const matches = await prisma.businessPartner.findMany({
-    where: {
-      tenantId: req.auth.tenantId,
-      OR: criteria
-    },
-    orderBy: { createdAt: "desc" },
-    take: 2
-  });
+  const seenPartnerIds = new Set();
+  const matches = [];
+
+  for (const criterion of criteria) {
+    const findArgs = {
+      where: {
+        tenantId: req.auth.tenantId,
+        ...criterion.where
+      },
+      orderBy: { createdAt: "desc" },
+      take: 2
+    };
+
+    let scopedMatches;
+    try {
+      scopedMatches = await prisma.businessPartner.findMany({
+        ...findArgs,
+        include: {
+          brandingUpdatedBy: {
+            select: {
+              id: true,
+              username: true,
+              email: true
+            }
+          }
+        }
+      });
+    } catch (error) {
+      const includeMismatch = isSchemaMismatchError(error, ["brandingupdatedby", "brandingupdatedbyuserid"]);
+      const criterionMismatch = isSchemaMismatchError(error, criterion.mismatchNeedles);
+
+      if (!includeMismatch && !criterionMismatch) {
+        throw error;
+      }
+
+      if (criterionMismatch) {
+        continue;
+      }
+
+      scopedMatches = await prisma.businessPartner.findMany(findArgs);
+    }
+
+    for (const candidate of scopedMatches) {
+      if (!candidate?.id || seenPartnerIds.has(candidate.id)) {
+        continue;
+      }
+
+      seenPartnerIds.add(candidate.id);
+      matches.push(candidate);
+      if (matches.length > 1) {
+        break;
+      }
+    }
+
+    if (matches.length > 1) {
+      break;
+    }
+  }
 
   if (matches.length > 1) {
     return res.apiError(409, "Multiple business partners match this BP user", "BP_SCOPE_AMBIGUOUS");
@@ -1136,7 +1157,6 @@ const getBPPracticeUsageReport = asyncHandler(async (req, res) => {
 
 export {
   createBusinessPartner,
-  uploadBusinessPartnerLogo,
   renewBusinessPartnerSubscription,
   listBusinessPartners,
   getBusinessPartner,

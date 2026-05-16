@@ -6,6 +6,7 @@ import {
   uploadCertificateAsset
 } from "../../services/partnerService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { resolveAssetUrl } from "../../utils/assetUrls";
 import { generateCertificatePdf, preloadTemplateImages, generateQrDataUrl } from "../../utils/pdfExport";
 import { CertificateVisualEditor } from "../../components/CertificateVisualEditor";
 
@@ -41,6 +42,7 @@ function BusinessPartnerCertificateTemplatePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [saveMsg, setSaveMsg] = useState("");
   const [uploading, setUploading] = useState({});
 
@@ -54,37 +56,75 @@ function BusinessPartnerCertificateTemplatePage() {
     layoutRef.current = newLayout;
   }, []);
 
+  const applyTemplate = useCallback((nextTemplate) => {
+    const normalizedTemplate = nextTemplate || {};
+    const nextLayout = normalizedTemplate.layout || null;
+
+    layoutRef.current = nextLayout;
+    setTemplate(normalizedTemplate);
+    setTitle(normalizedTemplate.title || "Certificate of Achievement");
+    setSignatoryName(normalizedTemplate.signatoryName || "");
+    setSignatoryDesignation(normalizedTemplate.signatoryDesignation || "");
+    setLayout(nextLayout);
+  }, []);
+
+  const mergeTemplateAssets = useCallback((nextTemplate) => {
+    const normalizedTemplate = nextTemplate || {};
+    setTemplate((previous) => ({ ...(previous || {}), ...normalizedTemplate }));
+  }, []);
+
   const fileInputRefs = useRef({});
 
-  const load = async () => {
+  const load = useCallback(async ({ showSpinner = true, syncForm = true } = {}) => {
     setError("");
-    setLoading(true);
+    if (showSpinner) {
+      setLoading(true);
+    }
     try {
-      const res = await getCertificateTemplate();
-      const t = res.data?.template || {};
-      setTemplate(t);
-      setTitle(t.title || "Certificate of Achievement");
-      setSignatoryName(t.signatoryName || "");
-      setSignatoryDesignation(t.signatoryDesignation || "");
-      setLayout(t.layout || null);
+      const res = await getCertificateTemplate({ fresh: true });
+      const nextTemplate = res.data?.template || {};
+      if (syncForm) {
+        applyTemplate(nextTemplate);
+      } else {
+        mergeTemplateAssets(nextTemplate);
+      }
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load template.");
     } finally {
-      setLoading(false);
+      if (showSpinner) {
+        setLoading(false);
+      }
     }
-  };
+  }, [applyTemplate, mergeTemplateAssets]);
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [load]);
+
+  useEffect(() => {
+    const refreshTemplate = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+      void load({ showSpinner: false, syncForm: false });
+    };
+
+    window.addEventListener("focus", refreshTemplate);
+    document.addEventListener("visibilitychange", refreshTemplate);
+
+    return () => {
+      window.removeEventListener("focus", refreshTemplate);
+      document.removeEventListener("visibilitychange", refreshTemplate);
+    };
+  }, [load]);
 
   const handleSaveText = async (e) => {
     e.preventDefault();
     setSaving(true);
     setSaveMsg("");
     try {
-      const res = await upsertCertificateTemplate({ title, signatoryName, signatoryDesignation, layout: layoutRef.current });
-      setTemplate(res.data?.template || template);
+      await upsertCertificateTemplate({ title, signatoryName, signatoryDesignation, layout: layoutRef.current });
+      await load({ showSpinner: false, syncForm: true });
       setSaveMsg("Template saved.");
     } catch (err) {
       setSaveMsg(getFriendlyErrorMessage(err) || "Save failed.");
@@ -95,9 +135,10 @@ function BusinessPartnerCertificateTemplatePage() {
 
   const handleUpload = async (assetType, file) => {
     setUploading((prev) => ({ ...prev, [assetType]: true }));
+    setSaveMsg("");
     try {
-      const res = await uploadCertificateAsset(assetType, file);
-      setTemplate(res.data?.template || template);
+      await uploadCertificateAsset(assetType, file);
+      await load({ showSpinner: false, syncForm: true });
       setSaveMsg(`${assetType} uploaded.`);
     } catch (err) {
       setSaveMsg(getFriendlyErrorMessage(err) || `Upload failed for ${assetType}.`);
@@ -115,33 +156,43 @@ function BusinessPartnerCertificateTemplatePage() {
   };
 
   const handlePreview = async () => {
-    const rawTemplate = {
-      title: title || "Certificate of Achievement",
-      signatoryName,
-      signatoryDesignation,
-      signatureImageUrl: template?.signatureImageUrl || null,
-      affiliationLogoUrl: template?.affiliationLogoUrl || null,
-      stampImageUrl: template?.stampImageUrl || null,
-      backgroundImageUrl: template?.backgroundImageUrl || null,
-      bpLogoUrl: template?.bpLogoUrl || null,
-      layout: layoutRef.current || layout || null
-    };
-    const enrichedTemplate = await preloadTemplateImages(rawTemplate);
-    let qrDataUrl = null;
     try {
-      qrDataUrl = await generateQrDataUrl(`${window.location.origin}/verify/PREVIEW-SAMPLE`);
-    } catch (_) { /* ignore */ }
-    const doc = generateCertificatePdf({
-      studentName: "Sample Student",
-      levelName: "Level 1 \u2014 Foundation",
-      certificateNumber: "CERT-PREVIEW-0001",
-      issuedAt: new Date().toISOString(),
-      template: enrichedTemplate,
-      qrDataUrl
-    });
-    const blob = doc.output("blob");
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
+      setPreviewing(true);
+      const res = await getCertificateTemplate({ fresh: true });
+      const latestTemplate = res.data?.template || {};
+      applyTemplate(latestTemplate);
+      const rawTemplate = {
+        title: latestTemplate?.title || "Certificate of Achievement",
+        signatoryName: latestTemplate?.signatoryName || "",
+        signatoryDesignation: latestTemplate?.signatoryDesignation || "",
+        signatureImageUrl: latestTemplate?.signatureImageUrl || null,
+        affiliationLogoUrl: latestTemplate?.affiliationLogoUrl || null,
+        stampImageUrl: latestTemplate?.stampImageUrl || null,
+        backgroundImageUrl: latestTemplate?.backgroundImageUrl || null,
+        bpLogoUrl: latestTemplate?.bpLogoUrl || null,
+        layout: latestTemplate?.layout || null
+      };
+      const enrichedTemplate = await preloadTemplateImages(rawTemplate);
+      let qrDataUrl = null;
+      try {
+        qrDataUrl = await generateQrDataUrl(`${window.location.origin}/verify/PREVIEW-SAMPLE`);
+      } catch (_) { /* ignore */ }
+      const doc = generateCertificatePdf({
+        studentName: "Sample Student",
+        levelName: "Level 1 \u2014 Foundation",
+        certificateNumber: "CERT-PREVIEW-0001",
+        issuedAt: new Date().toISOString(),
+        template: enrichedTemplate,
+        qrDataUrl
+      });
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank");
+    } catch (err) {
+      setSaveMsg(getFriendlyErrorMessage(err) || "Preview could not load the latest saved template.");
+    } finally {
+      setPreviewing(false);
+    }
   };
 
   if (loading) return <LoadingState label="Loading certificate template..." />;
@@ -152,17 +203,18 @@ function BusinessPartnerCertificateTemplatePage() {
         <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Certificate Template</h2>
         <button
           onClick={handlePreview}
+          disabled={previewing || saving || Object.values(uploading).some(Boolean)}
           style={{
             padding: "8px 20px",
-            background: "var(--color-primary)",
+            background: previewing || saving || Object.values(uploading).some(Boolean) ? "var(--color-text-faint)" : "var(--color-primary)",
             color: "#fff",
             border: "1px solid var(--color-primary)",
             borderRadius: 6,
             fontWeight: 600,
-            cursor: "pointer"
+            cursor: previewing || saving || Object.values(uploading).some(Boolean) ? "not-allowed" : "pointer"
           }}
         >
-          🔍 Preview Certificate
+          {previewing ? "Loading latest preview..." : "🔍 Preview Certificate"}
         </button>
       </div>
 
@@ -239,6 +291,7 @@ function BusinessPartnerCertificateTemplatePage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16 }}>
         {ASSET_TYPES.map((asset) => {
           const currentUrl = template?.[asset.urlField] || null;
+          const resolvedCurrentUrl = resolveAssetUrl(currentUrl);
           const isUploading = uploading[asset.key] || false;
 
           return (
@@ -258,10 +311,10 @@ function BusinessPartnerCertificateTemplatePage() {
                 <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>{asset.description}</p>
               </div>
 
-              {currentUrl ? (
+              {resolvedCurrentUrl ? (
                 <div style={{ display: "flex", justifyContent: "center", padding: 8, background: "var(--color-bg-subtle)", border: "1px solid var(--color-border-divider)", borderRadius: 8 }}>
                   <img
-                    src={currentUrl}
+                    src={resolvedCurrentUrl}
                     alt={asset.label}
                     style={{ maxWidth: "100%", maxHeight: 120, objectFit: "contain" }}
                   />
@@ -305,7 +358,7 @@ function BusinessPartnerCertificateTemplatePage() {
                   cursor: isUploading ? "not-allowed" : "pointer"
                 }}
               >
-                {isUploading ? "Uploading..." : currentUrl ? "Replace Image" : "Upload Image"}
+                {isUploading ? "Uploading..." : resolvedCurrentUrl ? "Replace Image" : "Upload Image"}
               </button>
             </div>
           );

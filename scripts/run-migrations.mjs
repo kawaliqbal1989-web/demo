@@ -43,12 +43,19 @@ const MIGRATION_SEQUENCE = [
   { wave: "wave3", file: "migration_revenue_split_config.sql", phase: 7, order: 14 },
   { wave: "wave3", file: "migration_subscription_enforcement.sql", phase: 7, order: 15 },
   { wave: "wave3", file: "migration_drop_centerprofile_branding_fields.sql", phase: 7, order: 16 },
-  { wave: "wave3", file: "migration_financial_ledger.sql", phase: 7, order: 17 },
-  { wave: "wave3", file: "migration_notification_automation.sql", phase: 8, order: 18 },
+  { wave: "wave3", file: "migration_centerprofile_branding_schema_restore.sql", phase: 7, order: 17 },
+  { wave: "wave3", file: "migration_financial_ledger.sql", phase: 7, order: 18 },
+  { wave: "wave3", file: "migration_notification_automation.sql", phase: 8, order: 19 },
   // Wave 4: Workflow & AI
-  { wave: "wave4", file: "migration_worksheet_reassignment.sql", phase: 9, order: 19 },
-  { wave: "wave4", file: "migration_competition_workflow_hardening.sql", phase: 9, order: 20 },
-  { wave: "wave4", file: "migration_competition_result_status.sql", phase: 9, order: 21 },
+  { wave: "wave4", file: "migration_worksheet_reassignment.sql", phase: 9, order: 20 },
+  { wave: "wave4", file: "migration_competition_workflow_hardening.sql", phase: 9, order: 21 },
+  { wave: "wave4", file: "migration_competition_result_status.sql", phase: 9, order: 22 },
+  { wave: "wave4", file: "migration_report_export_schema_restore.sql", phase: 9, order: 23 },
+  { wave: "wave4", file: "migration_report_export_job_status_enum_restore.sql", phase: 9, order: 24 },
+  { wave: "wave4", file: "migration_logo_file_path_restore.sql", phase: 9, order: 25 },
+  { wave: "wave4", file: "migration_center_capacity_schema_restore.sql", phase: 9, order: 26 },
+  { wave: "wave4", file: "migration_business_partner_code_normalization.sql", phase: 9, order: 27 },
+  { wave: "wave4", file: "migration_bp_branding_governance.sql", phase: 9, order: 28 },
 ];
 
 /* ── Argument parsing ── */

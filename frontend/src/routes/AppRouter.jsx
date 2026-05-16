@@ -4,6 +4,7 @@ import { ChangePasswordPage } from "../modules/auth/ChangePasswordPage";
 import { UnauthorizedPage } from "../modules/common/UnauthorizedPage";
 import { SubscriptionBlockedPage } from "../modules/common/SubscriptionBlockedPage";
 import { VirtualAbacusPage } from "../modules/common/VirtualAbacusPage";
+import { PrintableReportPage } from "../modules/common/PrintableReportPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { RoleRoute } from "./RoleRoute";
 import { MainLayout } from "../layout/MainLayout";
@@ -41,6 +42,7 @@ import { SuperadminHierarchyPage } from "../modules/superadmin/SuperadminHierarc
 import { SuperadminCompetitionPage } from "../modules/superadmin/SuperadminCompetitionPage";
 import { SuperadminCompetitionPendingPage } from "../modules/superadmin/SuperadminCompetitionPendingPage";
 import { SuperadminCompetitionResultsPage } from "../modules/superadmin/SuperadminCompetitionResultsPage";
+import { SuperadminExportOperationsPage } from "../modules/superadmin/SuperadminExportOperationsPage";
 
 import { CenterStudentsPage } from "../modules/center/CenterStudentsPage";
 import { CenterStudentViewPage } from "../modules/center/CenterStudentViewPage";
@@ -65,6 +67,8 @@ import { CenterAnalyticsPage } from "../modules/center/CenterAnalyticsPage";
 import { CenterReassignmentQueuePage } from "../modules/center/CenterReassignmentQueuePage";
 import { CenterPracticeAssignmentsPage } from "../modules/center/CenterPracticeAssignmentsPage";
 import { CenterAttendanceHistoryPage } from "../modules/center/CenterAttendanceHistoryPage";
+import { CenterWorkflowQueuePage } from "../modules/center/CenterWorkflowQueuePage";
+import { CenterWorkflowDetailPage } from "../modules/center/CenterWorkflowDetailPage";
 import { Student360Page } from "../modules/common/Student360Page";
 
 import { AttendanceSessionRollPage } from "../modules/attendance/AttendanceSessionRollPage";
@@ -87,8 +91,11 @@ import { TeacherExamCyclesPage } from "../modules/teacher/TeacherExamCyclesPage"
 import { TeacherExamEnrollmentPage } from "../modules/teacher/TeacherExamEnrollmentPage";
 import { TeacherAnalyticsPage } from "../modules/teacher/TeacherAnalyticsPage";
 import { TeacherReassignmentQueuePage } from "../modules/teacher/TeacherReassignmentQueuePage";
+import { TeacherWorkflowQueuePage } from "../modules/teacher/TeacherWorkflowQueuePage";
+import { TeacherWorkflowDetailPage } from "../modules/teacher/TeacherWorkflowDetailPage";
 
-import { BusinessPartnerDashboardPage } from "../modules/businessPartner/BusinessPartnerDashboardPage";
+import { BPDashboardPage } from "../modules/bp-dashboard/pages/BPDashboardPage";
+import { BPFranchiseDetailPage } from "../modules/bp-dashboard/pages/BPFranchiseDetailPage";
 import { BusinessPartnerCentersPage } from "../modules/businessPartner/BusinessPartnerCentersPage";
 import { BusinessPartnerRevenuePage } from "../modules/businessPartner/BusinessPartnerRevenuePage";
 import { BusinessPartnerRevenueSplitPage } from "../modules/businessPartner/BusinessPartnerRevenueSplitPage";
@@ -106,6 +113,7 @@ import { BusinessPartnerExamResultsPage } from "../modules/businessPartner/Busin
 import { BusinessPartnerSettlementsPage } from "../modules/businessPartner/BusinessPartnerSettlementsPage";
 import { BusinessPartnerLedgerPage } from "../modules/businessPartner/BusinessPartnerLedgerPage";
 import { BusinessPartnerPracticeAllocationsPage } from "../modules/businessPartner/BusinessPartnerPracticeAllocationsPage";
+import { SettlementWorkflowDetailPage } from "../modules/bp/pages/SettlementWorkflowDetailPage";
 import { FranchiseDashboard } from "../modules/franchise/FranchiseDashboard";
 import { FranchiseCentersPage } from "../modules/franchise/FranchiseCentersPage";
 import { FranchiseStudentsPage } from "../modules/franchise/FranchiseStudentsPage";
@@ -119,6 +127,8 @@ import { FranchiseExamCyclesPage } from "../modules/franchise/FranchiseExamCycle
 import { FranchiseExamPendingListsPage } from "../modules/franchise/FranchiseExamPendingListsPage";
 import { FranchiseExamResultsPage } from "../modules/franchise/FranchiseExamResultsPage";
 import { FranchiseCoursesPage } from "../modules/franchise/FranchiseCoursesPage";
+import { FranchiseWorkflowQueuePage } from "../modules/franchise/FranchiseWorkflowQueuePage";
+import { FranchiseWorkflowDetailPage } from "../modules/franchise/FranchiseWorkflowDetailPage";
 import { StudentDashboardPage } from "../modules/student/StudentDashboardPage";
 import { StudentEnrollmentsPage } from "../modules/student/StudentEnrollmentsPage";
 import { StudentWorksheetsPage } from "../modules/student/StudentWorksheetsPage";
@@ -140,6 +150,7 @@ import { StudentCertificatesPage } from "../modules/student/StudentCertificatesP
 import { StudentAttendancePage } from "../modules/student/StudentAttendancePage";
 import { StudentFeesPage } from "../modules/student/StudentFeesPage";
 import { StudentWeakTopicsPage } from "../modules/student/StudentWeakTopicsPage";
+import { ParentDashboardPage } from "../modules/parent/ParentDashboardPage";
 import { NotificationsPage } from "../modules/common/NotificationsPage";
 import { CertificateVerifyPage } from "../modules/public/CertificateVerifyPage";
 
@@ -153,6 +164,7 @@ function AppRouter() {
       <Route path="/verify/:token" element={<CertificateVerifyPage />} />
 
       <Route element={<ProtectedRoute />}>
+        <Route path="/reports/printable/:reportKey" element={<PrintableReportPage />} />
         <Route element={<MainLayout />}>
           <Route index element={<IndexRedirect />} />
 
@@ -160,6 +172,7 @@ function AppRouter() {
             <Route path="/superadmin/dashboard" element={<SuperadminDashboard />} />
             <Route path="/superadmin/analytics" element={<Navigate to="/superadmin/dashboard" replace />} />
             <Route path="/superadmin/reports" element={<ReportsPage />} />
+            <Route path="/superadmin/export-operations" element={<SuperadminExportOperationsPage />} />
             <Route path="/superadmin/overview" element={<Navigate to="/superadmin/dashboard" replace />} />
             <Route path="/superadmin/business-partners" element={<SuperadminBusinessPartnersPage />} />
             <Route path="/superadmin/business-partners/new" element={<SuperadminBusinessPartnerProfilePage />} />
@@ -216,6 +229,8 @@ function AppRouter() {
             <Route path="/center/reports" element={<CenterReportsPage />} />
             <Route path="/center/settlements" element={<CenterSettlementsPage />} />
             <Route path="/center/analytics" element={<CenterAnalyticsPage />} />
+            <Route path="/center/workflows" element={<CenterWorkflowQueuePage />} />
+            <Route path="/center/workflows/:id" element={<CenterWorkflowDetailPage />} />
             <Route path="/center/reassignment-requests" element={<CenterReassignmentQueuePage />} />
             <Route path="/center/practice-assignments" element={<CenterPracticeAssignmentsPage />} />
           </Route>
@@ -240,6 +255,8 @@ function AppRouter() {
             <Route path="/teacher/exam-cycles" element={<TeacherExamCyclesPage />} />
             <Route path="/teacher/exam-cycles/:examCycleId" element={<TeacherExamEnrollmentPage />} />
             <Route path="/teacher/analytics" element={<TeacherAnalyticsPage />} />
+            <Route path="/teacher/workflows" element={<TeacherWorkflowQueuePage />} />
+            <Route path="/teacher/workflows/:id" element={<TeacherWorkflowDetailPage />} />
             <Route path="/teacher/reassignment-requests" element={<TeacherReassignmentQueuePage />} />
           </Route>
 
@@ -252,7 +269,8 @@ function AppRouter() {
 
           <Route element={<RoleRoute allowedRoles={[ROLES.BP]} />}>
             <Route path="/bp/overview" element={<Navigate to="/bp/dashboard" replace />} />
-            <Route path="/bp/dashboard" element={<BusinessPartnerDashboardPage />} />
+            <Route path="/bp/dashboard" element={<BPDashboardPage />} />
+            <Route path="/bp/franchises/:id" element={<BPFranchiseDetailPage />} />
             <Route path="/bp/profile" element={<BusinessPartnerProfilePage />} />
             <Route path="/bp/franchises" element={<BusinessPartnerFranchisesPage />} />
             <Route path="/bp/courses" element={<BusinessPartnerCoursesPage />} />
@@ -265,6 +283,7 @@ function AppRouter() {
             <Route path="/bp/exam-cycles/:examCycleId/pending" element={<BusinessPartnerExamPendingListsPage />} />
             <Route path="/bp/exam-cycles/:examCycleId/results" element={<BusinessPartnerExamResultsPage />} />
             <Route path="/bp/settlements" element={<BusinessPartnerSettlementsPage />} />
+            <Route path="/bp/settlements/:id" element={<SettlementWorkflowDetailPage />} />
             <Route path="/bp/ledger" element={<BusinessPartnerLedgerPage />} />
             <Route path="/bp/centers" element={<BusinessPartnerCentersPage />} />
             <Route path="/bp/revenue" element={<BusinessPartnerRevenuePage />} />
@@ -287,6 +306,8 @@ function AppRouter() {
             <Route path="/franchise/reports" element={<FranchiseReportsPage />} />
             <Route path="/franchise/margins" element={<FranchiseMarginsPage />} />
             <Route path="/franchise/settlements" element={<FranchiseSettlementsPage />} />
+            <Route path="/franchise/workflows" element={<FranchiseWorkflowQueuePage />} />
+            <Route path="/franchise/workflows/:id" element={<FranchiseWorkflowDetailPage />} />
             <Route path="/franchise/practice-allocations" element={<BusinessPartnerPracticeAllocationsPage />} />
           </Route>
 
@@ -314,6 +335,11 @@ function AppRouter() {
             <Route path="/student/attendance" element={<StudentAttendancePage />} />
             <Route path="/student/fees" element={<StudentFeesPage />} />
             <Route path="/student/weak-topics" element={<StudentWeakTopicsPage />} />
+          </Route>
+
+          <Route element={<RoleRoute allowedRoles={[ROLES.PARENT]} />}>
+            <Route path="/parent/dashboard" element={<ParentDashboardPage />} />
+            <Route path="/parent/overview" element={<Navigate to="/parent/dashboard" replace />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/unauthorized" replace />} />

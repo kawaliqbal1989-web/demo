@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { CapacityInlineNotice, buildCapacityRequestHref } from "../../components/CapacityGovernance";
 import { DataTable } from "../../components/DataTable";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { PageHeader } from "../../components/PageHeader";
+import { useCenterCapacitySnapshot } from "../../hooks/useCenterCapacitySnapshot";
 import { createTeacher, listTeachers, resetTeacherPassword, shiftTeacherStudents, updateTeacher, uploadTeacherPhoto } from "../../services/teachersService";
 import { listStudents } from "../../services/studentsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { resolveAssetUrl } from "../../utils/assetUrls";
+import { buildCapacityLimitMessage, shouldDisableCapacityAction } from "../../utils/capacityGovernance";
 
 const photoFrameStyle = {
   display: "inline-flex",
@@ -29,6 +32,12 @@ const buildPhotoStyle = (size, objectFit = "cover") => ({
 });
 
 function CenterTeachersPage() {
+  const {
+    data: capacitySnapshot,
+    error: capacityError,
+    loading: capacityLoading,
+    retry: retryCapacity
+  } = useCenterCapacitySnapshot();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -504,6 +513,8 @@ function CenterTeachersPage() {
     : "";
   const createPhotoPreviewSrc = photoPreview || resolvePhotoUrl(photoUrl);
   const createPhotoPreviewLabel = photoPreview ? "Selected Photo" : "Photo Preview";
+  const teacherActionsLocked = shouldDisableCapacityAction(capacitySnapshot, "teachers");
+  const teacherLimitMessage = buildCapacityLimitMessage(capacitySnapshot?.usage?.teachers, "Teacher");
 
   if (loading && !rows.length) {
     return <SkeletonLoader variant="table" rows={6} />;
@@ -512,6 +523,15 @@ function CenterTeachersPage() {
   return (
     <section style={{ display: "grid", gap: 12 }}>
       <PageHeader title="Teachers" subtitle="Create and manage teachers for this center." />
+
+      <CapacityInlineNotice
+        title="Teacher seats"
+        metric={capacitySnapshot?.usage?.teachers}
+        loading={capacityLoading}
+        error={capacityError}
+        onRetry={retryCapacity}
+        requestHref={capacitySnapshot ? buildCapacityRequestHref(capacitySnapshot, "teachers") : "#"}
+      />
 
       {error ? (
         <div className="card">
@@ -707,7 +727,7 @@ function CenterTeachersPage() {
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button className="button" style={{ width: "auto" }} disabled={creating}>
+          <button className="button" style={{ width: "auto" }} disabled={creating || teacherActionsLocked} title={teacherLimitMessage}>
             {creating ? "Creating..." : "Create Teacher"}
           </button>
           <button type="button" className="button secondary" style={{ width: "auto" }} onClick={resetForm} disabled={creating}>

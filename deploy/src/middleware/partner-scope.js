@@ -1,7 +1,10 @@
 import { asyncHandler } from "../utils/async-handler.js";
 import { prisma } from "../lib/prisma.js";
-import { resolveBusinessPartnerForUser } from "../services/financial-reporting.service.js";
-import { resolveBusinessPartnerHierarchyNodeIds } from "../services/business-partner-cascade.service.js";
+import {
+  resolveBusinessPartnerForUser,
+  resolveBusinessPartnerScope
+} from "../services/bp-scope.service.js";
+import { toBpScopeIdsOrImpossible } from "../utils/bp-scope-filters.js";
 
 async function ensureBusinessPartnerHierarchyRoot({ tenantId, authUserId, businessPartner }) {
   if (businessPartner?.hierarchyNodeId) {
@@ -94,25 +97,31 @@ const requireBusinessPartnerScope = asyncHandler(async (req, res, next) => {
     ? { ...partner, hierarchyNodeId: ensuredHierarchyNodeId }
     : partner;
 
-  const hierarchyNodeIds = await resolveBusinessPartnerHierarchyNodeIds({
+  const resolvedScope = await resolveBusinessPartnerScope({
     tenantId: req.auth.tenantId,
-    businessPartnerId: partner.id
+    businessPartnerId: partner.id,
+    forceRefresh: effectivePartner.hierarchyNodeId !== partner.hierarchyNodeId
   });
-
-  // Important: Many partner endpoints conditionally apply filters only when
-  // nodeIds.length > 0. If a partner has no hierarchyNodeId, this would
-  // accidentally remove the filter and expose tenant-wide counts.
-  const effectiveNodeIds = hierarchyNodeIds.length ? hierarchyNodeIds : ["__NO_BP_SCOPE__"];
+  const hierarchyNodeIds = toBpScopeIdsOrImpossible(resolvedScope?.hierarchyNodeIds);
+  const franchiseIds = toBpScopeIdsOrImpossible(resolvedScope?.franchiseIds);
+  const centerIds = toBpScopeIdsOrImpossible(resolvedScope?.centerIds);
 
   req.bpScope = {
-    businessPartner: effectivePartner,
-    hierarchyNodeIds: effectiveNodeIds
+    businessPartner: resolvedScope?.businessPartner || effectivePartner,
+    hierarchyNodeIds,
+    franchiseIds,
+    centerIds
   };
 
   res.locals.auditMetadata = {
     ...(res.locals.auditMetadata || {}),
     businessPartnerId: partner.id,
-    scopeNodeIdsCount: hierarchyNodeIds.length
+    scopeNodeIdsCount: resolvedScope?.hierarchyNodeIds?.length || 0,
+    scopeFranchiseIdsCount: resolvedScope?.franchiseIds?.length || 0,
+    scopeCenterIdsCount: resolvedScope?.centerIds?.length || 0,
+    bpScopeUsedLegacyFallback: Boolean(resolvedScope?.meta?.usedLegacyFallback),
+    bpScopeUsedExplicitScopes: Boolean(resolvedScope?.meta?.usedExplicitScopes),
+    bpScopeCacheHit: Boolean(resolvedScope?.meta?.cacheHit)
   };
 
   return next();

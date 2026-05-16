@@ -78,7 +78,7 @@ async function computeStreaks(studentId, tenantId) {
 
   // Practice streak: consecutive days with at least one submission
   const submissions = await prisma.worksheetSubmission.findMany({
-    where: { tenantId, studentId, submittedAt: { not: null } },
+    where: { tenantId, studentId },
     orderBy: { submittedAt: "desc" },
     take: 200,
     select: { submittedAt: true },

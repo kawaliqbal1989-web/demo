@@ -55,6 +55,15 @@ import {
   getReadiness,
   getPerformanceExplainer,
 } from "../controllers/student-coach.controller.js";
+import {
+  getStudentDashboardAchievementsController,
+  getStudentDashboardAttendanceTrendsController,
+  getStudentDashboardOverviewController,
+  getStudentDashboardPracticeTrendsController,
+  getStudentDashboardRemindersController,
+  getStudentDashboardStreaksController,
+  getStudentDashboardWeakTopicsController
+} from "../controllers/student-dashboard.controller.js";
 import { getStudentAiNarrative } from "../controllers/ai-narrative.controller.js";
 import { auditAction } from "../middleware/audit-logger.js";
 import { authRateLimiter } from "../middleware/auth-rate-limit.js";
@@ -67,6 +76,48 @@ studentRouter.get(
   "/me",
   auditAction("STUDENT_VIEW_ME", "STUDENT", (req) => req.student.id),
   getStudentMe
+);
+
+studentRouter.get(
+  "/dashboard/overview",
+  auditAction("STUDENT_VIEW_DASHBOARD_OVERVIEW", "STUDENT", (req) => req.student.id),
+  getStudentDashboardOverviewController
+);
+
+studentRouter.get(
+  "/dashboard/streaks",
+  auditAction("STUDENT_VIEW_DASHBOARD_STREAKS", "STUDENT", (req) => req.student.id),
+  getStudentDashboardStreaksController
+);
+
+studentRouter.get(
+  "/dashboard/achievements",
+  auditAction("STUDENT_VIEW_DASHBOARD_ACHIEVEMENTS", "STUDENT", (req) => req.student.id),
+  getStudentDashboardAchievementsController
+);
+
+studentRouter.get(
+  "/dashboard/practice-trends",
+  auditAction("STUDENT_VIEW_DASHBOARD_PRACTICE_TRENDS", "STUDENT", (req) => req.student.id),
+  getStudentDashboardPracticeTrendsController
+);
+
+studentRouter.get(
+  "/dashboard/attendance-trends",
+  auditAction("STUDENT_VIEW_DASHBOARD_ATTENDANCE_TRENDS", "STUDENT", (req) => req.student.id),
+  getStudentDashboardAttendanceTrendsController
+);
+
+studentRouter.get(
+  "/dashboard/weak-topics",
+  auditAction("STUDENT_VIEW_DASHBOARD_WEAK_TOPICS", "STUDENT", (req) => req.student.id),
+  getStudentDashboardWeakTopicsController
+);
+
+studentRouter.get(
+  "/dashboard/reminders",
+  auditAction("STUDENT_VIEW_DASHBOARD_REMINDERS", "STUDENT", (req) => req.student.id),
+  getStudentDashboardRemindersController
 );
 
 studentRouter.patch(

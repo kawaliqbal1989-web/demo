@@ -301,7 +301,7 @@ async function main() {
     where: {
       tenantId_code: {
         tenantId: tenant.id,
-        code: "BP-001"
+        code: "BP001"
       }
     },
     update: {
@@ -313,7 +313,7 @@ async function main() {
     create: {
       tenantId: tenant.id,
       name: "North Growth Partner",
-      code: "BP-001",
+      code: "BP001",
       displayName: "North Partner",
       status: "ACTIVE",
       isActive: true,
@@ -487,7 +487,7 @@ async function main() {
     where: {
       tenantId_code: {
         tenantId: tenant2.id,
-        code: "BP-002"
+        code: "BP002"
       }
     },
     update: {
@@ -497,7 +497,7 @@ async function main() {
     create: {
       tenantId: tenant2.id,
       name: "Other Partner",
-      code: "BP-002",
+      code: "BP002",
       displayName: "Other BP",
       status: "ACTIVE",
       isActive: true,

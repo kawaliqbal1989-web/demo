@@ -4,6 +4,29 @@ import { auditAction } from "../middleware/audit-logger.js";
 import { requireFranchiseScope } from "../middleware/franchise-scope.js";
 import { requireScopeAccess } from "../middleware/scope-access.js";
 import {
+  getFranchiseCenterHealthDashboard,
+  getFranchiseOperationalAnomalies,
+  getFranchiseOperationalOverview,
+  getFranchiseOperationalTrends,
+  getFranchiseTeacherOperations
+} from "../controllers/franchise-dashboard.controller.js";
+import {
+  acknowledgeFranchiseEscalationAction,
+  acknowledgeFranchiseWorkflowAction,
+  escalateFranchiseCenterRiskAction,
+  forwardFranchiseEscalationAction,
+  getFranchiseWorkflowById,
+  getFranchiseWorkflowHistoryById,
+  listFranchiseWorkflowAnomalyQueue,
+  listFranchiseWorkflowEscalationQueue,
+  listFranchiseWorkflowQueue,
+  listFranchiseWorkflowReviewQueue,
+  reopenFranchiseWorkflowAction,
+  requestFranchiseCenterActionHandler,
+  resolveFranchiseWorkflowAction,
+  reviewFranchiseWorkflowAction
+} from "../controllers/franchise-workflow.controller.js";
+import {
   createCenter,
   deleteCenter,
   resetCenterPassword,
@@ -41,6 +64,120 @@ franchiseRouter.get(
   "/dashboard",
   auditAction("FRANCHISE_VIEW_DASHBOARD", "FRANCHISE"),
   getFranchiseDashboard
+);
+
+franchiseRouter.get(
+  "/dashboard/overview",
+  auditAction("FRANCHISE_VIEW_DASHBOARD", "FRANCHISE"),
+  getFranchiseOperationalOverview
+);
+
+franchiseRouter.get(
+  "/dashboard/center-health",
+  auditAction("FRANCHISE_VIEW_DASHBOARD", "CENTER"),
+  getFranchiseCenterHealthDashboard
+);
+
+franchiseRouter.get(
+  "/dashboard/teacher-ops",
+  auditAction("FRANCHISE_VIEW_DASHBOARD", "TEACHER"),
+  getFranchiseTeacherOperations
+);
+
+franchiseRouter.get(
+  "/dashboard/anomalies",
+  auditAction("FRANCHISE_VIEW_DASHBOARD", "FRANCHISE"),
+  getFranchiseOperationalAnomalies
+);
+
+franchiseRouter.get(
+  "/dashboard/trends",
+  auditAction("FRANCHISE_VIEW_DASHBOARD", "FRANCHISE"),
+  getFranchiseOperationalTrends
+);
+
+franchiseRouter.get(
+  "/workflows/queues",
+  auditAction("FRANCHISE_VIEW_WORKFLOW_QUEUE", "FRANCHISE_OPERATIONAL_WORKFLOW"),
+  listFranchiseWorkflowQueue
+);
+
+franchiseRouter.get(
+  "/workflows/queues/reviews",
+  auditAction("FRANCHISE_VIEW_WORKFLOW_QUEUE", "FRANCHISE_OPERATIONAL_WORKFLOW"),
+  listFranchiseWorkflowReviewQueue
+);
+
+franchiseRouter.get(
+  "/workflows/queues/anomalies",
+  auditAction("FRANCHISE_VIEW_WORKFLOW_QUEUE", "FRANCHISE_OPERATIONAL_WORKFLOW"),
+  listFranchiseWorkflowAnomalyQueue
+);
+
+franchiseRouter.get(
+  "/workflows/queues/escalations",
+  auditAction("FRANCHISE_VIEW_WORKFLOW_QUEUE", "FRANCHISE_OPERATIONAL_WORKFLOW"),
+  listFranchiseWorkflowEscalationQueue
+);
+
+franchiseRouter.get(
+  "/workflows/:id",
+  auditAction("FRANCHISE_VIEW_WORKFLOW_DETAIL", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  getFranchiseWorkflowById
+);
+
+franchiseRouter.get(
+  "/workflows/:id/history",
+  auditAction("FRANCHISE_VIEW_WORKFLOW_HISTORY", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  getFranchiseWorkflowHistoryById
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/review",
+  auditAction("FRANCHISE_REVIEW_WORKFLOW", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  reviewFranchiseWorkflowAction
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/acknowledge",
+  auditAction("FRANCHISE_ACKNOWLEDGE_WORKFLOW", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  acknowledgeFranchiseWorkflowAction
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/request-center-action",
+  auditAction("FRANCHISE_REQUEST_CENTER_ACTION", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  requestFranchiseCenterActionHandler
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/escalate",
+  auditAction("FRANCHISE_ESCALATE_CENTER_RISK", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  escalateFranchiseCenterRiskAction
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/acknowledge-escalation",
+  auditAction("FRANCHISE_ACKNOWLEDGE_ESCALATION", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  acknowledgeFranchiseEscalationAction
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/forward",
+  auditAction("FRANCHISE_FORWARD_ESCALATION", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  forwardFranchiseEscalationAction
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/resolve",
+  auditAction("FRANCHISE_RESOLVE_WORKFLOW", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  resolveFranchiseWorkflowAction
+);
+
+franchiseRouter.post(
+  "/workflows/:id/actions/reopen",
+  auditAction("FRANCHISE_REOPEN_WORKFLOW", "FRANCHISE_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  reopenFranchiseWorkflowAction
 );
 
 franchiseRouter.get(

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
+import { ReportActionButtons } from "../../components/ReportActionButtons";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
@@ -68,9 +69,12 @@ function FranchiseReportsPage() {
             <h2 style={{ margin: 0 }}>Reports</h2>
             <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Center-level summary</div>
           </div>
-          <button className="button secondary" style={{ width: "auto" }} onClick={handleExport}>
-            Export CSV
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            <ReportActionButtons reportKey="franchise-operational" />
+            <button className="button secondary" style={{ width: "auto" }} onClick={handleExport}>
+              Export CSV
+            </button>
+          </div>
         </div>
         {summary ? (
           <div style={{ marginTop: 12, display: "flex", gap: 16, flexWrap: "wrap" }}>

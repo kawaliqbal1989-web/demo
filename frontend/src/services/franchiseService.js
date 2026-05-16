@@ -123,6 +123,143 @@ async function listFranchiseCourses() {
   return res.data;
 }
 
+async function listFranchiseWorkflowQueue(
+  { limit = 20, offset = 0, q, status, severity, type, centerId, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const res = await apiClient.get("/franchise/workflows/queues", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      centerId: centerId || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return res.data;
+}
+
+async function listFranchiseWorkflowReviewQueue(
+  { limit = 20, offset = 0, q, status, severity, type, centerId, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const res = await apiClient.get("/franchise/workflows/queues/reviews", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      centerId: centerId || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return res.data;
+}
+
+async function listFranchiseWorkflowAnomalyQueue(
+  { limit = 20, offset = 0, q, status, severity, type, centerId, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const res = await apiClient.get("/franchise/workflows/queues/anomalies", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      centerId: centerId || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return res.data;
+}
+
+async function listFranchiseWorkflowEscalationQueue(
+  { limit = 20, offset = 0, q, status, severity, type, centerId, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const res = await apiClient.get("/franchise/workflows/queues/escalations", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      centerId: centerId || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return res.data;
+}
+
+async function getFranchiseWorkflowDetail(id, config = {}) {
+  const res = await apiClient.get(`/franchise/workflows/${id}`, config);
+  return res.data;
+}
+
+async function getFranchiseWorkflowHistory(id, { limit = 20, offset = 0 } = {}, config = {}) {
+  const res = await apiClient.get(`/franchise/workflows/${id}/history`, {
+    ...config,
+    params: {
+      limit,
+      offset
+    }
+  });
+  return res.data;
+}
+
+async function postFranchiseWorkflowAction(id, actionPath, payload = {}) {
+  const res = await apiClient.post(`/franchise/workflows/${id}/actions/${actionPath}`, payload);
+  return res.data;
+}
+
+async function reviewFranchiseWorkflow(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "review", payload);
+}
+
+async function acknowledgeFranchiseWorkflow(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "acknowledge", payload);
+}
+
+async function requestFranchiseCenterAction(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "request-center-action", payload);
+}
+
+async function escalateFranchiseWorkflow(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "escalate", payload);
+}
+
+async function acknowledgeFranchiseEscalation(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "acknowledge-escalation", payload);
+}
+
+async function forwardFranchiseEscalation(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "forward", payload);
+}
+
+async function resolveFranchiseWorkflow(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "resolve", payload);
+}
+
+async function reopenFranchiseWorkflow(id, payload = {}) {
+  return postFranchiseWorkflowAction(id, "reopen", payload);
+}
+
 export {
   getMyFranchise,
   getFranchiseDashboard,
@@ -141,5 +278,19 @@ export {
   updateFranchiseProfile,
   listFranchiseMargins,
   listFranchiseSettlements,
-  listFranchiseCourses
+  listFranchiseCourses,
+  listFranchiseWorkflowQueue,
+  listFranchiseWorkflowReviewQueue,
+  listFranchiseWorkflowAnomalyQueue,
+  listFranchiseWorkflowEscalationQueue,
+  getFranchiseWorkflowDetail,
+  getFranchiseWorkflowHistory,
+  reviewFranchiseWorkflow,
+  acknowledgeFranchiseWorkflow,
+  requestFranchiseCenterAction,
+  escalateFranchiseWorkflow,
+  acknowledgeFranchiseEscalation,
+  forwardFranchiseEscalation,
+  resolveFranchiseWorkflow,
+  reopenFranchiseWorkflow
 };

@@ -104,6 +104,155 @@ async function getStudent360(studentId) {
   return response.data;
 }
 
+async function listCenterWorkflowQueue(
+  { limit = 20, offset = 0, q, status, severity, type, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const response = await apiClient.get("/center/workflows/queues", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return response.data;
+}
+
+async function listCenterAttendanceWorkflowQueue(
+  { limit = 20, offset = 0, q, status, severity, type, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const response = await apiClient.get("/center/workflows/queues/attendance", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return response.data;
+}
+
+async function listCenterWorksheetWorkflowQueue(
+  { limit = 20, offset = 0, q, status, severity, type, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const response = await apiClient.get("/center/workflows/queues/worksheets", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return response.data;
+}
+
+async function listCenterTeacherWorkflowQueue(
+  { limit = 20, offset = 0, q, status, severity, type, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const response = await apiClient.get("/center/workflows/queues/teachers", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return response.data;
+}
+
+async function listCenterAnomalyWorkflowQueue(
+  { limit = 20, offset = 0, q, status, severity, type, sortBy, sortOrder } = {},
+  config = {}
+) {
+  const response = await apiClient.get("/center/workflows/queues/anomalies", {
+    ...config,
+    params: {
+      limit,
+      offset,
+      q: q || undefined,
+      status: status || undefined,
+      severity: severity || undefined,
+      type: type || undefined,
+      sortBy: sortBy || undefined,
+      sortOrder: sortOrder || undefined
+    }
+  });
+  return response.data;
+}
+
+async function getCenterWorkflowDetail(id, config = {}) {
+  const response = await apiClient.get(`/center/workflows/${id}`, config);
+  return response.data;
+}
+
+async function getCenterWorkflowHistory(id, { limit = 20, offset = 0 } = {}, config = {}) {
+  const response = await apiClient.get(`/center/workflows/${id}/history`, {
+    ...config,
+    params: {
+      limit,
+      offset
+    }
+  });
+  return response.data;
+}
+
+async function postCenterWorkflowAction(id, actionPath, payload = {}) {
+  const response = await apiClient.post(`/center/workflows/${id}/actions/${actionPath}`, payload);
+  return response.data;
+}
+
+async function reviewCenterWorkflow(id, payload = {}) {
+  return postCenterWorkflowAction(id, "review", payload);
+}
+
+async function acknowledgeCenterWorkflow(id, payload = {}) {
+  return postCenterWorkflowAction(id, "acknowledge", payload);
+}
+
+async function startCenterWorkflowRecovery(id, payload = {}) {
+  return postCenterWorkflowAction(id, "start-recovery", payload);
+}
+
+async function scheduleCenterWorkflowFollowUp(id, payload = {}) {
+  return postCenterWorkflowAction(id, "schedule-follow-up", payload);
+}
+
+async function escalateCenterWorkflow(id, payload = {}) {
+  return postCenterWorkflowAction(id, "escalate", payload);
+}
+
+async function resolveCenterWorkflow(id, payload = {}) {
+  return postCenterWorkflowAction(id, "resolve", payload);
+}
+
+async function reopenCenterWorkflow(id, payload = {}) {
+  return postCenterWorkflowAction(id, "reopen", payload);
+}
+
 export {
   getCenterMe,
   getCenterDashboard,
@@ -127,4 +276,18 @@ export {
   getStudentAttendanceHistory,
   listAttendanceHistory,
   getStudent360,
+  listCenterWorkflowQueue,
+  listCenterAttendanceWorkflowQueue,
+  listCenterWorksheetWorkflowQueue,
+  listCenterTeacherWorkflowQueue,
+  listCenterAnomalyWorkflowQueue,
+  getCenterWorkflowDetail,
+  getCenterWorkflowHistory,
+  reviewCenterWorkflow,
+  acknowledgeCenterWorkflow,
+  startCenterWorkflowRecovery,
+  scheduleCenterWorkflowFollowUp,
+  escalateCenterWorkflow,
+  resolveCenterWorkflow,
+  reopenCenterWorkflow,
 };

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { ErrorState } from "../../components/ErrorState";
 import { MetricCard } from "../../components/MetricCard";
+import { ReportActionButtons } from "../../components/ReportActionButtons";
 import { useAuth } from "../../hooks/useAuth";
 import { getDashboardSummary, getHealthMetrics } from "../../services/reportsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
@@ -123,6 +125,33 @@ function ReportsPage() {
         </div>
 
         {error ? <p className="error" style={{ margin: 0 }}>{error}</p> : null}
+      </div>
+
+      <div className="card" style={{ display: "grid", gap: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Foundation exports</h3>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 4 }}>
+              Printable, PDF, and Excel outputs for the governance and workflow reporting foundation.
+            </div>
+          </div>
+          <Link className="button secondary" style={{ width: "auto", textDecoration: "none" }} to="/superadmin/export-operations">
+            Open operations center
+          </Link>
+        </div>
+        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Printable, PDF, and Excel outputs for the governance and workflow reporting foundation.
+          </div>
+        <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+          <div style={{ padding: 12, borderRadius: 12, background: "var(--color-bg-subtle)" }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Governance audit summary</div>
+            <ReportActionButtons reportKey="governance-audit" />
+          </div>
+          <div style={{ padding: 12, borderRadius: 12, background: "var(--color-bg-subtle)" }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Workflow lifecycle summary</div>
+            <ReportActionButtons reportKey="workflow-lifecycle" />
+          </div>
+        </div>
       </div>
 
       <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>

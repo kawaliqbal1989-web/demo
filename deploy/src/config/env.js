@@ -41,6 +41,15 @@ function envOrDefault(name, fallback) {
   return value || fallback;
 }
 
+function envFlag(name, fallback = false) {
+  const value = normalizeEnvValue(process.env[`${name}`]);
+  if (!value) {
+    return fallback;
+  }
+
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
 const nodeEnv = envOrDefault("NODE_ENV", "development");
 const isProduction = nodeEnv === "production";
 
@@ -65,6 +74,12 @@ const env = {
     .filter(Boolean) ,
   kpiRateLimitWindowMs: Number(envOrDefault("KPI_RATE_LIMIT_WINDOW_MS", "60000")),
   kpiRateLimitMax: Number(envOrDefault("KPI_RATE_LIMIT_MAX", "120")),
+  analyticsSchedulerEnabled: envFlag("ANALYTICS_SCHEDULER_ENABLED", false),
+  analyticsSchedulerRunOnStartup: envFlag("ANALYTICS_SCHEDULER_RUN_ON_STARTUP", false),
+  analyticsSchedulerPollMs: Number(envOrDefault("ANALYTICS_SCHEDULER_POLL_MS", "300000")),
+  analyticsSchedulerRunHourUtc: Number(envOrDefault("ANALYTICS_SCHEDULER_RUN_HOUR_UTC", "1")),
+  analyticsSchedulerRunMinuteUtc: Number(envOrDefault("ANALYTICS_SCHEDULER_RUN_MINUTE_UTC", "15")),
+  analyticsSchedulerLookbackDays: Number(envOrDefault("ANALYTICS_SCHEDULER_LOOKBACK_DAYS", "2")),
   geminiApiKey: envOrDefault("GEMINI_API_KEY", ""),
   aiDailyLimit: Number(envOrDefault("AI_DAILY_LIMIT", "30"))
 };
@@ -74,6 +89,10 @@ if (env.port < 1 || env.port > 65535) throw new Error("PORT must be between 1 an
 if (env.authRateLimitMax < 1) throw new Error("AUTH_RATE_LIMIT_MAX must be > 0");
 if (env.authRateLimitWindowMs < 1000) throw new Error("AUTH_RATE_LIMIT_WINDOW_MS must be >= 1000");
 if (env.kpiRateLimitMax < 1) throw new Error("KPI_RATE_LIMIT_MAX must be > 0");
+if (env.analyticsSchedulerPollMs < 1000) throw new Error("ANALYTICS_SCHEDULER_POLL_MS must be >= 1000");
+if (env.analyticsSchedulerRunHourUtc < 0 || env.analyticsSchedulerRunHourUtc > 23) throw new Error("ANALYTICS_SCHEDULER_RUN_HOUR_UTC must be between 0 and 23");
+if (env.analyticsSchedulerRunMinuteUtc < 0 || env.analyticsSchedulerRunMinuteUtc > 59) throw new Error("ANALYTICS_SCHEDULER_RUN_MINUTE_UTC must be between 0 and 59");
+if (env.analyticsSchedulerLookbackDays < 1) throw new Error("ANALYTICS_SCHEDULER_LOOKBACK_DAYS must be > 0");
 if (env.aiDailyLimit < 1) throw new Error("AI_DAILY_LIMIT must be > 0");
 
 export { env };

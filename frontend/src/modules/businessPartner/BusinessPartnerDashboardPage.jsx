@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
-import { MetricCard } from "../../components/MetricCard";
 import { PageHeader } from "../../components/PageHeader";
+import { getPartnerProfile } from "../../services/partnerService";
 import { InsightPanel } from "../../components/InsightCard";
 import { NetworkPulseCard, CenterRanking } from "../../components/LeadershipIntel";
 import { getInsights } from "../../services/insightsService";
@@ -10,7 +10,6 @@ import { getBpNetworkPulse } from "../../services/leadershipIntelService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getPartnerDashboard } from "../../services/partnerService";
 import { useAuth } from "../../hooks/useAuth";
-import { getMyBusinessPartner } from "../../services/businessPartnersService";
 import { resolveAssetUrl } from "../../utils/assetUrls";
 import { NetworkAdvisor } from "../../components/AiNarrativeSurfaces";
 
@@ -131,7 +130,7 @@ function BusinessPartnerDashboardPage() {
     try {
       const resp = await getPartnerDashboard();
       setData(resp?.data || null);
-      const mine = await getMyBusinessPartner();
+      const mine = await getPartnerProfile({ _suppressErrorLogging: true });
       setPartner(mine?.data || null);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load dashboard.");

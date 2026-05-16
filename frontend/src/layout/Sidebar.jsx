@@ -18,6 +18,7 @@ const ROLE_ACCENT_MAP = {
   CENTER: "var(--role-center)",
   TEACHER: "var(--role-teacher)",
   STUDENT: "var(--role-student)",
+  PARENT: "var(--role-parent)",
 };
 
 function Sidebar({ open, onClose }) {

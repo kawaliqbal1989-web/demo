@@ -1,5 +1,15 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../lib/prisma-compat.js";
 import { prisma } from "../lib/prisma.js";
+import {
+  getCenterAttendanceOperationalAnalytics,
+  getCenterBatchHealthAnalytics,
+  getCenterOperationalAnomaliesAnalytics,
+  getCenterOperationalOverviewAnalytics,
+  getCenterOperationalTrendsAnalytics,
+  getCenterTeacherOperationalAnalytics,
+  getCenterWorksheetOperationalAnalytics,
+  resolveCenterOperationalScope
+} from "./center-operational-analytics.service.js";
 
 function toSafe(v) {
   if (v === null || v === undefined) return 0;
@@ -598,5 +608,13 @@ export {
   getMockTestAnalytics,
   getExamAnalytics,
   getCompetitionAnalytics,
-  getStudentProgressAnalytics
+  getStudentProgressAnalytics,
+  getCenterAttendanceOperationalAnalytics,
+  getCenterBatchHealthAnalytics,
+  getCenterOperationalAnomaliesAnalytics,
+  getCenterOperationalOverviewAnalytics,
+  getCenterOperationalTrendsAnalytics,
+  getCenterTeacherOperationalAnalytics,
+  getCenterWorksheetOperationalAnalytics,
+  resolveCenterOperationalScope
 };

@@ -3729,6 +3729,8 @@ const listStudentCertificates = asyncHandler(async (req, res) => {
     issuedAt: true,
     revokedAt: true,
     reason: true,
+    brandingSnapshot: true,
+    metadata: true,
     level: { select: { id: true, name: true, rank: true } }
   };
 
@@ -3763,7 +3765,9 @@ const listStudentCertificates = asyncHandler(async (req, res) => {
     issuedAt: c.issuedAt,
     revokedAt: c.revokedAt,
     reason: c.reason,
-    verificationToken: c.verificationToken || null
+    verificationToken: c.verificationToken || null,
+    brandingSnapshot: c.brandingSnapshot || c.metadata?.brandingSnapshot || null,
+    certificateTemplate: c.brandingSnapshot?.certificateTemplate || c.metadata?.brandingSnapshot?.certificateTemplate || null
   }));
 
   return res.apiSuccess("Student certificates fetched", data);

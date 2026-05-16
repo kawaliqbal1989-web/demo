@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 
-import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "./prisma-compat.js";
 
 dotenv.config(
   process.env.DOTENV_CONFIG_PATH
@@ -17,6 +16,10 @@ export function createPrismaClient(databaseUrl = process.env.DATABASE_URL) {
   }
 
   return new PrismaClient({
-    adapter: new PrismaMariaDb(databaseUrl)
+    datasources: {
+      db: {
+        url: databaseUrl
+      }
+    }
   });
 }

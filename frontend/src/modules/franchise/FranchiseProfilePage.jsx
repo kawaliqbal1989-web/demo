@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "../../hooks/useAuth";
 import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { getMyFranchise, updateFranchiseProfile } from "../../services/franchiseService";
 import { resolveAssetUrl } from "../../utils/assetUrls";
 
 function FranchiseProfilePage() {
+  useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -16,8 +18,7 @@ function FranchiseProfilePage() {
     displayName: "",
     phonePrimary: "",
     emailOfficial: "",
-    whatsappEnabled: false,
-    logoUrl: ""
+    whatsappEnabled: false
   });
 
   useEffect(() => {
@@ -34,8 +35,7 @@ function FranchiseProfilePage() {
             displayName: p.displayName || "",
             phonePrimary: p.phonePrimary || "",
             emailOfficial: p.emailOfficial || "",
-            whatsappEnabled: !!p.whatsappEnabled,
-            logoUrl: p.logoUrl || ""
+            whatsappEnabled: !!p.whatsappEnabled
           });
         }
       })
@@ -68,7 +68,6 @@ function FranchiseProfilePage() {
       if (form.phonePrimary !== (profile?.phonePrimary || "")) payload.phonePrimary = form.phonePrimary || null;
       if (form.emailOfficial !== (profile?.emailOfficial || "")) payload.emailOfficial = form.emailOfficial || null;
       if (form.whatsappEnabled !== !!profile?.whatsappEnabled) payload.whatsappEnabled = form.whatsappEnabled;
-      if (form.logoUrl !== (profile?.logoUrl || "")) payload.logoUrl = form.logoUrl || null;
 
       if (!Object.keys(payload).length) {
         setSuccess("No changes to save.");
@@ -98,8 +97,7 @@ function FranchiseProfilePage() {
         displayName: profile.displayName || "",
         phonePrimary: profile.phonePrimary || "",
         emailOfficial: profile.emailOfficial || "",
-        whatsappEnabled: !!profile.whatsappEnabled,
-        logoUrl: profile.logoUrl || ""
+        whatsappEnabled: !!profile.whatsappEnabled
       });
     }
   };
@@ -135,7 +133,9 @@ function FranchiseProfilePage() {
             alt="Franchise logo"
             style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover" }}
           />
-        ) : null}
+        ) : (
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>No logo configured. Logo is managed by SuperAdmin.</div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "160px 1fr", gap: 8, fontSize: 13 }}>
           <div style={{ color: "var(--color-text-muted)" }}>Franchise Code</div>
           <div>{profile?.code || "—"}</div>
@@ -161,10 +161,6 @@ function FranchiseProfilePage() {
           <label style={{ display: "grid", gap: 4 }}>
             <span style={{ fontSize: 12, color: "var(--color-text-label)" }}>Email</span>
             <input type="email" value={form.emailOfficial} onChange={handleChange("emailOfficial")} disabled={!editing} />
-          </label>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span style={{ fontSize: 12, color: "var(--color-text-label)" }}>Logo URL</span>
-            <input value={form.logoUrl} onChange={handleChange("logoUrl")} disabled={!editing} placeholder="https://..." />
           </label>
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>

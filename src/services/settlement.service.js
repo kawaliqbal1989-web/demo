@@ -1,4 +1,4 @@
-import { Prisma } from "@prisma/client";
+import { Prisma } from "../lib/prisma-compat.js";
 
 async function resolveActiveMarginPercent({ tx, tenantId, businessPartnerId, asOf = new Date() }) {
   const row = await tx.margin.findFirst({

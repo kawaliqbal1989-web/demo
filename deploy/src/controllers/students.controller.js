@@ -525,69 +525,88 @@ const STUDENT_EXPORT_COLUMNS = [
 ];
 
 async function buildDetailedStudentExportRows(where) {
-  const students = await prisma.student.findMany({
-    where,
-    orderBy: [{ admissionNo: "asc" }, { createdAt: "desc" }],
-    select: {
-      id: true,
-      admissionNo: true,
-      firstName: true,
-      lastName: true,
-      gender: true,
-      email: true,
-      dateOfBirth: true,
-      guardianName: true,
-      guardianPhone: true,
-      guardianEmail: true,
-      phonePrimary: true,
-      phoneSecondary: true,
-      address: true,
-      state: true,
-      district: true,
-      tehsil: true,
-      totalFeeAmount: true,
-      admissionFeeAmount: true,
-      feeConcessionAmount: true,
-      isActive: true,
-      createdAt: true,
-      updatedAt: true,
-      hierarchyNode: { select: { name: true, type: true } },
-      level: { select: { name: true, rank: true } },
-      course: { select: { name: true, code: true } },
-      assignedCourses: {
-        select: {
-          course: {
-            select: { name: true, code: true }
-          }
+  const baseSelect = {
+    id: true,
+    admissionNo: true,
+    firstName: true,
+    lastName: true,
+    gender: true,
+    email: true,
+    dateOfBirth: true,
+    guardianName: true,
+    guardianPhone: true,
+    guardianEmail: true,
+    phonePrimary: true,
+    phoneSecondary: true,
+    address: true,
+    state: true,
+    district: true,
+    tehsil: true,
+    totalFeeAmount: true,
+    admissionFeeAmount: true,
+    feeConcessionAmount: true,
+    isActive: true,
+    createdAt: true,
+    updatedAt: true,
+    hierarchyNode: { select: { name: true, type: true } },
+    level: { select: { name: true, rank: true } },
+    course: { select: { name: true, code: true } },
+    assignedCourses: {
+      select: {
+        course: {
+          select: { name: true, code: true }
         }
-      },
-      currentTeacher: {
-        select: {
-          username: true,
-          email: true,
-          teacherProfile: { select: { fullName: true } }
-        }
-      },
-      batchEnrollments: {
-        where: { status: "ACTIVE" },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: {
-          status: true,
-          startDate: true,
-          batch: { select: { name: true } },
-          level: { select: { name: true, rank: true } },
-          assignedTeacher: {
-            select: {
-              username: true,
-              email: true,
-              teacherProfile: { select: { fullName: true } }
-            }
+      }
+    },
+    currentTeacher: {
+      select: {
+        username: true,
+        email: true,
+        teacherProfile: { select: { fullName: true } }
+      }
+    },
+    batchEnrollments: {
+      where: { status: "ACTIVE" },
+      orderBy: { createdAt: "desc" },
+      take: 1,
+      select: {
+        status: true,
+        startDate: true,
+        batch: { select: { name: true } },
+        level: { select: { name: true, rank: true } },
+        assignedTeacher: {
+          select: {
+            username: true,
+            email: true,
+            teacherProfile: { select: { fullName: true } }
           }
         }
       }
     }
-  });
+  };
+
+  let students;
+  try {
+    students = await prisma.student.findMany({
+      where,
+      orderBy: [{ admissionNo: "asc" }, { createdAt: "desc" }],
+      select: baseSelect
+    });
+  } catch (error) {
+    // Keep export working in partial-schema environments the same way listStudents does.
+    if (error?.code !== "P2021" && error?.code !== "P2022") {
+      throw error;
+    }
+
+    students = await prisma.student.findMany({
+      where,
+      orderBy: [{ admissionNo: "asc" }, { createdAt: "desc" }],
+      select: {
+        ...baseSelect,
+        assignedCourses: false
+      }
+    });
+  }
 
   const studentIds = students.map((student) => student.id);
   if (!studentIds.length) {

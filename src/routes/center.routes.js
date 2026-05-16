@@ -25,6 +25,32 @@ import {
   listCenterAttendanceHistory,
   getStudent360,
 } from "../controllers/center.controller.js";
+import { getCenterCapacityController } from "../controllers/capacity.controller.js";
+import {
+  getCenterAttendanceHealthDashboard,
+  getCenterBatchHealthDashboard,
+  getCenterOperationalAnomaliesDashboard,
+  getCenterOperationalOverview,
+  getCenterOperationalTrendsDashboard,
+  getCenterTeacherOperationsDashboard,
+  getCenterWorksheetOperationsDashboard
+} from "../controllers/center-dashboard.controller.js";
+import {
+  acknowledgeCenterWorkflowAction,
+  escalateCenterWorkflowToFranchiseAction,
+  getCenterWorkflowById,
+  getCenterWorkflowHistoryById,
+  listCenterAnomalyWorkflowQueue,
+  listCenterAttendanceWorkflowQueue,
+  listCenterTeacherWorkflowQueue,
+  listCenterWorkflowQueue,
+  listCenterWorksheetWorkflowQueue,
+  reopenCenterWorkflowAction,
+  resolveCenterWorkflowAction,
+  reviewCenterWorkflowAction,
+  scheduleCenterWorkflowFollowUpAction,
+  startCenterWorkflowRecoveryAction
+} from "../controllers/center-workflow.controller.js";
 
 const centerRouter = Router();
 
@@ -32,6 +58,84 @@ centerRouter.use(requireRole("CENTER"));
 
 centerRouter.get("/me", auditAction("CENTER_VIEW_PROFILE", "CENTER"), getCenterMe);
 centerRouter.get("/dashboard", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterDashboard);
+centerRouter.get("/capacity", auditAction("CENTER_VIEW_CAPACITY", "CENTER"), getCenterCapacityController);
+centerRouter.get("/dashboard/overview", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterOperationalOverview);
+centerRouter.get("/dashboard/attendance-health", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterAttendanceHealthDashboard);
+centerRouter.get("/dashboard/worksheet-ops", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterWorksheetOperationsDashboard);
+centerRouter.get("/dashboard/teacher-ops", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterTeacherOperationsDashboard);
+centerRouter.get("/dashboard/batch-health", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterBatchHealthDashboard);
+centerRouter.get("/dashboard/anomalies", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterOperationalAnomaliesDashboard);
+centerRouter.get("/dashboard/trends", auditAction("CENTER_VIEW_DASHBOARD", "CENTER"), getCenterOperationalTrendsDashboard);
+centerRouter.get(
+  "/workflows/queues",
+  auditAction("CENTER_VIEW_WORKFLOW_QUEUE", "CENTER_OPERATIONAL_WORKFLOW"),
+  listCenterWorkflowQueue
+);
+centerRouter.get(
+  "/workflows/queues/attendance",
+  auditAction("CENTER_VIEW_WORKFLOW_QUEUE", "CENTER_OPERATIONAL_WORKFLOW"),
+  listCenterAttendanceWorkflowQueue
+);
+centerRouter.get(
+  "/workflows/queues/worksheets",
+  auditAction("CENTER_VIEW_WORKFLOW_QUEUE", "CENTER_OPERATIONAL_WORKFLOW"),
+  listCenterWorksheetWorkflowQueue
+);
+centerRouter.get(
+  "/workflows/queues/teachers",
+  auditAction("CENTER_VIEW_WORKFLOW_QUEUE", "CENTER_OPERATIONAL_WORKFLOW"),
+  listCenterTeacherWorkflowQueue
+);
+centerRouter.get(
+  "/workflows/queues/anomalies",
+  auditAction("CENTER_VIEW_WORKFLOW_QUEUE", "CENTER_OPERATIONAL_WORKFLOW"),
+  listCenterAnomalyWorkflowQueue
+);
+centerRouter.get(
+  "/workflows/:id",
+  auditAction("CENTER_VIEW_WORKFLOW_DETAIL", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  getCenterWorkflowById
+);
+centerRouter.get(
+  "/workflows/:id/history",
+  auditAction("CENTER_VIEW_WORKFLOW_HISTORY", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  getCenterWorkflowHistoryById
+);
+centerRouter.post(
+  "/workflows/:id/actions/review",
+  auditAction("CENTER_REVIEW_WORKFLOW", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  reviewCenterWorkflowAction
+);
+centerRouter.post(
+  "/workflows/:id/actions/acknowledge",
+  auditAction("CENTER_ACKNOWLEDGE_WORKFLOW", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  acknowledgeCenterWorkflowAction
+);
+centerRouter.post(
+  "/workflows/:id/actions/start-recovery",
+  auditAction("CENTER_START_WORKFLOW_RECOVERY", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  startCenterWorkflowRecoveryAction
+);
+centerRouter.post(
+  "/workflows/:id/actions/schedule-follow-up",
+  auditAction("CENTER_SCHEDULE_WORKFLOW_FOLLOW_UP", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  scheduleCenterWorkflowFollowUpAction
+);
+centerRouter.post(
+  "/workflows/:id/actions/escalate",
+  auditAction("CENTER_ESCALATE_WORKFLOW", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  escalateCenterWorkflowToFranchiseAction
+);
+centerRouter.post(
+  "/workflows/:id/actions/resolve",
+  auditAction("CENTER_RESOLVE_WORKFLOW", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  resolveCenterWorkflowAction
+);
+centerRouter.post(
+  "/workflows/:id/actions/reopen",
+  auditAction("CENTER_REOPEN_WORKFLOW", "CENTER_OPERATIONAL_WORKFLOW", (req) => req.params.id),
+  reopenCenterWorkflowAction
+);
 
 centerRouter.get(
   "/available-courses",

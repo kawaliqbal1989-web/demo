@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { LoadingState } from "../../components/LoadingState";
+import { ReportActionButtons } from "../../components/ReportActionButtons";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import {
   getFeesMonthlyDues,
@@ -124,6 +125,14 @@ function CenterReportsPage() {
       <div>
         <h2 style={{ margin: 0 }}>Reports</h2>
         <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Collections + dues summary for your center</div>
+      </div>
+
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <div style={{ fontSize: 14, fontWeight: 700 }}>Operational report foundation</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+          Export the scoped operational summary that backs printable reporting, PDF, and Excel outputs for this center.
+        </div>
+        <ReportActionButtons reportKey="center-operational" params={to ? { asOf: to } : {}} />
       </div>
 
       <div className="card" style={{ display: "grid", gap: 10 }}>

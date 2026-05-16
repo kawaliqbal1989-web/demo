@@ -17,6 +17,8 @@ function getHomeForRole(role) {
       return "/teacher/dashboard";
     case ROLES.STUDENT:
       return "/student/dashboard";
+    case ROLES.PARENT:
+      return "/parent/dashboard";
     default:
       return "/login";
   }

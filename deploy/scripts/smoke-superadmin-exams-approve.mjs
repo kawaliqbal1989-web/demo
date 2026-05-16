@@ -118,10 +118,10 @@ async function ensurePendingListForSuperadmin({ saToken, bpToken, franchiseToken
   }
 
   // Create a fresh cycle + push a combined list up the chain.
-  const partners = await apiJson("/api/business-partners?limit=10&offset=0&q=BP-001", { token: saToken });
+  const partners = await apiJson("/api/business-partners?limit=10&offset=0&q=BP001", { token: saToken });
   const bp = Array.isArray(partners?.data?.items) ? partners.data.items[0] : null;
   if (!bp?.id) {
-    throw new Error("Cannot find business partner BP-001");
+    throw new Error("Cannot find business partner BP001");
   }
 
   const now = Date.now();

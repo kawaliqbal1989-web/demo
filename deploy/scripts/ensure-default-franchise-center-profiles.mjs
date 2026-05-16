@@ -9,11 +9,11 @@ async function main() {
   }
 
   const bp = await prisma.businessPartner.findFirst({
-    where: { tenantId: tenant.id, code: "BP-001", isActive: true },
+    where: { tenantId: tenant.id, code: "BP001", isActive: true },
     select: { id: true, code: true, name: true }
   });
   if (!bp) {
-    throw new Error("BusinessPartner BP-001 not found (run seed or create partner)");
+    throw new Error("BusinessPartner BP001 not found (run seed or create partner)");
   }
 
   const franchiseAuth = await prisma.authUser.findFirst({
@@ -36,7 +36,7 @@ async function main() {
     where: {
       tenantId_code: {
         tenantId: tenant.id,
-        code: "FR001"
+        code: "FR-001"
       }
     },
     update: {
@@ -49,7 +49,7 @@ async function main() {
       tenantId: tenant.id,
       businessPartnerId: bp.id,
       authUserId: franchiseAuth.id,
-      code: "FR001",
+      code: "FR-001",
       name: "Default Franchise",
       displayName: "Default Franchise",
       status: "ACTIVE",

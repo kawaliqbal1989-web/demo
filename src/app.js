@@ -21,8 +21,16 @@ const defaultAllowedOrigins = [
   "https://api.abacuseducation.online"
 ];
 
+function normalizeOrigin(origin) {
+  if (!origin || typeof origin !== "string") {
+    return "";
+  }
+
+  return origin.trim().replace(/\/+$/, "").toLowerCase();
+}
+
 const productionCorsAllowedOrigins = new Set(
-  env.corsAllowedOrigins.length ? env.corsAllowedOrigins : defaultAllowedOrigins
+  [...defaultAllowedOrigins, ...env.corsAllowedOrigins].map(normalizeOrigin).filter(Boolean)
 );
 
 app.disable("x-powered-by");
@@ -39,12 +47,14 @@ app.use(
         return callback(null, true);
       }
 
+      const normalizedOrigin = normalizeOrigin(origin);
+
       if (!env.isProduction) {
-        const ok = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(origin);
+        const ok = /^http:\/\/(localhost|127\.0\.0\.1):\d+$/i.test(normalizedOrigin);
         return callback(null, ok);
       }
 
-      return callback(null, productionCorsAllowedOrigins.has(origin));
+      return callback(null, productionCorsAllowedOrigins.has(normalizedOrigin));
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: [

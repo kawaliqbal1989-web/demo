@@ -369,6 +369,18 @@ function SuperadminCentersPage() {
         maxTeachers: Number(capacityForm.maxTeachers)
       });
       toast.success("Center capacity updated.");
+      
+      // Refresh capacity data immediately after save to ensure frontend shows persisted values
+      try {
+        const refreshedResponse = await getBpCenterCapacitySummary({ centerId: capacityCenter.profileId, limit: 1, offset: 0 });
+        const refreshedSnapshot = refreshedResponse?.data?.items?.[0] || null;
+        if (refreshedSnapshot) {
+          setCapacitySummary(refreshedSnapshot);
+        }
+      } catch (refreshErr) {
+        // Silent fail on refresh - capacity save was already successful
+      }
+      
       closeCapacityModal({ force: true });
     } catch (err) {
       const message = getFriendlyErrorMessage(err) || "Failed to update center capacity.";

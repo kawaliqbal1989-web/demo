@@ -359,6 +359,29 @@ function assertBpCenterAccess({ tenantId, bpScope, centerId }) {
   }
 }
 
+async function attemptRawSqlCapacityWrite({ centerId, input }) {
+  const capacityId = `c_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
+  const now = new Date();
+  const maxTeachers = Number(input.maxTeachers ?? 0);
+  const maxStudents = Number(input.maxStudents ?? 0);
+  const allowOverAllocation = Boolean(input.allowOverAllocation ?? false);
+
+  try {
+    await prisma.$executeRaw`
+      INSERT INTO \`centercapacity\` (id, centerId, maxTeachers, maxStudents, allowOverAllocation, createdAt, updatedAt)
+      VALUES (${capacityId}, ${centerId}, ${maxTeachers}, ${maxStudents}, ${allowOverAllocation}, ${now}, ${now})
+      ON DUPLICATE KEY UPDATE
+        maxTeachers = ${maxTeachers},
+        maxStudents = ${maxStudents},
+        allowOverAllocation = ${allowOverAllocation},
+        updatedAt = ${now}
+    `;
+    return { success: true, persistedId: capacityId };
+  } catch (rawError) {
+    return { success: false, error: rawError };
+  }
+}
+
 async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope }) {
   if (actor?.role === "BP") {
     assertBpCenterAccess({ tenantId, bpScope, centerId });
@@ -366,6 +389,7 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
 
   let snapshot;
   let previousCapacity;
+  let persistenceAttempted = false;
 
   try {
     const transactionResult = await prisma.$transaction(async (tx) => {
@@ -446,6 +470,9 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
         throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
       }
 
+      persistenceAttempted = true;
+      const rawSqlResult = await attemptRawSqlCapacityWrite({ centerId, input });
+
       const usage = await loadCenterCapacityUsage({
         tx: prisma,
         tenantId,
@@ -455,7 +482,7 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
       snapshot = buildCenterCapacitySnapshot({
         center,
         capacity: {
-          id: null,
+          id: rawSqlResult.success ? rawSqlResult.persistedId : null,
           maxTeachers: input.maxTeachers ?? 0,
           maxStudents: input.maxStudents ?? 0,
           allowOverAllocation: input.allowOverAllocation ?? false,

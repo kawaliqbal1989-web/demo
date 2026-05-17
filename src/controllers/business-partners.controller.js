@@ -325,14 +325,16 @@ const uploadBusinessPartnerLogo = asyncHandler(async (req, res) => {
 });
 const getBusinessPartner = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const tenantId = req.auth.tenantId;
+  const where = {
+    id,
+    ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId })
+  };
   let partner;
 
   try {
     partner = await prisma.businessPartner.findFirst({
-      where: {
-        id,
-        ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
-      },
+      where,
       include: {
         address: true,
         operationalStates: true,
@@ -344,13 +346,108 @@ const getBusinessPartner = asyncHandler(async (req, res) => {
     });
   } catch (error) {
     if (isSchemaMismatchError(error, ["businesspartner", "operational", "courseaccess", "legacyprogram"])) {
-      // Schema mismatch on relations - fall back to base query
-      partner = await prisma.businessPartner.findFirst({
-        where: {
-          id,
-          ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
+      // Schema mismatch on BP base or relations - fall back to safe base fields and guarded relation reads.
+      const base = await prisma.businessPartner.findFirst({
+        where,
+        select: {
+          id: true,
+          tenantId: true,
+          code: true,
+          name: true,
+          displayName: true,
+          status: true,
+          isActive: true,
+          logoUrl: true,
+          createdAt: true,
+          updatedAt: true
         }
-      });
+      }).catch(() => null);
+
+      if (!base) {
+        partner = null;
+      } else {
+        const [address, operationalStates, operationalDistricts, operationalCities, courseAccesses, legacyPrograms] = await Promise.all([
+          prisma.businessPartnerAddress.findFirst({
+            where: {
+              businessPartnerId: base.id
+            }
+          }).catch((relationError) => {
+            if (isSchemaMismatchError(relationError, ["businesspartneraddress"])) {
+              return null;
+            }
+            throw relationError;
+          }),
+          prisma.partnerOperationalState.findMany({
+            where: {
+              businessPartnerId: base.id
+            }
+          }).catch((relationError) => {
+            if (isSchemaMismatchError(relationError, ["partneroperationalstate"])) {
+              return [];
+            }
+            throw relationError;
+          }),
+          prisma.partnerOperationalDistrict.findMany({
+            where: {
+              businessPartnerId: base.id
+            }
+          }).catch((relationError) => {
+            if (isSchemaMismatchError(relationError, ["partneroperationaldistrict"])) {
+              return [];
+            }
+            throw relationError;
+          }),
+          prisma.partnerOperationalCity.findMany({
+            where: {
+              businessPartnerId: base.id
+            }
+          }).catch((relationError) => {
+            if (isSchemaMismatchError(relationError, ["partneroperationalcity"])) {
+              return [];
+            }
+            throw relationError;
+          }),
+          prisma.partnerCourseAccess.findMany({
+            where: {
+              businessPartnerId: base.id
+            },
+            include: {
+              course: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true
+                }
+              }
+            }
+          }).catch((relationError) => {
+            if (isSchemaMismatchError(relationError, ["partnercourseaccess", "course"])) {
+              return [];
+            }
+            throw relationError;
+          }),
+          prisma.partnerLegacyProgram.findMany({
+            where: {
+              businessPartnerId: base.id
+            }
+          }).catch((relationError) => {
+            if (isSchemaMismatchError(relationError, ["partnerlegacyprogram"])) {
+              return [];
+            }
+            throw relationError;
+          })
+        ]);
+
+        partner = {
+          ...base,
+          address,
+          operationalStates,
+          operationalDistricts,
+          operationalCities,
+          courseAccesses,
+          legacyPrograms
+        };
+      }
     } else {
       throw error;
     }

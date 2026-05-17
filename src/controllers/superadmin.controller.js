@@ -1323,7 +1323,16 @@ const saGetCenterDetail = asyncHandler(async (req, res) => {
         authUserId: true,
         franchiseProfileId: true,
         createdAt: true,
-        updatedAt: true
+        updatedAt: true,
+        brandingMode: true,
+        inheritBranding: true,
+        customLogoUrl: true,
+        customBrandName: true,
+        brandingNotes: true,
+        brandingActive: true,
+        brandingLocked: true,
+        commercializationTier: true,
+        logoUrl: true
       }
     }).catch(() => null);
 
@@ -1456,11 +1465,11 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
     : existing.brandingLocked;
   const nextCommercializationTier = requestedTier || existing.commercializationTier || "STANDARD_CENTER";
 
-  const nextLogoUrl = req.body.customLogoUrl !== undefined
-    ? normalizeString(req.body.customLogoUrl)
-    : req.body.logoUrl !== undefined
-      ? normalizeString(req.body.logoUrl)
-      : existing.logoUrl;
+  // logoUrl tracks the file-upload path and must NOT be overwritten by customLogoUrl.
+  // Only update logoUrl when an explicit logoUrl value is provided in the request.
+  const nextLogoUrl = req.body.logoUrl !== undefined
+    ? normalizeString(req.body.logoUrl)
+    : existing.logoUrl;
   const nextLogoPath = req.body.logoPath !== undefined
     ? normalizeString(req.body.logoPath)
     : existing.logoPath;

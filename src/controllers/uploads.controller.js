@@ -548,26 +548,45 @@ const deleteLogo = asyncHandler(async (req, res) => {
       }
     });
   } else {
-    updated = await prisma.centerProfile.update({
-      where: { id: target.entityId },
-      data: {
-        logoPath: null,
-        logoFilePath: null,
-        logoUrl: null,
-        customLogoUrl: null,
-        brandingMode: "INHERIT_FRANCHISE",
-        inheritBranding: true
-      },
-      select: {
-        id: true,
-        logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        customLogoUrl: true,
-        brandingMode: true,
-        inheritBranding: true
+    try {
+      updated = await prisma.centerProfile.update({
+        where: { id: target.entityId },
+        data: {
+          logoPath: null,
+          logoFilePath: null,
+          logoUrl: null,
+          customLogoUrl: null
+        },
+        select: {
+          id: true,
+          logoPath: true,
+          logoFilePath: true,
+          logoUrl: true,
+          customLogoUrl: true,
+          brandingMode: true,
+          inheritBranding: true
+        }
+      });
+    } catch (error) {
+      if (isCenterBrandingColumnMismatchError(error)) {
+        updated = await prisma.centerProfile.update({
+          where: { id: target.entityId },
+          data: {
+            logoPath: null,
+            logoUrl: null
+          },
+          select: {
+            id: true,
+            logoPath: true,
+            logoUrl: true
+          }
+        });
+      } else if (isCenterBrandingSchemaMismatchError(error)) {
+        return res.apiError(503, "Center branding schema is not ready on this environment", "CENTER_BRANDING_SCHEMA_MISMATCH");
+      } else {
+        throw error;
       }
-    });
+    }
   }
 
   await Promise.all(existingPaths.map(deleteManagedLogoFile));

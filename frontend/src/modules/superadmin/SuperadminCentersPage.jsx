@@ -470,7 +470,7 @@ function SuperadminCentersPage() {
     return true;
   };
 
-  const canRemoveCenterLogo = Boolean(selectedCenterDetail?.customLogoUrl || selectedCenterDetail?.logoFilePath);
+  const canRemoveCenterLogo = Boolean(selectedCenterDetail?.customLogoUrl || selectedCenterDetail?.logoFilePath || selectedCenterDetail?.logoUrl);
   const effectiveCenterLogoPreviewUrl = selectedCenterDetail?.customLogoUrl
     || selectedCenterDetail?.effectiveBranding?.logoUrl
     || selectedCenterDetail?.logoUrl

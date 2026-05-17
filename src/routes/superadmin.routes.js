@@ -197,6 +197,7 @@ import {
   handleToggleWave,
   handleGetDeployInfo,
   handleGetMigrationSequence,
+  handleRunMigrations,
 } from "../controllers/release-management.controller.js";
 
 superadminRouter.get("/intel/network-pulse", requireSuperadmin(), getSuperadminNetworkPulse);
@@ -216,5 +217,6 @@ superadminRouter.get("/release/features", requireSuperadmin(), handleGetFeatureS
 superadminRouter.patch("/release/waves/:waveKey", requireSuperadmin(), handleToggleWave);
 superadminRouter.get("/release/deploy-info", requireSuperadmin(), handleGetDeployInfo);
 superadminRouter.get("/release/migrations", requireSuperadmin(), handleGetMigrationSequence);
+superadminRouter.post("/release/migrations/run", requireSuperadmin(), handleRunMigrations);
 
 export { superadminRouter };

@@ -1,7 +1,14 @@
 /**
  * Release Management Controller — Wave status, feature flags, deployment info
  */
+import { readFileSync, existsSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+import { createConnection } from "mysql2/promise";
 import { asyncHandler } from "../utils/async-handler.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, "../../");
 
 /* ── Wave Status ── */
 const handleGetWaveStatus = asyncHandler(async (_req, res) => {
@@ -108,10 +115,72 @@ const handleGetMigrationSequence = asyncHandler(async (req, res) => {
   });
 });
 
+/* ── Run Migrations (superadmin-only, idempotent) ── */
+const handleRunMigrations = asyncHandler(async (req, res) => {
+  const { wave } = req.body || {};
+  let migrations = MIGRATION_SEQUENCE;
+  if (wave) {
+    migrations = migrations.filter((m) => m.wave === wave);
+    if (migrations.length === 0) {
+      return res.apiError(400, `Unknown wave: ${wave}`, "WAVE_NOT_FOUND");
+    }
+  }
+
+  const dbUrl = process.env.DATABASE_URL;
+  if (!dbUrl) {
+    return res.apiError(503, "DATABASE_URL not configured", "DB_URL_MISSING");
+  }
+
+  const url = new URL(dbUrl);
+  const connection = await createConnection({
+    host: url.hostname,
+    port: Number(url.port) || 3306,
+    user: url.username,
+    password: decodeURIComponent(url.password),
+    database: url.pathname.slice(1),
+    multipleStatements: true,
+  });
+
+  const results = [];
+  let successCount = 0;
+  let skipCount = 0;
+
+  try {
+    for (const m of migrations) {
+      const filePath = resolve(PROJECT_ROOT, m.file);
+      if (!existsSync(filePath)) {
+        results.push({ file: m.file, wave: m.wave, status: "missing" });
+        skipCount++;
+        continue;
+      }
+      const sql = readFileSync(filePath, "utf8");
+      try {
+        await connection.query(sql);
+        results.push({ file: m.file, wave: m.wave, status: "applied" });
+        successCount++;
+      } catch (err) {
+        results.push({ file: m.file, wave: m.wave, status: "error", error: err.message });
+        await connection.end();
+        return res.apiError(500, `Migration failed on ${m.file}: ${err.message}`, "MIGRATION_ERROR", { results });
+      }
+    }
+  } finally {
+    await connection.end().catch(() => {});
+  }
+
+  return res.apiSuccess("Migrations applied", {
+    total: migrations.length,
+    applied: successCount,
+    skipped: skipCount,
+    results,
+  });
+});
+
 export {
   handleGetWaveStatus,
   handleGetFeatureStatus,
   handleToggleWave,
   handleGetDeployInfo,
   handleGetMigrationSequence,
+  handleRunMigrations,
 };

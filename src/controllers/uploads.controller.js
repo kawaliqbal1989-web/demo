@@ -135,11 +135,7 @@ const resolveSuperadminCenterLogoUploadTarget = asyncHandler(async (req, res, ne
       select: {
         id: true,
         logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        customLogoUrl: true,
-        brandingMode: true,
-        inheritBranding: true
+        logoUrl: true
       }
     });
   } catch (error) {
@@ -218,11 +214,7 @@ const resolveLogoUploadTarget = asyncHandler(async (req, res, next) => {
       select: {
         id: true,
         logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        customLogoUrl: true,
-        brandingMode: true,
-        inheritBranding: true
+        logoUrl: true
       }
     });
 
@@ -365,21 +357,12 @@ const uploadLogo = asyncHandler(async (req, res) => {
         where: { id: target.entityId },
         data: {
           logoPath: req.file.filename,
-          logoFilePath: storedFilePath,
-          logoUrl: storedPath,
-          customLogoUrl: storedPath,
-          brandingMode: "CUSTOM_CENTER",
-          inheritBranding: false,
-          brandingActive: true
+          logoUrl: storedPath
         },
         select: {
           id: true,
           logoPath: true,
-          logoFilePath: true,
-          logoUrl: true,
-          customLogoUrl: true,
-          brandingMode: true,
-          inheritBranding: true
+          logoUrl: true
         }
       });
     } catch (error) {

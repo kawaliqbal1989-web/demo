@@ -246,7 +246,6 @@ const resolveAdminBusinessPartnerLogoUploadTarget = asyncHandler(async (req, res
       id: true,
       tenantId: true,
       logoPath: true,
-      logoFilePath: true,
       logoUrl: true
     }
   });
@@ -339,18 +338,12 @@ const uploadLogo = asyncHandler(async (req, res) => {
       where: { id: target.entityId },
       data: {
         logoPath: req.file.filename,
-        logoFilePath: storedFilePath,
-        logoUrl: storedPath,
-        brandingUpdatedAt: new Date(),
-        brandingUpdatedByUserId: req.auth?.userId || null
+        logoUrl: storedPath
       },
       select: {
         id: true,
         logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        brandingUpdatedAt: true,
-        brandingUpdatedByUserId: true
+        logoUrl: true
       }
     });
   } else if (target.entityType === "FRANCHISE") {
@@ -445,18 +438,12 @@ const deleteLogo = asyncHandler(async (req, res) => {
       where: { id: target.entityId },
       data: {
         logoPath: null,
-        logoFilePath: null,
-        logoUrl: null,
-        brandingUpdatedAt: new Date(),
-        brandingUpdatedByUserId: req.auth?.userId || null
+        logoUrl: null
       },
       select: {
         id: true,
         logoPath: true,
-        logoFilePath: true,
-        logoUrl: true,
-        brandingUpdatedAt: true,
-        brandingUpdatedByUserId: true
+        logoUrl: true
       }
     });
   } else if (target.entityType === "FRANCHISE") {

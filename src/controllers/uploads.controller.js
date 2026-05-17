@@ -118,6 +118,36 @@ function isCenterBrandingColumnMismatchError(error) {
   );
 }
 
+function isBusinessPartnerBrandingSchemaMismatchError(error) {
+  if (!isSchemaMismatchPrismaError(error)) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  const modelName = String(error?.meta?.modelName || "").toLowerCase();
+  const table = String(error?.meta?.table || "").toLowerCase();
+
+  return (
+    modelName.includes("businesspartner") ||
+    table.includes("businesspartner") ||
+    message.includes("businesspartner")
+  );
+}
+
+function isBusinessPartnerBrandingColumnMismatchError(error) {
+  if (!isBusinessPartnerBrandingSchemaMismatchError(error)) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("logopath") ||
+    message.includes("logourl") ||
+    message.includes("isactive") ||
+    message.includes("brandingupdated")
+  );
+}
+
 const resolveSuperadminCenterLogoUploadTarget = asyncHandler(async (req, res, next) => {
   const { tenantId } = req.auth || {};
   const { id } = req.params;
@@ -237,18 +267,36 @@ const resolveLogoUploadTarget = asyncHandler(async (req, res, next) => {
 });
 
 const resolveAdminBusinessPartnerLogoUploadTarget = asyncHandler(async (req, res, next) => {
-  const partner = await prisma.businessPartner.findFirst({
-    where: {
-      id: req.params.id,
-      isActive: true
-    },
-    select: {
-      id: true,
-      tenantId: true,
-      logoPath: true,
-      logoUrl: true
+  let partner;
+  try {
+    partner = await prisma.businessPartner.findFirst({
+      where: {
+        id: req.params.id,
+        isActive: true
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        logoPath: true,
+        logoUrl: true
+      }
+    });
+  } catch (error) {
+    if (isBusinessPartnerBrandingColumnMismatchError(error)) {
+      partner = await prisma.businessPartner.findFirst({
+        where: {
+          id: req.params.id
+        },
+        select: {
+          id: true,
+          tenantId: true,
+          logoUrl: true
+        }
+      }).catch(() => null);
+    } else {
+      throw error;
     }
-  });
+  }
 
   if (!partner) {
     return res.apiError(404, "Business partner not found", "BUSINESS_PARTNER_NOT_FOUND");
@@ -334,18 +382,37 @@ const uploadLogo = asyncHandler(async (req, res) => {
   let updated;
 
   if (target.entityType === "BUSINESS_PARTNER") {
-    updated = await prisma.businessPartner.update({
-      where: { id: target.entityId },
-      data: {
-        logoPath: req.file.filename,
-        logoUrl: storedPath
-      },
-      select: {
-        id: true,
-        logoPath: true,
-        logoUrl: true
+    try {
+      updated = await prisma.businessPartner.update({
+        where: { id: target.entityId },
+        data: {
+          logoPath: req.file.filename,
+          logoUrl: storedPath
+        },
+        select: {
+          id: true,
+          logoPath: true,
+          logoUrl: true
+        }
+      });
+    } catch (error) {
+      if (isBusinessPartnerBrandingColumnMismatchError(error)) {
+        updated = await prisma.businessPartner.update({
+          where: { id: target.entityId },
+          data: {
+            logoUrl: storedPath
+          },
+          select: {
+            id: true,
+            logoUrl: true
+          }
+        });
+      } else if (isBusinessPartnerBrandingSchemaMismatchError(error)) {
+        return res.apiError(503, "Business partner branding schema is not ready on this environment", "BUSINESS_PARTNER_BRANDING_SCHEMA_MISMATCH");
+      } else {
+        throw error;
       }
-    });
+    }
   } else if (target.entityType === "FRANCHISE") {
     updated = await prisma.franchiseProfile.update({
       where: { id: target.entityId },
@@ -434,18 +501,37 @@ const deleteLogo = asyncHandler(async (req, res) => {
   let updated;
 
   if (target.entityType === "BUSINESS_PARTNER") {
-    updated = await prisma.businessPartner.update({
-      where: { id: target.entityId },
-      data: {
-        logoPath: null,
-        logoUrl: null
-      },
-      select: {
-        id: true,
-        logoPath: true,
-        logoUrl: true
+    try {
+      updated = await prisma.businessPartner.update({
+        where: { id: target.entityId },
+        data: {
+          logoPath: null,
+          logoUrl: null
+        },
+        select: {
+          id: true,
+          logoPath: true,
+          logoUrl: true
+        }
+      });
+    } catch (error) {
+      if (isBusinessPartnerBrandingColumnMismatchError(error)) {
+        updated = await prisma.businessPartner.update({
+          where: { id: target.entityId },
+          data: {
+            logoUrl: null
+          },
+          select: {
+            id: true,
+            logoUrl: true
+          }
+        });
+      } else if (isBusinessPartnerBrandingSchemaMismatchError(error)) {
+        return res.apiError(503, "Business partner branding schema is not ready on this environment", "BUSINESS_PARTNER_BRANDING_SCHEMA_MISMATCH");
+      } else {
+        throw error;
       }
-    });
+    }
   } else if (target.entityType === "FRANCHISE") {
     updated = await prisma.franchiseProfile.update({
       where: { id: target.entityId },

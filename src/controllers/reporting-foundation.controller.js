@@ -151,6 +151,29 @@ function buildExportQueuedResponse({ job, coalesced }) {
     job: serializeExportJob(job)
   };
 }
+
+function isReportExportStorageMissingError(error) {
+  const code = String(error?.code || "");
+  if (!["P2021", "P2022", "P2010"].includes(code)) {
+    return false;
+  }
+
+  const modelName = String(error?.meta?.modelName || "").toLowerCase();
+  const table = String(error?.meta?.table || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return (
+    modelName.includes("reportexport") ||
+    table.includes("reportexport") ||
+    table.includes("report_export") ||
+    message.includes("reportexport") ||
+    message.includes("report_export") ||
+    message.includes("unknown column") ||
+    message.includes("does not exist") ||
+    message.includes("no such table") ||
+    message.includes("unknown table")
+  );
+}
     function normalizeWindowHours(value, fallback = 24) {
       const parsed = Number.parseInt(value, 10);
       if (!Number.isFinite(parsed) || parsed < 1) {
@@ -445,7 +468,21 @@ const getPrintableReport = asyncHandler(async (req, res) => {
 
 const exportPdfReport = asyncHandler(async (req, res) => {
   const reportKey = getResolvedReportKey(req.params.reportKey);
-  const { coalesced, result } = await prepareTrackedExport({ req, reportKey, format: "PDF" });
+  let exportResult;
+  try {
+    exportResult = await prepareTrackedExport({ req, reportKey, format: "PDF" });
+  } catch (error) {
+    if (isReportExportStorageMissingError(error)) {
+      return res.apiError(
+        503,
+        "Report export storage is not ready on this environment",
+        "REPORT_EXPORT_STORAGE_UNAVAILABLE"
+      );
+    }
+    throw error;
+  }
+
+  const { coalesced, result } = exportResult;
   const status = result.job.status === "COMPLETED" && result.job.artifact?.status === "AVAILABLE" ? 200 : 202;
   res.setHeader("X-Export-Job-Id", result.job.id);
   res.setHeader("X-Export-Job-Status", result.job.status);
@@ -462,7 +499,21 @@ const exportPdfReport = asyncHandler(async (req, res) => {
 
 const exportExcelReport = asyncHandler(async (req, res) => {
   const reportKey = getResolvedReportKey(req.params.reportKey);
-  const { coalesced, result } = await prepareTrackedExport({ req, reportKey, format: "XLSX" });
+  let exportResult;
+  try {
+    exportResult = await prepareTrackedExport({ req, reportKey, format: "XLSX" });
+  } catch (error) {
+    if (isReportExportStorageMissingError(error)) {
+      return res.apiError(
+        503,
+        "Report export storage is not ready on this environment",
+        "REPORT_EXPORT_STORAGE_UNAVAILABLE"
+      );
+    }
+    throw error;
+  }
+
+  const { coalesced, result } = exportResult;
   const status = result.job.status === "COMPLETED" && result.job.artifact?.status === "AVAILABLE" ? 200 : 202;
   res.setHeader("X-Export-Job-Id", result.job.id);
   res.setHeader("X-Export-Job-Status", result.job.status);

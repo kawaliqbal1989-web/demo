@@ -103,6 +103,20 @@ function isCenterBrandingSchemaMismatchError(error) {
   );
 }
 
+function isCenterBrandingColumnMismatchError(error) {
+  if (!isCenterBrandingSchemaMismatchError(error)) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("customlogourl") ||
+    message.includes("brandingmode") ||
+    message.includes("inheritbranding") ||
+    message.includes("brandingactive")
+  );
+}
+
 const resolveSuperadminCenterLogoUploadTarget = asyncHandler(async (req, res, next) => {
   const { tenantId } = req.auth || {};
   const { id } = req.params;
@@ -369,11 +383,28 @@ const uploadLogo = asyncHandler(async (req, res) => {
         }
       });
     } catch (error) {
-      if (isCenterBrandingSchemaMismatchError(error)) {
+      if (isCenterBrandingColumnMismatchError(error)) {
+        updated = await prisma.centerProfile.update({
+          where: { id: target.entityId },
+          data: {
+            logoPath: req.file.filename,
+            logoFilePath: storedFilePath,
+            logoUrl: storedPath
+          },
+          select: {
+            id: true,
+            logoPath: true,
+            logoFilePath: true,
+            logoUrl: true
+          }
+        });
+      } else if (isCenterBrandingSchemaMismatchError(error)) {
         return res.apiError(503, "Center branding schema is not ready on this environment", "CENTER_BRANDING_SCHEMA_MISMATCH");
       }
 
-      throw error;
+      if (!updated) {
+        throw error;
+      }
     }
   }
 

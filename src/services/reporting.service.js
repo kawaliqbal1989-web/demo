@@ -93,11 +93,47 @@ const GOVERNANCE_SELF_AUDIT_ACTIONS = Object.freeze([
   "EXPORT_REPORT_EXCEL"
 ]);
 
+const WORKFLOW_LIFECYCLE_SCHEMA_TOKENS = Object.freeze([
+  "franchiseoperationalworkflow",
+  "franchiseoperationalworkflowhistory",
+  "centeroperationalworkflow",
+  "centeroperationalworkflowhistory",
+  "teacheroperationalworkflow",
+  "teacheroperationalworkflowhistory",
+  "settlementworkflowtask",
+  "settlementworkflowhistory"
+]);
+
 function createHttpError(statusCode, message, errorCode) {
   const error = new Error(message);
   error.statusCode = statusCode;
   error.errorCode = errorCode;
   return error;
+}
+
+function isWorkflowLifecycleSchemaMismatchError(error) {
+  const code = String(error?.code || "");
+  if (!["P2021", "P2022", "P2010"].includes(code)) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  const modelName = String(error?.meta?.modelName || "").toLowerCase();
+  const table = String(error?.meta?.table || "").toLowerCase();
+  const combined = `${message} ${modelName} ${table}`;
+
+  return WORKFLOW_LIFECYCLE_SCHEMA_TOKENS.some((token) => combined.includes(token));
+}
+
+async function safeWorkflowLifecycleQuery(queryFn) {
+  try {
+    return await queryFn();
+  } catch (error) {
+    if (isWorkflowLifecycleSchemaMismatchError(error)) {
+      return [];
+    }
+    throw error;
+  }
 }
 
 function toNumber(value, fallback = 0) {
@@ -941,14 +977,14 @@ async function buildWorkflowLifecycleReport({ tenantId, auth, bpScope, franchise
   }
 
   const [franchiseStatus, centerStatus, teacherStatus, settlementTasks, recentFranchiseHistory, recentCenterHistory, recentTeacherHistory, recentSettlementHistory] = await Promise.all([
-    prisma.franchiseOperationalWorkflow.groupBy({ by: ["status"], where: franchiseWhere, _count: { _all: true }, orderBy: { status: "asc" } }),
-    prisma.centerOperationalWorkflow.groupBy({ by: ["status"], where: centerWhere, _count: { _all: true }, orderBy: { status: "asc" } }),
-    prisma.teacherOperationalWorkflow.groupBy({ by: ["status"], where: teacherWhere, _count: { _all: true }, orderBy: { status: "asc" } }),
-    prisma.settlementWorkflowTask.groupBy({ by: ["state"], where: settlementWhere, _count: { _all: true }, orderBy: { state: "asc" } }),
-    prisma.franchiseOperationalWorkflowHistory.findMany({ where: franchiseWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, workflowId: true } }),
-    prisma.centerOperationalWorkflowHistory.findMany({ where: centerWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, workflowId: true } }),
-    prisma.teacherOperationalWorkflowHistory.findMany({ where: teacherWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, workflowId: true } }),
-    prisma.settlementWorkflowHistory.findMany({ where: settlementWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, settlementId: true } })
+    safeWorkflowLifecycleQuery(() => prisma.franchiseOperationalWorkflow.groupBy({ by: ["status"], where: franchiseWhere, _count: { _all: true }, orderBy: { status: "asc" } })),
+    safeWorkflowLifecycleQuery(() => prisma.centerOperationalWorkflow.groupBy({ by: ["status"], where: centerWhere, _count: { _all: true }, orderBy: { status: "asc" } })),
+    safeWorkflowLifecycleQuery(() => prisma.teacherOperationalWorkflow.groupBy({ by: ["status"], where: teacherWhere, _count: { _all: true }, orderBy: { status: "asc" } })),
+    safeWorkflowLifecycleQuery(() => prisma.settlementWorkflowTask.groupBy({ by: ["state"], where: settlementWhere, _count: { _all: true }, orderBy: { state: "asc" } })),
+    safeWorkflowLifecycleQuery(() => prisma.franchiseOperationalWorkflowHistory.findMany({ where: franchiseWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, workflowId: true } })),
+    safeWorkflowLifecycleQuery(() => prisma.centerOperationalWorkflowHistory.findMany({ where: centerWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, workflowId: true } })),
+    safeWorkflowLifecycleQuery(() => prisma.teacherOperationalWorkflowHistory.findMany({ where: teacherWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, workflowId: true } })),
+    safeWorkflowLifecycleQuery(() => prisma.settlementWorkflowHistory.findMany({ where: settlementWhere, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 10, select: { createdAt: true, actionType: true, fromStatus: true, toStatus: true, settlementId: true } }))
   ]);
 
   const statusRows = [

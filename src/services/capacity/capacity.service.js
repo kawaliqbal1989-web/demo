@@ -364,49 +364,63 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
     assertBpCenterAccess({ tenantId, bpScope, centerId });
   }
 
-  const { snapshot, previousCapacity } = await prisma.$transaction(async (tx) => {
-    const center = await resolveCenterById({ tx, tenantId, centerId });
-    if (!center) {
-      throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+  let snapshot;
+  let previousCapacity;
+
+  try {
+    const transactionResult = await prisma.$transaction(async (tx) => {
+      const center = await resolveCenterById({ tx, tenantId, centerId });
+      if (!center) {
+        throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+      }
+
+      await lockCenterCapacityScope({ tx, centerId: center.id });
+
+      const current = await tx.centerCapacity.findUnique({
+        where: {
+          centerId: center.id
+        }
+      });
+
+      const nextData = {
+        maxTeachers: input.maxTeachers ?? current?.maxTeachers ?? 0,
+        maxStudents: input.maxStudents ?? current?.maxStudents ?? 0,
+        allowOverAllocation: input.allowOverAllocation ?? current?.allowOverAllocation ?? false
+      };
+
+      await tx.centerCapacity.upsert({
+        where: {
+          centerId: center.id
+        },
+        update: nextData,
+        create: {
+          centerId: center.id,
+          ...nextData
+        }
+      });
+
+      const nextSnapshot = await buildCenterSnapshot({
+        tx,
+        tenantId,
+        center,
+        auditLimit: 10
+      });
+
+      return {
+        snapshot: nextSnapshot,
+        previousCapacity: current
+      };
+    });
+
+    snapshot = transactionResult.snapshot;
+    previousCapacity = transactionResult.previousCapacity;
+  } catch (error) {
+    if (isCapacityStorageMissingError(error)) {
+      throw createHttpError(503, "Center capacity storage is not ready on this environment", "CENTER_CAPACITY_SCHEMA_MISSING");
     }
 
-    await lockCenterCapacityScope({ tx, centerId: center.id });
-
-    const current = await tx.centerCapacity.findUnique({
-      where: {
-        centerId: center.id
-      }
-    });
-
-    const nextData = {
-      maxTeachers: input.maxTeachers ?? current?.maxTeachers ?? 0,
-      maxStudents: input.maxStudents ?? current?.maxStudents ?? 0,
-      allowOverAllocation: input.allowOverAllocation ?? current?.allowOverAllocation ?? false
-    };
-
-    await tx.centerCapacity.upsert({
-      where: {
-        centerId: center.id
-      },
-      update: nextData,
-      create: {
-        centerId: center.id,
-        ...nextData
-      }
-    });
-
-    const nextSnapshot = await buildCenterSnapshot({
-      tx,
-      tenantId,
-      center,
-      auditLimit: 10
-    });
-
-    return {
-      snapshot: nextSnapshot,
-      previousCapacity: current
-    };
-  });
+    throw error;
+  }
 
   await recordCenterCapacityAudit({
     tenantId,

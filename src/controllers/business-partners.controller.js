@@ -325,21 +325,36 @@ const uploadBusinessPartnerLogo = asyncHandler(async (req, res) => {
 });
 const getBusinessPartner = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  let partner;
 
-  const partner = await prisma.businessPartner.findFirst({
-    where: {
-      id,
-      ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
-    },
-    include: {
-      address: true,
-      operationalStates: true,
-      operationalDistricts: true,
-      operationalCities: true,
-      courseAccesses: { include: { course: { select: { id: true, code: true, name: true } } } },
-      legacyPrograms: true
+  try {
+    partner = await prisma.businessPartner.findFirst({
+      where: {
+        id,
+        ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
+      },
+      include: {
+        address: true,
+        operationalStates: true,
+        operationalDistricts: true,
+        operationalCities: true,
+        courseAccesses: { include: { course: { select: { id: true, code: true, name: true } } } },
+        legacyPrograms: true
+      }
+    });
+  } catch (error) {
+    if (isSchemaMismatchError(error, ["businesspartner", "operational", "courseaccess", "legacyprogram"])) {
+      // Schema mismatch on relations - fall back to base query
+      partner = await prisma.businessPartner.findFirst({
+        where: {
+          id,
+          ...(req.auth.role === "SUPERADMIN" ? {} : { tenantId: req.auth.tenantId })
+        }
+      });
+    } else {
+      throw error;
     }
-  });
+  }
 
   if (!partner) {
     return res.apiError(404, "Business partner not found", "BUSINESS_PARTNER_NOT_FOUND");

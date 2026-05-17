@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 const LOGO_UPLOAD_PREFIX = "/uploads/logos/";
 const LOGO_UPLOAD_DIR = path.resolve(process.cwd(), "uploads", "logos");
@@ -266,30 +267,46 @@ const resolveAdminBusinessPartnerLogoUploadTarget = asyncHandler(async (req, res
 });
 
 const getAdminBusinessPartnerBranding = asyncHandler(async (req, res) => {
-  const partner = await prisma.businessPartner.findFirst({
-    where: {
-      id: req.params.id
-    },
-    select: {
-      id: true,
-      tenantId: true,
-      code: true,
-      name: true,
-      displayName: true,
-      logoPath: true,
-      logoFilePath: true,
-      logoUrl: true,
-      brandingUpdatedAt: true,
-      brandingUpdatedByUserId: true,
-      brandingUpdatedBy: {
+  let partner;
+  
+  try {
+    partner = await prisma.businessPartner.findFirst({
+      where: {
+        id: req.params.id
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        code: true,
+        name: true,
+        displayName: true,
+        logoPath: true,
+        logoUrl: true,
+        brandingUpdatedAt: true,
+        brandingUpdatedByUserId: true
+      }
+    });
+  } catch (error) {
+    if (isSchemaMismatchError(error, ["businesspartner", "logoupdate"])) {
+      // Schema mismatch - fall back to minimal branding query
+      partner = await prisma.businessPartner.findFirst({
+        where: {
+          id: req.params.id
+        },
         select: {
           id: true,
-          username: true,
-          email: true
+          tenantId: true,
+          code: true,
+          name: true,
+          displayName: true,
+          logoPath: true,
+          logoUrl: true
         }
-      }
+      });
+    } else {
+      throw error;
     }
-  });
+  }
 
   if (!partner) {
     return res.apiError(404, "Business partner not found", "BUSINESS_PARTNER_NOT_FOUND");

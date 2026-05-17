@@ -189,17 +189,18 @@ function isPrismaSchemaMismatchError(error) {
     message.includes("unknown table")
   );
 }
-    function normalizeWindowHours(value, fallback = 24) {
-      const parsed = Number.parseInt(value, 10);
-      if (!Number.isFinite(parsed) || parsed < 1) {
-        return fallback;
-      }
-      return Math.min(parsed, 24 * 30);
-    }
 
-    function buildOperationsDashboardFallback(windowHours, reason) {
-      const now = new Date();
-      const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
+function normalizeWindowHours(value, fallback = 24) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallback;
+  }
+  return Math.min(parsed, 24 * 30);
+}
+
+function buildOperationsDashboardFallback(windowHours, reason) {
+  const now = new Date();
+  const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
       const emptyChart = Array.from({ length: normalizedWindowHours }, (_, index) => ({
         label: String(index).padStart(2, "0") + ":00",
         startAt: new Date(now.getTime() - (normalizedWindowHours - index) * 60 * 60 * 1000).toISOString(),

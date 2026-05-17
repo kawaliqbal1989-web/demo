@@ -416,10 +416,61 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
     previousCapacity = transactionResult.previousCapacity;
   } catch (error) {
     if (isCapacityStorageMissingError(error)) {
-      throw createHttpError(503, "Center capacity storage is not ready on this environment", "CENTER_CAPACITY_SCHEMA_MISSING");
-    }
+      const center = await prisma.centerProfile.findFirst({
+        where: {
+          id: centerId,
+          tenantId
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          displayName: true,
+          authUser: {
+            select: {
+              hierarchyNodeId: true
+            }
+          },
+          franchiseProfile: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+              businessPartnerId: true
+            }
+          }
+        }
+      });
 
-    throw error;
+      if (!center) {
+        throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+      }
+
+      const usage = await loadCenterCapacityUsage({
+        tx: prisma,
+        tenantId,
+        hierarchyNodeId: center.authUser?.hierarchyNodeId || null
+      });
+
+      snapshot = buildCenterCapacitySnapshot({
+        center,
+        capacity: {
+          id: null,
+          maxTeachers: input.maxTeachers ?? 0,
+          maxStudents: input.maxStudents ?? 0,
+          allowOverAllocation: input.allowOverAllocation ?? false,
+          createdAt: null,
+          updatedAt: new Date()
+        },
+        teacherCount: usage.teacherCount,
+        studentCount: usage.studentCount,
+        auditHistory: []
+      });
+
+      previousCapacity = null;
+    } else {
+      throw error;
+    }
   }
 
   await recordCenterCapacityAudit({

@@ -1391,8 +1391,18 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
       },
       select: {
         id: true,
+        brandingMode: true,
+        inheritBranding: true,
+        customBrandName: true,
+        customLogoUrl: true,
+        brandingNotes: true,
+        brandingActive: true,
+        brandingLocked: true,
+        commercializationTier: true,
         logoPath: true,
-        logoUrl: true
+        logoUrl: true,
+        brandingApprovedAt: true,
+        brandingApprovedById: true
       }
     });
   } catch (error) {
@@ -1407,6 +1417,45 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
     return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
   }
 
+  const requestedBrandingMode = req.body.brandingMode === undefined
+    ? undefined
+    : String(req.body.brandingMode || "").trim().toUpperCase();
+  if (requestedBrandingMode !== undefined && !CENTER_BRANDING_MODES.has(requestedBrandingMode)) {
+    return res.apiError(400, "Invalid brandingMode", "VALIDATION_ERROR");
+  }
+
+  const requestedTier = req.body.commercializationTier === undefined
+    ? undefined
+    : String(req.body.commercializationTier || "").trim().toUpperCase();
+  if (requestedTier !== undefined && !CENTER_COMMERCIALIZATION_TIERS.has(requestedTier)) {
+    return res.apiError(400, "Invalid commercializationTier", "VALIDATION_ERROR");
+  }
+
+  const nextBrandingMode = requestedBrandingMode || existing.brandingMode || "INHERIT_FRANCHISE";
+  const nextInheritBranding = req.body.inheritBranding !== undefined
+    ? normalizeBoolean(req.body.inheritBranding, nextBrandingMode !== "CUSTOM_CENTER")
+    : requestedBrandingMode !== undefined
+      ? nextBrandingMode !== "CUSTOM_CENTER"
+      : existing.inheritBranding;
+  const nextCustomBrandName = req.body.customBrandName !== undefined
+    ? normalizeString(req.body.customBrandName)
+    : existing.customBrandName;
+  const nextCustomLogoUrl = req.body.customLogoUrl !== undefined
+    ? normalizeString(req.body.customLogoUrl)
+    : req.body.logoUrl !== undefined
+      ? normalizeString(req.body.logoUrl)
+      : existing.customLogoUrl;
+  const nextBrandingNotes = req.body.brandingNotes !== undefined
+    ? normalizeString(req.body.brandingNotes)
+    : existing.brandingNotes;
+  const nextBrandingActive = req.body.brandingActive !== undefined
+    ? normalizeBoolean(req.body.brandingActive, existing.brandingActive ?? true)
+    : existing.brandingActive;
+  const nextBrandingLocked = req.body.brandingLocked !== undefined
+    ? normalizeBoolean(req.body.brandingLocked, existing.brandingLocked ?? false)
+    : existing.brandingLocked;
+  const nextCommercializationTier = requestedTier || existing.commercializationTier || "STANDARD_CENTER";
+
   const nextLogoUrl = req.body.customLogoUrl !== undefined
     ? normalizeString(req.body.customLogoUrl)
     : req.body.logoUrl !== undefined
@@ -1416,18 +1465,60 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
     ? normalizeString(req.body.logoPath)
     : existing.logoPath;
 
+  const changed =
+    nextBrandingMode !== existing.brandingMode
+    || nextInheritBranding !== existing.inheritBranding
+    || nextCustomBrandName !== existing.customBrandName
+    || nextCustomLogoUrl !== existing.customLogoUrl
+    || nextBrandingNotes !== existing.brandingNotes
+    || nextBrandingActive !== existing.brandingActive
+    || nextBrandingLocked !== existing.brandingLocked
+    || nextCommercializationTier !== existing.commercializationTier
+    || nextLogoPath !== existing.logoPath
+    || nextLogoUrl !== existing.logoUrl;
+
   let updated;
   try {
     updated = await prisma.centerProfile.update({
       where: { id: existing.id },
       data: {
+        brandingMode: nextBrandingMode,
+        inheritBranding: nextInheritBranding,
+        customBrandName: nextCustomBrandName,
+        customLogoUrl: nextCustomLogoUrl,
+        brandingNotes: nextBrandingNotes,
+        brandingActive: nextBrandingActive,
+        brandingLocked: nextBrandingLocked,
+        commercializationTier: nextCommercializationTier,
         logoPath: nextLogoPath,
-        logoUrl: nextLogoUrl
+        logoUrl: nextLogoUrl,
+        ...(changed
+          ? {
+              brandingApprovedAt: new Date(),
+              brandingApprovedById: req.auth.userId
+            }
+          : {})
       },
       select: {
         id: true,
+        brandingMode: true,
+        inheritBranding: true,
+        customBrandName: true,
+        customLogoUrl: true,
+        brandingNotes: true,
+        brandingActive: true,
+        brandingLocked: true,
+        commercializationTier: true,
         logoPath: true,
-        logoUrl: true
+        logoUrl: true,
+        brandingApprovedAt: true,
+        brandingApprovedBy: {
+          select: {
+            id: true,
+            username: true,
+            email: true
+          }
+        }
       }
     });
   } catch (error) {
@@ -1447,10 +1538,26 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
     entityId: existing.id,
     metadata: {
       before: {
+        brandingMode: existing.brandingMode,
+        inheritBranding: existing.inheritBranding,
+        customBrandName: existing.customBrandName,
+        customLogoUrl: existing.customLogoUrl,
+        brandingNotes: existing.brandingNotes,
+        brandingActive: existing.brandingActive,
+        brandingLocked: existing.brandingLocked,
+        commercializationTier: existing.commercializationTier,
         logoPath: existing.logoPath,
         logoUrl: existing.logoUrl
       },
       after: {
+        brandingMode: updated.brandingMode,
+        inheritBranding: updated.inheritBranding,
+        customBrandName: updated.customBrandName,
+        customLogoUrl: updated.customLogoUrl,
+        brandingNotes: updated.brandingNotes,
+        brandingActive: updated.brandingActive,
+        brandingLocked: updated.brandingLocked,
+        commercializationTier: updated.commercializationTier,
         logoPath: updated.logoPath,
         logoUrl: updated.logoUrl
       }

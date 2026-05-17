@@ -389,7 +389,6 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
 
   let snapshot;
   let previousCapacity;
-  let persistenceAttempted = false;
 
   try {
     const transactionResult = await prisma.$transaction(async (tx) => {
@@ -470,28 +469,20 @@ async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope 
         throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
       }
 
-      persistenceAttempted = true;
       const rawSqlResult = await attemptRawSqlCapacityWrite({ centerId, input });
+      if (!rawSqlResult.success) {
+        throw createHttpError(
+          503,
+          "Center capacity storage is not available on this environment",
+          "CENTER_CAPACITY_STORAGE_UNAVAILABLE"
+        );
+      }
 
-      const usage = await loadCenterCapacityUsage({
+      snapshot = await buildCenterSnapshot({
         tx: prisma,
         tenantId,
-        hierarchyNodeId: center.authUser?.hierarchyNodeId || null
-      });
-
-      snapshot = buildCenterCapacitySnapshot({
         center,
-        capacity: {
-          id: rawSqlResult.success ? rawSqlResult.persistedId : null,
-          maxTeachers: input.maxTeachers ?? 0,
-          maxStudents: input.maxStudents ?? 0,
-          allowOverAllocation: input.allowOverAllocation ?? false,
-          createdAt: null,
-          updatedAt: new Date()
-        },
-        teacherCount: usage.teacherCount,
-        studentCount: usage.studentCount,
-        auditHistory: []
+        auditLimit: 10
       });
 
       previousCapacity = null;

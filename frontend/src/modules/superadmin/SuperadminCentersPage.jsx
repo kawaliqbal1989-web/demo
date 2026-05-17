@@ -430,15 +430,14 @@ function SuperadminCentersPage() {
     setBrandingSaving(true);
     setBrandingMessage("");
     try {
-      const result = await saUpdateCenterBranding(selectedCenterId, {
+      await saUpdateCenterBranding(selectedCenterId, {
         ...brandingForm,
         customBrandName: brandingForm.customBrandName.trim(),
         customLogoUrl: brandingForm.customLogoUrl.trim(),
         brandingNotes: brandingForm.brandingNotes.trim()
       });
-      const detail = result?.data || null;
-      setSelectedCenterDetail(detail);
-      applyBrandingForm(detail);
+
+      await refreshSelectedCenterDetail(selectedCenterId);
       setBrandingMessage("Center branding updated.");
     } catch (err) {
       setBrandingMessage(getFriendlyErrorMessage(err) || "Failed to save center branding.");

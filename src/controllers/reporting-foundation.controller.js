@@ -174,6 +174,21 @@ function isReportExportStorageMissingError(error) {
     message.includes("unknown table")
   );
 }
+
+function isPrismaSchemaMismatchError(error) {
+  const code = String(error?.code || "");
+  if (!["P2021", "P2022", "P2010"].includes(code)) {
+    return false;
+  }
+
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    message.includes("unknown column") ||
+    message.includes("does not exist") ||
+    message.includes("no such table") ||
+    message.includes("unknown table")
+  );
+}
     function normalizeWindowHours(value, fallback = 24) {
       const parsed = Number.parseInt(value, 10);
       if (!Number.isFinite(parsed) || parsed < 1) {
@@ -479,6 +494,13 @@ const exportPdfReport = asyncHandler(async (req, res) => {
         "REPORT_EXPORT_STORAGE_UNAVAILABLE"
       );
     }
+    if (isPrismaSchemaMismatchError(error)) {
+      return res.apiError(
+        503,
+        "Report data storage is not ready on this environment",
+        "REPORT_DATA_SCHEMA_MISMATCH"
+      );
+    }
     throw error;
   }
 
@@ -508,6 +530,13 @@ const exportExcelReport = asyncHandler(async (req, res) => {
         503,
         "Report export storage is not ready on this environment",
         "REPORT_EXPORT_STORAGE_UNAVAILABLE"
+      );
+    }
+    if (isPrismaSchemaMismatchError(error)) {
+      return res.apiError(
+        503,
+        "Report data storage is not ready on this environment",
+        "REPORT_DATA_SCHEMA_MISMATCH"
       );
     }
     throw error;

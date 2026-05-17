@@ -1389,10 +1389,10 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
         tenantId: req.auth.tenantId,
         OR: [{ id }, { authUserId: id }]
       },
-      include: {
-        brandingApprovedBy: {
-          select: { id: true, username: true, email: true }
-        }
+      select: {
+        id: true,
+        logoPath: true,
+        logoUrl: true
       }
     });
   } catch (error) {
@@ -1407,66 +1407,27 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
     return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
   }
 
-  const brandingMode = req.body.brandingMode
-    ? String(req.body.brandingMode).trim().toUpperCase()
-    : existing.brandingMode;
-  const commercializationTier = req.body.commercializationTier
-    ? String(req.body.commercializationTier).trim().toUpperCase()
-    : existing.commercializationTier;
-
-  if (!CENTER_BRANDING_MODES.has(brandingMode)) {
-    return res.apiError(400, "Invalid brandingMode", "VALIDATION_ERROR");
-  }
-  if (!CENTER_COMMERCIALIZATION_TIERS.has(commercializationTier)) {
-    return res.apiError(400, "Invalid commercializationTier", "VALIDATION_ERROR");
-  }
-
-  if (existing.brandingLocked && req.body.brandingLocked === undefined) {
-    return res.apiError(409, "Branding is locked for this center", "CENTER_BRANDING_LOCKED");
-  }
-
-  const nextCustomLogoUrl = req.body.customLogoUrl !== undefined
+  const nextLogoUrl = req.body.customLogoUrl !== undefined
     ? normalizeString(req.body.customLogoUrl)
-    : existing.customLogoUrl;
-  const nextCustomBrandName = req.body.customBrandName !== undefined
-    ? normalizeString(req.body.customBrandName)
-    : existing.customBrandName;
-  const nextBrandingNotes = req.body.brandingNotes !== undefined
-    ? normalizeString(req.body.brandingNotes)
-    : existing.brandingNotes;
-  const nextBrandingActive = req.body.brandingActive !== undefined
-    ? normalizeBoolean(req.body.brandingActive, existing.brandingActive)
-    : existing.brandingActive;
-  const nextBrandingLocked = req.body.brandingLocked !== undefined
-    ? normalizeBoolean(req.body.brandingLocked, existing.brandingLocked)
-    : existing.brandingLocked;
+    : req.body.logoUrl !== undefined
+      ? normalizeString(req.body.logoUrl)
+      : existing.logoUrl;
+  const nextLogoPath = req.body.logoPath !== undefined
+    ? normalizeString(req.body.logoPath)
+    : existing.logoPath;
 
   let updated;
   try {
     updated = await prisma.centerProfile.update({
       where: { id: existing.id },
       data: {
-        brandingMode,
-        inheritBranding: brandingMode !== "CUSTOM_CENTER",
-        customLogoUrl: nextCustomLogoUrl,
-        customBrandName: nextCustomBrandName,
-        brandingApprovedAt: new Date(),
-        brandingApprovedById: req.auth.userId,
-        brandingNotes: nextBrandingNotes,
-        brandingActive: nextBrandingActive,
-        brandingLocked: nextBrandingLocked,
-        commercializationTier,
-        logoUrl: brandingMode === "CUSTOM_CENTER" ? nextCustomLogoUrl : existing.logoUrl
+        logoPath: nextLogoPath,
+        logoUrl: nextLogoUrl
       },
-      include: {
-        brandingApprovedBy: {
-          select: { id: true, username: true, email: true }
-        },
-        franchiseProfile: { select: { id: true, code: true, name: true } },
-        authUser: {
-          select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
-        },
-        address: true
+      select: {
+        id: true,
+        logoPath: true,
+        logoUrl: true
       }
     });
   } catch (error) {
@@ -1486,40 +1447,18 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
     entityId: existing.id,
     metadata: {
       before: {
-        brandingMode: existing.brandingMode,
-        customBrandName: existing.customBrandName,
-        customLogoUrl: existing.customLogoUrl,
-        brandingActive: existing.brandingActive,
-        brandingLocked: existing.brandingLocked,
-        commercializationTier: existing.commercializationTier
+        logoPath: existing.logoPath,
+        logoUrl: existing.logoUrl
       },
       after: {
-        brandingMode: updated.brandingMode,
-        customBrandName: updated.customBrandName,
-        customLogoUrl: updated.customLogoUrl,
-        brandingActive: updated.brandingActive,
-        brandingLocked: updated.brandingLocked,
-        commercializationTier: updated.commercializationTier
+        logoPath: updated.logoPath,
+        logoUrl: updated.logoUrl
       }
     }
   });
 
-  let effectiveBranding;
-  try {
-    effectiveBranding = await resolveBrandingForCenter(updated.id, req.auth.tenantId);
-  } catch (error) {
-    if (isCenterBrandingSchemaMismatchError(error)) {
-      return res.apiError(503, "Center branding schema is not ready on this environment", "CENTER_BRANDING_SCHEMA_MISMATCH");
-    }
-
-    throw error;
-  }
-
   res.locals.entityId = updated.id;
-  return res.apiSuccess("Center branding updated", {
-    ...updated,
-    effectiveBranding
-  });
+  return res.apiSuccess("Center branding updated", updated);
 });
 
 export {

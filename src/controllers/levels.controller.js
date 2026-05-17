@@ -2,6 +2,7 @@ import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { generateWorksheet } from "../services/abacus-question-generator.service.js";
 import { assertCanModifyAcademic, assertCanModifyOperational } from "../services/ownership-guard.service.js";
+import { resolveScopedLevelIdsForAuth } from "../services/course-scope.service.js";
 
 function normalizeMoney(value) {
   if (value === undefined) return undefined;
@@ -156,6 +157,11 @@ const generateLevelWorksheet = asyncHandler(async (req, res) => {
 
   if (!level) {
     return res.apiError(404, "Level not found", "LEVEL_NOT_FOUND");
+  }
+
+  const scopedLevelIds = await resolveScopedLevelIdsForAuth({ auth: req.auth });
+  if (Array.isArray(scopedLevelIds) && !scopedLevelIds.includes(level.id)) {
+    return res.apiError(403, "Level is outside your course scope", "LEVEL_SCOPE_DENIED");
   }
 
   const seedToUse = seed || `${Date.now()}-${req.auth.userId}-${levelId}`;

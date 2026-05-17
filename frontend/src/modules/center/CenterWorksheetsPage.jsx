@@ -5,7 +5,6 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { listCatalogCourseLevels } from "../../services/catalogService";
 import { listCenterAvailableCourses } from "../../services/centerService";
 import { listWorksheets } from "../../services/worksheetsService";
-import { listLevels } from "../../services/levelsService";
 import { Link } from "react-router-dom";
 
 function CenterWorksheetsPage() {
@@ -20,25 +19,15 @@ function CenterWorksheetsPage() {
   const [worksheetsLoading, setWorksheetsLoading] = useState(false);
   const [worksheets, setWorksheets] = useState([]);
 
-  const [allLevels, setAllLevels] = useState([]);
-  const [selectedLevelDirect, setSelectedLevelDirect] = useState(null);
-  const [directWsLoading, setDirectWsLoading] = useState(false);
-  const [directWorksheets, setDirectWorksheets] = useState([]);
-
   const [error, setError] = useState("");
 
   const loadCourses = async () => {
     setCoursesLoading(true);
     setError("");
     try {
-      const [courseResp, levelResp] = await Promise.all([
-        listCenterAvailableCourses(),
-        listLevels().catch(() => null)
-      ]);
+      const courseResp = await listCenterAvailableCourses();
       const raw = courseResp?.data;
       setCourses(Array.isArray(raw) ? raw : raw?.items || []);
-      const lvls = levelResp?.data || [];
-      setAllLevels(Array.isArray(lvls) ? lvls : []);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load courses.");
       setCourses([]);
@@ -78,21 +67,6 @@ function CenterWorksheetsPage() {
       setWorksheets([]);
     } finally {
       setWorksheetsLoading(false);
-    }
-  };
-
-  const loadDirectWorksheets = async (level) => {
-    if (!level?.id) return;
-    setDirectWsLoading(true);
-    setError("");
-    try {
-      const resp = await listWorksheets({ levelId: level.id, limit: 100, offset: 0 });
-      setDirectWorksheets(resp?.data || []);
-    } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to load worksheets.");
-      setDirectWorksheets([]);
-    } finally {
-      setDirectWsLoading(false);
     }
   };
 
@@ -234,74 +208,6 @@ function CenterWorksheetsPage() {
         </>
       ) : null}
 
-      {allLevels.length > 0 ? (
-        <>
-          <div style={{ marginTop: 8 }}>
-            <h3 style={{ margin: 0 }}>Browse by Level</h3>
-            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>View worksheets for each level directly.</div>
-          </div>
-          <DataTable
-            columns={[
-              { key: "rank", header: "Rank", render: (r) => r.rank },
-              { key: "name", header: "Name", render: (r) => r.name },
-              {
-                key: "actions",
-                header: "Actions",
-                render: (r) => (
-                  <button
-                    className={selectedLevelDirect?.id === r.id ? "button" : "button secondary"}
-                    style={{ width: "auto" }}
-                    onClick={() => {
-                      setSelectedLevelDirect(r);
-                      void loadDirectWorksheets(r);
-                    }}
-                  >
-                    Worksheets
-                  </button>
-                )
-              }
-            ]}
-            rows={allLevels}
-            keyField="id"
-          />
-        </>
-      ) : null}
-
-      {selectedLevelDirect ? (
-        <>
-          <div style={{ marginTop: 4 }}>
-            <h3 style={{ margin: 0 }}>Worksheets for {selectedLevelDirect.name}</h3>
-          </div>
-          {directWsLoading ? (
-            <LoadingState label="Loading worksheets..." />
-          ) : (
-            <>
-              <DataTable
-                columns={[
-                  { key: "number", header: "Number", render: (r) => r.number },
-                  { key: "title", header: "Title", render: (r) => r.title },
-                  { key: "questionCount", header: "Questions", render: (r) => r.questionCount ?? 0 },
-                  { key: "status", header: "Status", render: (r) => (r.isPublished ? "PUBLISHED" : "DRAFT") },
-                  {
-                    key: "actions",
-                    header: "Actions",
-                    render: (r) => (
-                      <Link className="button secondary" style={{ width: "auto" }} to={`/center/worksheets/${r.id}`}>
-                        View
-                      </Link>
-                    )
-                  }
-                ]}
-                rows={directWorksheets.map((w, i) => ({ ...w, number: i + 1 }))}
-                keyField="id"
-              />
-              {!directWorksheets.length ? (
-                <div className="card" style={{ color: "var(--color-text-muted)" }}>No worksheets available for this level.</div>
-              ) : null}
-            </>
-          )}
-        </>
-      ) : null}
     </section>
   );
 }

@@ -16,6 +16,7 @@ import {
 import { logger } from "../lib/logger.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import { resolveEffectiveStudentLevel } from "../utils/student-level.js";
+import { resolveScopedLevelIdsForAuth } from "../services/course-scope.service.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -379,7 +380,9 @@ const listStudentEnrollments = asyncHandler(async (req, res) => {
   return res.apiSuccess("Enrollments fetched", response);
 });
 
-async function assertWorksheetAccessibleForStudent({ tenantId, student, worksheetId }) {
+async function assertWorksheetAccessibleForStudent({ tenantId, student, worksheetId, auth }) {
+  const scopedLevelIds = await resolveScopedLevelIdsForAuth({ auth, studentId: student.id });
+
   const activeAssignment = await prisma.worksheetAssignment.findFirst({
     where: {
       tenantId,
@@ -414,6 +417,13 @@ async function assertWorksheetAccessibleForStudent({ tenantId, student, workshee
     const error = new Error("Worksheet not found");
     error.statusCode = 404;
     error.errorCode = "WORKSHEET_NOT_FOUND";
+    throw error;
+  }
+
+  if (Array.isArray(scopedLevelIds) && !scopedLevelIds.includes(worksheet.levelId)) {
+    const error = new Error("Worksheet is outside center course scope");
+    error.statusCode = 403;
+    error.errorCode = "WORKSHEET_SCOPE_DENIED";
     throw error;
   }
 
@@ -657,7 +667,8 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     const access = await assertWorksheetAccessibleForStudent({
       tenantId: req.auth.tenantId,
       student: req.student,
-      worksheetId
+      worksheetId,
+      auth: req.auth
     });
 
     const worksheet = await prisma.worksheet.findFirst({
@@ -1024,6 +1035,16 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
   const { take, skip } = parsePagination(req.query);
   const search = req.query.search ? String(req.query.search).trim() : "";
 
+  const scopedLevelIds = await resolveScopedLevelIdsForAuth({ auth: req.auth, studentId: req.student.id });
+  const assignmentWorksheetWhere = {
+    ...(Array.isArray(scopedLevelIds) ? { levelId: { in: scopedLevelIds } } : {}),
+    ...(search
+      ? {
+          OR: [{ title: { contains: search } }, { description: { contains: search } }]
+        }
+      : {})
+  };
+
   const assignmentWhere = {
     tenantId: req.auth.tenantId,
     studentId: req.student.id,
@@ -1037,10 +1058,10 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
         }
       }
     },
-    ...(search
+    ...(Object.keys(assignmentWorksheetWhere).length
       ? {
           worksheet: {
-            OR: [{ title: { contains: search } }, { description: { contains: search } }]
+            is: assignmentWorksheetWhere
           }
         }
       : {})
@@ -1082,10 +1103,18 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
     total = assignmentTotal;
     worksheets = assignments.map((a) => a.worksheet).filter(Boolean);
   } else {
+    const fallbackLevelIds = Array.isArray(scopedLevelIds)
+      ? scopedLevelIds.filter((id) => id === req.student.levelId)
+      : [req.student.levelId];
+
+    if (!fallbackLevelIds.length) {
+      total = 0;
+      worksheets = [];
+    } else {
     const where = {
       tenantId: req.auth.tenantId,
       isPublished: true,
-      levelId: req.student.levelId,
+      levelId: { in: fallbackLevelIds },
       ...(search
         ? {
             OR: [{ title: { contains: search } }, { description: { contains: search } }]
@@ -1108,6 +1137,7 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
 
     total = fallbackTotal;
     worksheets = fallbackWorksheets;
+    }
   }
 
   const worksheetIds = worksheets.map((w) => w.id);
@@ -1195,7 +1225,8 @@ const getStudentWorksheet = asyncHandler(async (req, res) => {
   const access = await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
     student: req.student,
-    worksheetId
+    worksheetId,
+    auth: req.auth
   });
 
   const worksheet = await prisma.worksheet.findFirst({
@@ -1241,7 +1272,8 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
   const { worksheet } = await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
     student: req.student,
-    worksheetId
+    worksheetId,
+    auth: req.auth
   });
 
   const existing = await prisma.worksheetSubmission.findUnique({
@@ -1324,7 +1356,8 @@ const listStudentWorksheetAttempts = asyncHandler(async (req, res) => {
   await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
     student: req.student,
-    worksheetId
+    worksheetId,
+    auth: req.auth
   });
 
   const submission = await prisma.worksheetSubmission.findUnique({
@@ -1347,7 +1380,8 @@ const submitStudentWorksheet = asyncHandler(async (req, res) => {
   await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
     student: req.student,
-    worksheetId
+    worksheetId,
+    auth: req.auth
   });
 
   if (!attemptId) {

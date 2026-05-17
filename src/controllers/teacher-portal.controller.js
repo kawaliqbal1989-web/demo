@@ -15,6 +15,7 @@ import {
 } from "../services/worksheet-reassignment.service.js";
 import { getStudent360Data } from "../services/student-360.service.js";
 import { withEffectiveStudentLevel } from "../utils/student-level.js";
+import { resolveScopedLevelIdsForAuth } from "../services/course-scope.service.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -474,10 +475,23 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
     });
   }
 
+  const scopedLevelIds = await resolveScopedLevelIdsForAuth({ auth: req.auth });
+  const allowedLevelIds = Array.isArray(scopedLevelIds)
+    ? levelIds.filter((id) => scopedLevelIds.includes(id))
+    : levelIds;
+
+  if (!allowedLevelIds.length) {
+    return res.apiSuccess("Batch worksheet context", {
+      batchId: String(batchId),
+      studentCount: enrollments.length,
+      worksheets: []
+    });
+  }
+
   const worksheets = await prisma.worksheet.findMany({
     where: {
       tenantId: req.auth.tenantId,
-      levelId: { in: levelIds }
+      levelId: { in: allowedLevelIds }
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
@@ -537,6 +551,11 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
   });
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const scopedLevelIdsForBatchAssign = await resolveScopedLevelIdsForAuth({ auth: req.auth });
+  if (Array.isArray(scopedLevelIdsForBatchAssign) && !scopedLevelIdsForBatchAssign.includes(worksheet.levelId)) {
+    return res.apiError(403, "Worksheet is outside center course scope", "WORKSHEET_SCOPE_DENIED");
   }
 
   const enrollments = await prisma.enrollment.findMany({
@@ -1124,7 +1143,12 @@ const getTeacherAssignWorksheetsContext = asyncHandler(async (req, res) => {
       })
     : null;
 
-  const worksheets = effectiveLevelId
+  const scopedLevelIds = await resolveScopedLevelIdsForAuth({ auth: req.auth });
+  const levelAllowed = effectiveLevelId
+    ? (Array.isArray(scopedLevelIds) ? scopedLevelIds.includes(effectiveLevelId) : true)
+    : false;
+
+  const worksheets = levelAllowed
     ? await prisma.worksheet.findMany({
         where: {
           tenantId,
@@ -1282,7 +1306,12 @@ const saveTeacherWorksheetAssignments = asyncHandler(async (req, res) => {
     return res.apiError(400, "Student level not set", "LEVEL_REQUIRED");
   }
 
-  const allowedWorksheets = worksheetIds.length
+  const scopedLevelIdsForSave = await resolveScopedLevelIdsForAuth({ auth: req.auth });
+  const levelAllowedForSave = Array.isArray(scopedLevelIdsForSave)
+    ? scopedLevelIdsForSave.includes(effectiveLevelId)
+    : true;
+
+  const allowedWorksheets = worksheetIds.length && levelAllowedForSave
     ? await prisma.worksheet.findMany({
         where: {
           tenantId,
@@ -1538,7 +1567,12 @@ const listTeacherStudentMaterials = asyncHandler(async (req, res) => {
     }
   });
 
-  const worksheets = effectiveLevel?.id
+  const scopedLevelIdsForMaterials = await resolveScopedLevelIdsForAuth({ auth: req.auth });
+  const levelAllowedForMaterials = effectiveLevel?.id
+    ? (Array.isArray(scopedLevelIdsForMaterials) ? scopedLevelIdsForMaterials.includes(effectiveLevel.id) : true)
+    : false;
+
+  const worksheets = levelAllowedForMaterials
     ? await prisma.worksheet.findMany({
         where: {
           tenantId,

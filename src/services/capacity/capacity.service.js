@@ -359,7 +359,47 @@ function assertBpCenterAccess({ tenantId, bpScope, centerId }) {
   }
 }
 
+async function ensureCenterCapacityTableExists() {
+  try {
+    await prisma.$executeRawUnsafe(`
+      CREATE TABLE IF NOT EXISTS \`centercapacity\` (
+        \`id\` VARCHAR(191) NOT NULL,
+        \`centerId\` VARCHAR(191) NOT NULL,
+        \`maxTeachers\` INT NOT NULL DEFAULT 0,
+        \`maxStudents\` INT NOT NULL DEFAULT 0,
+        \`allowOverAllocation\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+        UNIQUE INDEX \`centercapacity_centerId_key\`(\`centerId\`),
+        INDEX \`centercapacity_updatedAt_idx\`(\`updatedAt\`),
+        PRIMARY KEY (\`id\`)
+      ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
+    `);
+
+    // Add foreign key separately; ignore failure when it already exists or centercapacity
+    // was created without it (e.g. due to prior partial DDL).
+    try {
+      await prisma.$executeRawUnsafe(`
+        ALTER TABLE \`centercapacity\`
+          ADD CONSTRAINT \`CenterCapacity_centerId_fkey\`
+          FOREIGN KEY (\`centerId\`) REFERENCES \`centerprofile\`(\`id\`)
+          ON DELETE CASCADE ON UPDATE CASCADE
+      `);
+    } catch {
+      // Constraint already exists or centercapacity can operate without it — not fatal.
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function attemptRawSqlCapacityWrite({ centerId, input }) {
+  // When the centercapacity table is absent, create it on-demand (same as the
+  // migration_center_capacity_schema_restore.sql script but applied inline).
+  await ensureCenterCapacityTableExists();
+
   const capacityId = `c_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
   const now = new Date();
   const maxTeachers = Number(input.maxTeachers ?? 0);

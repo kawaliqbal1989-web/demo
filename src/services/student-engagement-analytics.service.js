@@ -310,9 +310,6 @@ async function resolveStudentEngagementScope({ tenantId, authUserId, studentId, 
       admissionNo: true,
       firstName: true,
       lastName: true,
-      guardianName: true,
-      guardianEmail: true,
-      guardianPhone: true,
       hierarchyNodeId: true,
       levelId: true,
       authUsers: {
@@ -364,9 +361,9 @@ async function resolveStudentEngagementScope({ tenantId, authUserId, studentId, 
     studentAuthUserId: student.authUsers[0]?.id || null,
     studentAuthUsername: student.authUsers[0]?.username || null,
     studentAuthEmail: student.authUsers[0]?.email || null,
-    guardianName: student.guardianName || null,
-    guardianEmail: student.guardianEmail || null,
-    guardianPhone: student.guardianPhone || null
+    guardianName: null,
+    guardianEmail: null,
+    guardianPhone: null
   };
 }
 

@@ -101,45 +101,90 @@ function deriveAttemptTimerMode(worksheetKind) {
 }
 
 const getStudentMe = asyncHandler(async (req, res) => {
-  const student = await prisma.student.findFirst({
-    where: {
-      id: req.student.id,
-      tenantId: req.auth.tenantId
-    },
-    select: {
-      id: true,
-      photoUrl: true,
-      admissionNo: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      gender: true,
-      dateOfBirth: true,
-      guardianName: true,
-      guardianPhone: true,
-      guardianEmail: true,
-      phonePrimary: true,
-      phoneSecondary: true,
-      address: true,
-      state: true,
-      district: true,
-      hierarchyNodeId: true,
-      levelId: true,
-      isActive: true,
-      hierarchyNode: { select: { id: true, name: true, code: true } },
-      level: { select: { id: true, name: true, rank: true } },
-      course: { select: { id: true, code: true, name: true } },
-      batchEnrollments: {
-        where: { status: "ACTIVE" },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: {
-          levelId: true,
-          level: { select: { id: true, name: true, rank: true } }
+  let student;
+  try {
+    student = await prisma.student.findFirst({
+      where: {
+        id: req.student.id,
+        tenantId: req.auth.tenantId
+      },
+      select: {
+        id: true,
+        photoUrl: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        gender: true,
+        dateOfBirth: true,
+        guardianName: true,
+        guardianPhone: true,
+        guardianEmail: true,
+        phonePrimary: true,
+        phoneSecondary: true,
+        address: true,
+        state: true,
+        district: true,
+        hierarchyNodeId: true,
+        levelId: true,
+        isActive: true,
+        hierarchyNode: { select: { id: true, name: true, code: true } },
+        level: { select: { id: true, name: true, rank: true } },
+        course: { select: { id: true, code: true, name: true } },
+        batchEnrollments: {
+          where: { status: "ACTIVE" },
+          orderBy: { createdAt: "desc" },
+          take: 1,
+          select: {
+            levelId: true,
+            level: { select: { id: true, name: true, rank: true } }
+          }
         }
       }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["student", "guardian", "batchenrollment"])) {
+      throw error;
     }
-  });
+
+    student = await prisma.student.findFirst({
+      where: {
+        id: req.student.id,
+        tenantId: req.auth.tenantId
+      },
+      select: {
+        id: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        hierarchyNodeId: true,
+        levelId: true,
+        isActive: true,
+        hierarchyNode: { select: { id: true, name: true, code: true } },
+        level: { select: { id: true, name: true, rank: true } },
+        course: { select: { id: true, code: true, name: true } }
+      }
+    });
+
+    if (student) {
+      student = {
+        ...student,
+        photoUrl: null,
+        email: null,
+        gender: null,
+        dateOfBirth: null,
+        guardianName: null,
+        guardianPhone: null,
+        guardianEmail: null,
+        phonePrimary: null,
+        phoneSecondary: null,
+        address: null,
+        state: null,
+        district: null,
+        batchEnrollments: []
+      };
+    }
+  }
 
   if (!student) {
     return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
@@ -147,7 +192,7 @@ const getStudentMe = asyncHandler(async (req, res) => {
 
   const { effectiveLevel, effectiveLevelId } = resolveEffectiveStudentLevel(student);
 
-  const [activeEnrollmentsCount, assignedWorksheetsCount, user] = await Promise.all([
+  const [activeEnrollmentsCountResult, assignedWorksheetsCountResult, userResult] = await Promise.allSettled([
     prisma.enrollment.count({
       where: {
         tenantId: req.auth.tenantId,
@@ -163,7 +208,7 @@ const getStudentMe = asyncHandler(async (req, res) => {
             isPublished: true
           }
         })
-      : 0,
+      : Promise.resolve(0),
     prisma.authUser.findFirst({
       where: {
         id: req.auth.userId,
@@ -175,6 +220,14 @@ const getStudentMe = asyncHandler(async (req, res) => {
       }
     })
   ]);
+
+  const activeEnrollmentsCount = activeEnrollmentsCountResult.status === "fulfilled"
+    ? Number(activeEnrollmentsCountResult.value) || 0
+    : 0;
+  const assignedWorksheetsCount = assignedWorksheetsCountResult.status === "fulfilled"
+    ? Number(assignedWorksheetsCountResult.value) || 0
+    : 0;
+  const user = userResult.status === "fulfilled" ? userResult.value : null;
 
   // fetch any explicit assigned courses (multi-assign feature)
   let assignedCourseRows = [];

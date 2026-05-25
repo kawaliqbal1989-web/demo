@@ -15,98 +15,261 @@ function formatStudentName(row) {
   return `${firstName} ${lastName}`.trim();
 }
 
-async function listPendingInstallments({ tenantId, centerId, range, limit, offset }) {
-  const from = range.from;
-  const toExclusive = range.toExclusive;
+async function listPendingInstallments({ tenantId, centerId, range, limit, offset, filters = {} }) {
+  const { status, levelId, batchId, search } = filters;
 
-  const totalRows = await prisma.$queryRaw`
+  // Build additional WHERE conditions
+  let additionalWhere = "";
+  
+  if (batchId) {
+    additionalWhere += ` AND EXISTS (
+      SELECT 1 FROM Enrollment e2
+      WHERE e2.studentId = s.id
+      AND e2.batchId = '${batchId.replace(/'/g, "''")}'
+      AND e2.status = 'ACTIVE'
+    )`;
+  }
+  
+  if (levelId) {
+    additionalWhere += ` AND s.currentLevelId = '${levelId.replace(/'/g, "''")}'`;
+  }
+  
+  if (search) {
+    const escapedSearch = search.replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
+    additionalWhere += ` AND (
+      s.firstName LIKE '%${escapedSearch}%' OR
+      s.lastName LIKE '%${escapedSearch}%' OR
+      s.admissionNo LIKE '%${escapedSearch}%'
+    )`;
+  }
+
+  const allowedStatuses = new Set(["PENDING", "OVERDUE"]);
+  const requestedStatuses = String(status || "")
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter((value) => allowedStatuses.has(value));
+
+  let statusWhere = "";
+  if (requestedStatuses.length > 0) {
+    statusWhere = ` AND (CASE WHEN due.overdueCount > 0 THEN 'OVERDUE' ELSE 'PENDING' END) IN (${requestedStatuses
+      .map((value) => `'${value}'`)
+      .join(",")})`;
+  }
+
+  const countSql = `
     SELECT COUNT(1) AS total
     FROM (
-      SELECT i.id
-      FROM StudentFeeInstallment i
-      JOIN Student s ON s.id = i.studentId
-      LEFT JOIN FinancialTransaction t
-        ON t.installmentId = i.id
-        AND t.tenantId = i.tenantId
-        AND t.centerId = ${centerId}
-        AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
-      WHERE i.tenantId = ${tenantId}
-        AND s.tenantId = ${tenantId}
-        AND s.hierarchyNodeId = ${centerId}
-        AND i.dueDate >= ${from}
-        AND i.dueDate < ${toExclusive}
-      GROUP BY i.id
-      HAVING (i.amount - COALESCE(SUM(t.grossAmount), 0)) > 0
+      SELECT s.id
+      FROM Student s
+      JOIN (
+        SELECT
+          i.studentId,
+          SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS pendingAmount,
+          MIN(CASE WHEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN i.dueDate ELSE NULL END) AS nextDueDate,
+          SUM(CASE WHEN i.dueDate < NOW() AND GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN 1 ELSE 0 END) AS overdueCount
+        FROM StudentFeeInstallment i
+        LEFT JOIN (
+          SELECT installmentId, SUM(grossAmount) AS paidAmount
+          FROM FinancialTransaction
+          WHERE tenantId = ?
+            AND centerId = ?
+            AND installmentId IS NOT NULL
+            AND type IN (?, ?)
+          GROUP BY installmentId
+        ) p ON p.installmentId = i.id
+        WHERE i.tenantId = ?
+        GROUP BY i.studentId
+        HAVING pendingAmount > 0
+      ) due ON due.studentId = s.id
+      WHERE s.tenantId = ?
+        AND s.hierarchyNodeId = ?
+        AND s.isActive = 1
+        ${additionalWhere}
+        ${statusWhere}
     ) x
   `;
 
+  const totalRows = await prisma.$queryRawUnsafe(
+    countSql,
+    tenantId,
+    centerId,
+    PAYMENT_TYPES[0],
+    PAYMENT_TYPES[1],
+    tenantId,
+    tenantId,
+    centerId
+  );
+
   const total = toSafeNumber(Array.isArray(totalRows) ? totalRows[0]?.total : 0);
 
-  const rows = await prisma.$queryRaw`
+  const dataSql = `
     SELECT
-      i.id,
-      i.studentId,
-      i.amount,
-      i.dueDate,
+      s.id AS studentId,
+      due.pendingAmount,
+      due.nextDueDate,
+      due.overdueCount,
       s.admissionNo,
       s.firstName,
       s.lastName,
-      COALESCE(SUM(t.grossAmount), 0) AS paidAmount
-    FROM StudentFeeInstallment i
-    JOIN Student s ON s.id = i.studentId
-    LEFT JOIN FinancialTransaction t
-      ON t.installmentId = i.id
-      AND t.tenantId = i.tenantId
-      AND t.centerId = ${centerId}
-      AND t.type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
-    WHERE i.tenantId = ${tenantId}
-      AND s.tenantId = ${tenantId}
-      AND s.hierarchyNodeId = ${centerId}
-      AND i.dueDate >= ${from}
-      AND i.dueDate < ${toExclusive}
-    GROUP BY i.id
-    HAVING (i.amount - COALESCE(SUM(t.grossAmount), 0)) > 0
-    ORDER BY i.dueDate ASC, i.id ASC
-    LIMIT ${limit} OFFSET ${offset}
+      s.phonePrimary,
+      s.guardianPhone,
+      (SELECT MAX(t2.receivedAt) FROM FinancialTransaction t2
+       WHERE t2.tenantId = ?
+         AND t2.centerId = ?
+         AND t2.studentId = s.id
+         AND t2.type IN (?, ?)) AS lastPaymentDate,
+      (SELECT b2.name FROM Enrollment e2 
+       LEFT JOIN Batch b2 ON b2.id = e2.batchId 
+       WHERE e2.studentId = s.id AND e2.status = 'ACTIVE' 
+       LIMIT 1) AS batchName,
+      (SELECT tp2.fullName FROM Enrollment e3
+       LEFT JOIN Batch b3 ON b3.id = e3.batchId
+       LEFT JOIN TeacherProfile tp2 ON tp2.authUserId = b3.primaryTeacherUserId
+       WHERE e3.studentId = s.id AND e3.status = 'ACTIVE'
+       LIMIT 1) AS teacherName
+    FROM Student s
+    JOIN (
+      SELECT
+        i.studentId,
+        SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS pendingAmount,
+        MIN(CASE WHEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN i.dueDate ELSE NULL END) AS nextDueDate,
+        SUM(CASE WHEN i.dueDate < NOW() AND GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN 1 ELSE 0 END) AS overdueCount
+      FROM StudentFeeInstallment i
+      LEFT JOIN (
+        SELECT installmentId, SUM(grossAmount) AS paidAmount
+        FROM FinancialTransaction
+        WHERE tenantId = ?
+          AND centerId = ?
+          AND installmentId IS NOT NULL
+          AND type IN (?, ?)
+        GROUP BY installmentId
+      ) p ON p.installmentId = i.id
+      WHERE i.tenantId = ?
+      GROUP BY i.studentId
+      HAVING pendingAmount > 0
+    ) due ON due.studentId = s.id
+    WHERE s.tenantId = ?
+      AND s.hierarchyNodeId = ?
+      AND s.isActive = 1
+      ${additionalWhere}
+      ${statusWhere}
+    ORDER BY due.overdueCount DESC, due.nextDueDate ASC, due.pendingAmount DESC, s.admissionNo ASC
+    LIMIT ? OFFSET ?
   `;
+
+  const rows = await prisma.$queryRawUnsafe(
+    dataSql,
+    tenantId,
+    centerId,
+    PAYMENT_TYPES[0],
+    PAYMENT_TYPES[1],
+    tenantId,
+    centerId,
+    PAYMENT_TYPES[0],
+    PAYMENT_TYPES[1],
+    tenantId,
+    tenantId,
+    centerId,
+    limit,
+    offset
+  );
 
   const now = new Date();
 
   const items = (Array.isArray(rows) ? rows : []).map((row) => {
-    const amount = toSafeNumber(row.amount);
-    const paidAmount = toSafeNumber(row.paidAmount);
-    const pending = Math.max(0, amount - paidAmount);
+    const pending = toSafeNumber(row.pendingAmount);
+    const amount = pending;
+    const paidAmount = 0;
 
     let status = "PENDING";
-    if (pending <= 0) status = "PAID";
-    else if (paidAmount > 0) status = "PARTIAL";
 
-    const dueDate = row.dueDate instanceof Date ? row.dueDate : row.dueDate ? new Date(row.dueDate) : null;
-    if (status !== "PAID" && dueDate && dueDate.getTime() < now.getTime()) {
+    const dueDate = row.nextDueDate instanceof Date ? row.nextDueDate : row.nextDueDate ? new Date(row.nextDueDate) : null;
+    if (dueDate && dueDate.getTime() < now.getTime()) {
       status = "OVERDUE";
     }
 
+    const lastPaymentDate = row.lastPaymentDate instanceof Date ? row.lastPaymentDate : row.lastPaymentDate ? new Date(row.lastPaymentDate) : null;
+
     return {
-      id: String(row.id),
+      id: String(row.studentId),
       studentId: String(row.studentId),
-      admissionNo: row.admissionNo ? String(row.admissionNo) : null,
-      studentName: formatStudentName(row) || null,
       dueDate,
       amount,
       paidAmount,
       pending,
-      status
+      pendingAmount: pending,
+      status,
+      lastPaymentDate,
+      student: {
+        id: String(row.studentId),
+        studentCode: row.admissionNo ? String(row.admissionNo) : null,
+        admissionNo: row.admissionNo ? String(row.admissionNo) : null,
+        firstName: row.firstName ? String(row.firstName) : null,
+        lastName: row.lastName ? String(row.lastName) : null,
+        contactNumber: row.phonePrimary ? String(row.phonePrimary) : null,
+        parentContactNumber: row.guardianPhone ? String(row.guardianPhone) : null,
+        batch: row.batchName ? { name: String(row.batchName) } : null,
+        teacher: row.teacherName ? { name: String(row.teacherName) } : null
+      }
     };
   });
 
   return { items, total, limit, offset };
 }
 
-async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
+async function listStudentWise({ tenantId, centerId, range, limit, offset, filters = {} }) {
   const from = range.from;
   const toExclusive = range.toExclusive;
+  const { batchId, levelId, search } = filters;
 
-  const totalRows = await prisma.$queryRaw`
+  // Build additional WHERE conditions using Prisma's Sql helper
+  const studentFilterConditions = [];
+  
+  if (batchId) {
+    studentFilterConditions.push(prisma.$queryRaw`EXISTS (
+      SELECT 1 FROM BatchEnrollment be 
+      WHERE be.studentId = s.id 
+      AND be.batchId = ${batchId}
+      AND be.status = 'ACTIVE'
+    )`);
+  }
+  
+  if (levelId) {
+    studentFilterConditions.push(prisma.$queryRaw`s.currentLevelId = ${levelId}`);
+  }
+  
+  if (search) {
+    const searchPattern = `%${search}%`;
+    studentFilterConditions.push(prisma.$queryRaw`(
+      s.firstName LIKE ${searchPattern} OR 
+      s.lastName LIKE ${searchPattern} OR 
+      s.admissionNo LIKE ${searchPattern}
+    )`);
+  }
+
+  // For now, use a simpler approach - build complete WHERE as string
+  let additionalWhere = "";
+  if (batchId) {
+    additionalWhere += ` AND EXISTS (
+      SELECT 1 FROM BatchEnrollment be 
+      WHERE be.studentId = s.id 
+      AND be.batchId = '${batchId.replace(/'/g, "''")}'
+      AND be.status = 'ACTIVE'
+    )`;
+  }
+  if (levelId) {
+    additionalWhere += ` AND s.currentLevelId = '${levelId.replace(/'/g, "''")}'`;
+  }
+  if (search) {
+    const escapedSearch = search.replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
+    additionalWhere += ` AND (
+      s.firstName LIKE '%${escapedSearch}%' OR 
+      s.lastName LIKE '%${escapedSearch}%' OR 
+      s.admissionNo LIKE '%${escapedSearch}%'
+    )`;
+  }
+
+  const countSql = `
     SELECT COUNT(1) AS total
     FROM (
       SELECT s.id
@@ -116,12 +279,12 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
           studentId,
           SUM(grossAmount) AS paidInRange
         FROM FinancialTransaction
-        WHERE tenantId = ${tenantId}
-          AND centerId = ${centerId}
+        WHERE tenantId = ?
+          AND centerId = ?
           AND studentId IS NOT NULL
-          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
-          AND createdAt >= ${from}
-          AND createdAt < ${toExclusive}
+          AND type IN (?, ?)
+          AND createdAt >= ?
+          AND createdAt < ?
         GROUP BY studentId
       ) paid ON paid.studentId = s.id
       LEFT JOIN (
@@ -135,29 +298,36 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
         LEFT JOIN (
           SELECT installmentId, SUM(grossAmount) AS paidAmount
           FROM FinancialTransaction
-          WHERE tenantId = ${tenantId}
-            AND centerId = ${centerId}
+          WHERE tenantId = ?
+            AND centerId = ?
             AND installmentId IS NOT NULL
-            AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
+            AND type IN (?, ?)
           GROUP BY installmentId
         ) p ON p.installmentId = i.id
-        WHERE i.tenantId = ${tenantId}
-          AND s2.tenantId = ${tenantId}
-          AND s2.hierarchyNodeId = ${centerId}
-          AND i.dueDate >= ${from}
-          AND i.dueDate < ${toExclusive}
+        WHERE i.tenantId = ?
+          AND s2.tenantId = ?
+          AND s2.hierarchyNodeId = ?
         GROUP BY i.studentId
       ) due ON due.studentId = s.id
-      WHERE s.tenantId = ${tenantId}
-        AND s.hierarchyNodeId = ${centerId}
+      WHERE s.tenantId = ?
+        AND s.hierarchyNodeId = ?
         AND s.isActive = 1
+        ${additionalWhere}
         AND (COALESCE(paid.paidInRange, 0) > 0 OR COALESCE(due.duePending, 0) > 0)
     ) x
   `;
 
+  const totalRows = await prisma.$queryRawUnsafe(
+    countSql,
+    tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1], from, toExclusive,
+    tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1],
+    tenantId, tenantId, centerId,
+    tenantId, centerId
+  );
+
   const total = toSafeNumber(Array.isArray(totalRows) ? totalRows[0]?.total : 0);
 
-  const rows = await prisma.$queryRaw`
+  const dataSql = `
     SELECT
       s.id,
       s.admissionNo,
@@ -173,12 +343,12 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
         studentId,
         SUM(grossAmount) AS paidInRange
       FROM FinancialTransaction
-      WHERE tenantId = ${tenantId}
-        AND centerId = ${centerId}
+      WHERE tenantId = ?
+        AND centerId = ?
         AND studentId IS NOT NULL
-        AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
-        AND createdAt >= ${from}
-        AND createdAt < ${toExclusive}
+        AND type IN (?, ?)
+        AND createdAt >= ?
+        AND createdAt < ?
       GROUP BY studentId
     ) paid ON paid.studentId = s.id
     LEFT JOIN (
@@ -192,33 +362,44 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset }) {
       LEFT JOIN (
         SELECT installmentId, SUM(grossAmount) AS paidAmount
         FROM FinancialTransaction
-        WHERE tenantId = ${tenantId}
-          AND centerId = ${centerId}
+        WHERE tenantId = ?
+          AND centerId = ?
           AND installmentId IS NOT NULL
-          AND type IN (${PAYMENT_TYPES[0]}, ${PAYMENT_TYPES[1]})
+          AND type IN (?, ?)
         GROUP BY installmentId
       ) p ON p.installmentId = i.id
-      WHERE i.tenantId = ${tenantId}
-        AND s2.tenantId = ${tenantId}
-        AND s2.hierarchyNodeId = ${centerId}
-        AND i.dueDate >= ${from}
-        AND i.dueDate < ${toExclusive}
+      WHERE i.tenantId = ?
+        AND s2.tenantId = ?
+        AND s2.hierarchyNodeId = ?
       GROUP BY i.studentId
     ) due ON due.studentId = s.id
-    WHERE s.tenantId = ${tenantId}
-      AND s.hierarchyNodeId = ${centerId}
+    WHERE s.tenantId = ?
+      AND s.hierarchyNodeId = ?
       AND s.isActive = 1
+      ${additionalWhere}
       AND (COALESCE(paid.paidInRange, 0) > 0 OR COALESCE(due.duePending, 0) > 0)
     ORDER BY COALESCE(due.overduePending, 0) DESC,
       COALESCE(due.duePending, 0) DESC,
       COALESCE(paid.paidInRange, 0) DESC,
       s.admissionNo ASC
-    LIMIT ${limit} OFFSET ${offset}
+    LIMIT ? OFFSET ?
   `;
 
+  const rows = await prisma.$queryRawUnsafe(
+    dataSql,
+    tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1], from, toExclusive,
+    tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1],
+    tenantId, tenantId, centerId,
+    tenantId, centerId,
+    limit, offset
+  );
+
   const items = (Array.isArray(rows) ? rows : []).map((row) => ({
+    id: String(row.id),
     studentId: String(row.id),
     admissionNo: row.admissionNo ? String(row.admissionNo) : null,
+    firstName: row.firstName ? String(row.firstName) : null,
+    lastName: row.lastName ? String(row.lastName) : null,
     studentName: formatStudentName(row) || null,
     paidInRange: toSafeNumber(row.paidInRange),
     duePending: toSafeNumber(row.duePending),

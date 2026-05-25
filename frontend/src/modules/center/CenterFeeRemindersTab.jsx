@@ -92,6 +92,7 @@ export function CenterFeeRemindersTab() {
       };
 
       if (statusFilter) params.status = statusFilter;
+      if (batchId) params.batchId = batchId;
       if (levelId) params.levelId = levelId;
       if (search) params.q = search;
 
@@ -116,7 +117,7 @@ export function CenterFeeRemindersTab() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, levelId, search, daysOverdueFilter]);
+  }, [statusFilter, batchId, levelId, search, daysOverdueFilter]);
 
   useEffect(() => {
     fetchInstallments();
@@ -350,10 +351,11 @@ export function CenterFeeRemindersTab() {
                         <td>{item.student?.studentCode || "—"}</td>
                         <td>
                           <a
-                            href={`/center/students/${item.student?.id}`}
+                            href={`/center/students/${item.student?.id}/fees`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="no-print"
+                            style={{ color: "var(--color-primary)", textDecoration: "underline", fontWeight: 600 }}
                           >
                             {item.student?.firstName} {item.student?.lastName}
                           </a>
@@ -379,6 +381,11 @@ export function CenterFeeRemindersTab() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            {/* Info Note */}
+            <div className="no-print" style={{ marginTop: "1rem", padding: "0.75rem", background: "var(--color-bg-light)", borderRadius: 6, fontSize: 13, color: "var(--color-text-muted)" }}>
+              <strong>💡 Tip:</strong> Click any student name to open their detailed fee management page where you can record payments, create installments, and view complete fee history.
             </div>
           </>
         )}

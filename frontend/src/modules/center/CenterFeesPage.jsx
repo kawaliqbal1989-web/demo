@@ -1,20 +1,20 @@
 import { useState } from "react";
-import { CenterQuickCollectionTab } from "./CenterQuickCollectionTab";
+import { CenterFeesDashboardTab } from "./CenterFeesDashboardTab";
 import { CenterFeeRemindersTab } from "./CenterFeeRemindersTab";
 
 const TABS = [
-  { key: "quick-collection", label: "💰 Quick Collection" },
-  { key: "reminders", label: "📞 Reminders & Calling List" }
+  { key: "dashboard", label: "📊 Fee Dashboard" },
+  { key: "reminders", label: "📞 Calling List" }
 ];
 
 export function CenterFeesPage() {
-  const [activeTab, setActiveTab] = useState("quick-collection");
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   return (
     <div className="page">
       <div className="page-header">
         <h1>Fee Management</h1>
-        <p>Collect payments and manage fee reminders</p>
+        <p>Unified fee dashboard and student calling list</p>
       </div>
 
       {/* Tab Navigation */}
@@ -32,7 +32,7 @@ export function CenterFeesPage() {
 
       {/* Tab Content */}
       <div className="tab-content">
-        {activeTab === "quick-collection" && <CenterQuickCollectionTab />}
+        {activeTab === "dashboard" && <CenterFeesDashboardTab />}
         {activeTab === "reminders" && <CenterFeeRemindersTab />}
       </div>
     </div>

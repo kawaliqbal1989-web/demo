@@ -537,8 +537,15 @@ const feesStudentWise = asyncHandler(async (req, res) => {
 
   const limit = Number.parseInt(String(req.query.limit ?? "20"), 10);
   const offset = Number.parseInt(String(req.query.offset ?? "0"), 10);
-  const safeLimit = Number.isFinite(limit) ? Math.min(100, Math.max(1, limit)) : 20;
+  const safeLimit = Number.isFinite(limit) ? Math.min(500, Math.max(1, limit)) : 20;
   const safeOffset = Number.isFinite(offset) ? Math.max(0, offset) : 0;
+
+  // Extract filter parameters
+  const filters = {
+    batchId: req.query.batchId ? String(req.query.batchId) : null,
+    levelId: req.query.levelId ? String(req.query.levelId) : null,
+    search: req.query.q ? String(req.query.q) : null
+  };
 
   const data = await safePrisma(
     "feesStudentWise",
@@ -548,7 +555,8 @@ const feesStudentWise = asyncHandler(async (req, res) => {
         centerId: scope.centerId,
         range,
         limit: safeLimit,
-        offset: safeOffset
+        offset: safeOffset,
+        filters
       }),
     { items: [], total: 0, limit: safeLimit, offset: safeOffset },
     { role: req.auth?.role || null, tenantId: scope.tenantId || null, centerId: scope.centerId || null }

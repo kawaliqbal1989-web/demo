@@ -816,8 +816,476 @@ async function main() {
     });
   }
 
+  // ========================================
+  // FEE MANAGEMENT SEED DATA
+  // ========================================
+
+  // Create additional teachers
+  const teacher2Auth = await upsertUser({
+    tenantId: tenant.id,
+    email: "teacher.two@abacusweb.local",
+    username: "TE002",
+    role: "TEACHER",
+    passwordHash,
+    hierarchyNodeId: school.id,
+    parentUserId: centerAuth.id
+  });
+
+  await prisma.teacherProfile.upsert({
+    where: { authUserId: teacher2Auth.id },
+    update: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      fullName: "Teacher Two",
+      status: "ACTIVE",
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      authUserId: teacher2Auth.id,
+      fullName: "Teacher Two",
+      status: "ACTIVE",
+      isActive: true
+    }
+  });
+
+  const teacher3Auth = await upsertUser({
+    tenantId: tenant.id,
+    email: "teacher.three@abacusweb.local",
+    username: "TE003",
+    role: "TEACHER",
+    passwordHash,
+    hierarchyNodeId: school.id,
+    parentUserId: centerAuth.id
+  });
+
+  await prisma.teacherProfile.upsert({
+    where: { authUserId: teacher3Auth.id },
+    update: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      fullName: "Teacher Three",
+      status: "ACTIVE",
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      authUserId: teacher3Auth.id,
+      fullName: "Teacher Three",
+      status: "ACTIVE",
+      isActive: true
+    }
+  });
+
+  // Create batches
+  const batch1 = await prisma.batch.upsert({
+    where: {
+      tenantId_code: {
+        tenantId: tenant.id,
+        code: "BATCH-L1-MORNING"
+      }
+    },
+    update: {
+      name: "Level 1 - Morning Batch",
+      hierarchyNodeId: school.id,
+      assignedTeacherUserId: teacherOneAuth.id,
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      code: "BATCH-L1-MORNING",
+      name: "Level 1 - Morning Batch",
+      hierarchyNodeId: school.id,
+      assignedTeacherUserId: teacherOneAuth.id,
+      isActive: true
+    }
+  });
+
+  const batch2 = await prisma.batch.upsert({
+    where: {
+      tenantId_code: {
+        tenantId: tenant.id,
+        code: "BATCH-L1-EVENING"
+      }
+    },
+    update: {
+      name: "Level 1 - Evening Batch",
+      hierarchyNodeId: school.id,
+      assignedTeacherUserId: teacher2Auth.id,
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      code: "BATCH-L1-EVENING",
+      name: "Level 1 - Evening Batch",
+      hierarchyNodeId: school.id,
+      assignedTeacherUserId: teacher2Auth.id,
+      isActive: true
+    }
+  });
+
+  const batch3 = await prisma.batch.upsert({
+    where: {
+      tenantId_code: {
+        tenantId: tenant.id,
+        code: "BATCH-L2-WEEKEND"
+      }
+    },
+    update: {
+      name: "Level 2 - Weekend Batch",
+      hierarchyNodeId: school.id,
+      assignedTeacherUserId: teacher3Auth.id,
+      isActive: true
+    },
+    create: {
+      tenantId: tenant.id,
+      code: "BATCH-L2-WEEKEND",
+      name: "Level 2 - Weekend Batch",
+      hierarchyNodeId: school.id,
+      assignedTeacherUserId: teacher3Auth.id,
+      isActive: true
+    }
+  });
+
+  // Create additional students with fee data
+  const studentsData = [
+    {
+      admissionNo: "ADM-1003",
+      firstName: "Riya",
+      lastName: "Gupta",
+      email: "riya@example.com",
+      phonePrimary: "+91-9876543210",
+      guardianPhone: "+91-9876543211",
+      levelId: level1.id,
+      totalFeeAmount: 12000,
+      admissionFeeAmount: 2000,
+      feeConcessionAmount: 0,
+      batchId: batch1.id
+    },
+    {
+      admissionNo: "ADM-1004",
+      firstName: "Arjun",
+      lastName: "Patel",
+      email: "arjun@example.com",
+      phonePrimary: "+91-9876543220",
+      guardianPhone: "+91-9876543221",
+      levelId: level1.id,
+      totalFeeAmount: 12000,
+      admissionFeeAmount: 2000,
+      feeConcessionAmount: 1000,
+      batchId: batch1.id
+    },
+    {
+      admissionNo: "ADM-1005",
+      firstName: "Ananya",
+      lastName: "Singh",
+      email: "ananya@example.com",
+      phonePrimary: "+91-9876543230",
+      guardianPhone: "+91-9876543231",
+      levelId: level1.id,
+      totalFeeAmount: 12000,
+      admissionFeeAmount: 2000,
+      feeConcessionAmount: 0,
+      batchId: batch2.id
+    },
+    {
+      admissionNo: "ADM-1006",
+      firstName: "Vivaan",
+      lastName: "Kumar",
+      email: "vivaan@example.com",
+      phonePrimary: "+91-9876543240",
+      guardianPhone: "+91-9876543241",
+      levelId: level2.id,
+      totalFeeAmount: 15000,
+      admissionFeeAmount: 3000,
+      feeConcessionAmount: 500,
+      batchId: batch3.id
+    },
+    {
+      admissionNo: "ADM-1007",
+      firstName: "Ishaan",
+      lastName: "Reddy",
+      email: "ishaan@example.com",
+      phonePrimary: "+91-9876543250",
+      guardianPhone: "+91-9876543251",
+      levelId: level2.id,
+      totalFeeAmount: 15000,
+      admissionFeeAmount: 3000,
+      feeConcessionAmount: 0,
+      batchId: batch3.id
+    },
+    {
+      admissionNo: "ADM-1008",
+      firstName: "Saanvi",
+      lastName: "Mehta",
+      email: "saanvi@example.com",
+      phonePrimary: "+91-9876543260",
+      guardianPhone: "+91-9876543261",
+      levelId: level1.id,
+      totalFeeAmount: 12000,
+      admissionFeeAmount: 2000,
+      feeConcessionAmount: 2000,
+      batchId: batch2.id
+    }
+  ];
+
+  const createdStudents = [];
+  for (const studentData of studentsData) {
+    const student = await prisma.student.upsert({
+      where: {
+        tenantId_admissionNo: {
+          tenantId: tenant.id,
+          admissionNo: studentData.admissionNo
+        }
+      },
+      update: {
+        firstName: studentData.firstName,
+        lastName: studentData.lastName,
+        email: studentData.email,
+        phonePrimary: studentData.phonePrimary,
+        guardianPhone: studentData.guardianPhone,
+        hierarchyNodeId: school.id,
+        levelId: studentData.levelId,
+        totalFeeAmount: studentData.totalFeeAmount,
+        admissionFeeAmount: studentData.admissionFeeAmount,
+        feeConcessionAmount: studentData.feeConcessionAmount,
+        isActive: true
+      },
+      create: {
+        tenantId: tenant.id,
+        admissionNo: studentData.admissionNo,
+        firstName: studentData.firstName,
+        lastName: studentData.lastName,
+        email: studentData.email,
+        phonePrimary: studentData.phonePrimary,
+        guardianPhone: studentData.guardianPhone,
+        hierarchyNodeId: school.id,
+        levelId: studentData.levelId,
+        totalFeeAmount: studentData.totalFeeAmount,
+        admissionFeeAmount: studentData.admissionFeeAmount,
+        feeConcessionAmount: studentData.feeConcessionAmount,
+        isActive: true
+      }
+    });
+    createdStudents.push({ ...student, batchId: studentData.batchId });
+  }
+
+  // Update existing students with fee amounts and phones
+  await prisma.student.update({
+    where: { id: student1.id },
+    data: {
+      phonePrimary: "+91-9876543200",
+      guardianPhone: "+91-9876543201",
+      totalFeeAmount: 12000,
+      admissionFeeAmount: 2000,
+      feeConcessionAmount: 0,
+      isActive: true
+    }
+  });
+
+  await prisma.student.update({
+    where: { id: student2.id },
+    data: {
+      phonePrimary: "+91-9876543205",
+      guardianPhone: "+91-9876543206",
+      totalFeeAmount: 15000,
+      admissionFeeAmount: 3000,
+      feeConcessionAmount: 1500,
+      isActive: true
+    }
+  });
+
+  // Enroll students in batches
+  const batchEnrollments = [
+    { studentId: student1.id, batchId: batch1.id },
+    { studentId: student2.id, batchId: batch3.id },
+    ...createdStudents.map((s) => ({ studentId: s.id, batchId: s.batchId }))
+  ];
+
+  for (const enrollment of batchEnrollments) {
+    await prisma.batchEnrollment.upsert({
+      where: {
+        batchId_studentId: {
+          batchId: enrollment.batchId,
+          studentId: enrollment.studentId
+        }
+      },
+      update: {
+        status: "ACTIVE",
+        enrolledAt: new Date("2025-01-01")
+      },
+      create: {
+        batchId: enrollment.batchId,
+        studentId: enrollment.studentId,
+        status: "ACTIVE",
+        enrolledAt: new Date("2025-01-01")
+      }
+    });
+  }
+
+  // Create fee installments for each student
+  const allStudentsWithFees = [student1, student2, ...createdStudents];
+  
+  for (const student of allStudentsWithFees) {
+    const studentRecord = await prisma.student.findUnique({
+      where: { id: student.id },
+      select: { totalFeeAmount: true, admissionFeeAmount: true, feeConcessionAmount: true }
+    });
+
+    const totalFee = studentRecord.totalFeeAmount || 12000;
+    const admissionFee = studentRecord.admissionFeeAmount || 2000;
+    const concession = studentRecord.feeConcessionAmount || 0;
+    const tuitionFee = totalFee - admissionFee - concession;
+    const monthlyInstallment = Math.round(tuitionFee / 12);
+
+    // Create installments for the year (some overdue, some pending, some future)
+    const installmentsData = [];
+    
+    // Jan-March: Overdue (not paid)
+    installmentsData.push({
+      tenantId: tenant.id,
+      studentId: student.id,
+      amount: monthlyInstallment,
+      dueDate: new Date("2025-01-10"),
+      description: "January 2025 Tuition"
+    });
+    installmentsData.push({
+      tenantId: tenant.id,
+      studentId: student.id,
+      amount: monthlyInstallment,
+      dueDate: new Date("2025-02-10"),
+      description: "February 2025 Tuition"
+    });
+    installmentsData.push({
+      tenantId: tenant.id,
+      studentId: student.id,
+      amount: monthlyInstallment,
+      dueDate: new Date("2025-03-10"),
+      description: "March 2025 Tuition"
+    });
+
+    // April-May: Some paid, some pending
+    installmentsData.push({
+      tenantId: tenant.id,
+      studentId: student.id,
+      amount: monthlyInstallment,
+      dueDate: new Date("2025-04-10"),
+      description: "April 2025 Tuition"
+    });
+    installmentsData.push({
+      tenantId: tenant.id,
+      studentId: student.id,
+      amount: monthlyInstallment,
+      dueDate: new Date("2025-05-10"),
+      description: "May 2025 Tuition"
+    });
+
+    // June onwards: Future
+    for (let month = 6; month <= 12; month++) {
+      installmentsData.push({
+        tenantId: tenant.id,
+        studentId: student.id,
+        amount: monthlyInstallment,
+        dueDate: new Date(`2025-${String(month).padStart(2, "0")}-10`),
+        description: `${new Date(2025, month - 1).toLocaleString("default", { month: "long" })} 2025 Tuition`
+      });
+    }
+
+    // Create installments
+    for (const installmentData of installmentsData) {
+      await prisma.studentFeeInstallment.upsert({
+        where: {
+          tenantId_studentId_dueDate: {
+            tenantId: installmentData.tenantId,
+            studentId: installmentData.studentId,
+            dueDate: installmentData.dueDate
+          }
+        },
+        update: installmentData,
+        create: installmentData
+      });
+    }
+  }
+
+  // Create some payment transactions (partial payments for some students)
+  const paymentsData = [
+    {
+      // Student 1: Paid Jan & Feb fully
+      studentId: student1.id,
+      installmentDate: new Date("2025-01-10"),
+      amount: 850, // full payment
+      paymentDate: new Date("2025-01-15"),
+      mode: "CASH"
+    },
+    {
+      studentId: student1.id,
+      installmentDate: new Date("2025-02-10"),
+      amount: 850,
+      paymentDate: new Date("2025-02-15"),
+      mode: "UPI"
+    },
+    {
+      // Student 2: Partial payment for Jan
+      studentId: student2.id,
+      installmentDate: new Date("2025-01-10"),
+      amount: 500, // partial
+      paymentDate: new Date("2025-01-20"),
+      mode: "CASH"
+    },
+    {
+      // Student 3 (Riya): Paid Jan fully, partial Feb
+      studentId: createdStudents[0].id,
+      installmentDate: new Date("2025-01-10"),
+      amount: 850,
+      paymentDate: new Date("2025-01-12"),
+      mode: "UPI"
+    },
+    {
+      studentId: createdStudents[0].id,
+      installmentDate: new Date("2025-02-10"),
+      amount: 400,
+      paymentDate: new Date("2025-02-18"),
+      mode: "CASH"
+    }
+  ];
+
+  for (const payment of paymentsData) {
+    const installment = await prisma.studentFeeInstallment.findFirst({
+      where: {
+        tenantId: tenant.id,
+        studentId: payment.studentId,
+        dueDate: payment.installmentDate
+      }
+    });
+
+    if (installment) {
+      await prisma.financialTransaction.create({
+        data: {
+          tenantId: tenant.id,
+          centerId: school.id,
+          studentId: payment.studentId,
+          installmentId: installment.id,
+          type: "ENROLLMENT",
+          grossAmount: payment.amount,
+          netAmount: payment.amount,
+          paymentMode: payment.mode,
+          receivedAt: payment.paymentDate,
+          createdAt: payment.paymentDate
+        }
+      });
+    }
+  }
+
   console.log("Seed completed. Login: SA001 / Pass@123 / tenant DEFAULT");
   console.log(`Cross-tenant competition id: ${tenant2Competition.id}`);
+  console.log("===== FEE SEED DATA =====");
+  console.log("Teachers: TE001, TE002, TE003");
+  console.log("Batches: BATCH-L1-MORNING, BATCH-L1-EVENING, BATCH-L2-WEEKEND");
+  console.log(`Students with fees: ${allStudentsWithFees.length} total`);
+  console.log("Installments: Jan-Dec 2025 (some overdue, some pending, some future)");
+  console.log("Payments: Sample payments for testing (some full, some partial)");
 }
 
 main()

@@ -50,8 +50,9 @@ const roleMenus = {
     { label: "📊 Analytics", to: "/center/analytics" },
     { label: "🧭 Academic Workflows", to: "/center/workflows" },
     { section: "Finance" },
+    { label: "💰 Fees", to: "/center/fees" },
     { label: "📊 Reports", to: "/center/reports" },
-    { label: "💰 Settlements", to: "/center/settlements" },
+    { label: "💵 Settlements", to: "/center/settlements" },
     { section: "System" },
     { label: "🔔 Notifications", to: "/notifications" }
   ],

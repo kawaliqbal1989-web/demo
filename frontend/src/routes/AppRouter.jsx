@@ -56,6 +56,7 @@ import { CenterBatchesPage } from "../modules/center/CenterBatchesPage";
 import { CenterEnrollmentsPage } from "../modules/center/CenterEnrollmentsPage";
 import { CenterAttendanceSessionsPage } from "../modules/center/CenterAttendanceSessionsPage";
 import { CenterWorksheetsPage } from "../modules/center/CenterWorksheetsPage";
+import { CenterFeesPage } from "../modules/center/CenterFeesPage";
 import { CenterReportsPage } from "../modules/center/CenterReportsPage";
 import { CenterSettlementsPage } from "../modules/center/CenterSettlementsPage";
 import { CenterAssignWorksheetsPage } from "../modules/center/CenterAssignWorksheetsPage";
@@ -226,6 +227,7 @@ function AppRouter() {
             <Route path="/center/exam-cycles" element={<CenterExamCyclesPage />} />
             <Route path="/center/exam-cycles/:examCycleId" element={<CenterExamEnrollmentPage />} />
             <Route path="/center/courses" element={<Navigate to="/center/worksheets" replace />} />
+            <Route path="/center/fees" element={<CenterFeesPage />} />
             <Route path="/center/reports" element={<CenterReportsPage />} />
             <Route path="/center/settlements" element={<CenterSettlementsPage />} />
             <Route path="/center/analytics" element={<CenterAnalyticsPage />} />

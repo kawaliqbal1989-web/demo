@@ -31,7 +31,8 @@ async function listStudents({
   status = "",
   teacherUserId = "",
   levelId = "",
-  courseCode = ""
+  courseCode = "",
+  batchId = ""
 } = {}) {
   const response = await apiClient.get("/students", {
     params: {
@@ -41,7 +42,8 @@ async function listStudents({
       status: status || undefined,
       teacherUserId: teacherUserId || undefined,
       levelId: levelId || undefined,
-      courseCode: courseCode || undefined
+      courseCode: courseCode || undefined,
+      batchId: batchId || undefined
     }
   });
   return response.data;

@@ -496,7 +496,6 @@ function getStudentExportWhere(req) {
 const STUDENT_EXPORT_COLUMNS = [
   { key: "admissionNo", header: "Admission No" },
   { key: "fullName", header: "Full Name" },
-  { key: "gender", header: "Gender" },
   { key: "dateOfBirth", header: "Date Of Birth" },
   { key: "email", header: "Student Email" },
   { key: "guardianName", header: "Guardian Name" },
@@ -545,7 +544,6 @@ async function buildDetailedStudentExportRows(where) {
       admissionNo: true,
       firstName: true,
       lastName: true,
-      gender: true,
       email: true,
       dateOfBirth: true,
       guardianName: true,
@@ -681,7 +679,6 @@ async function buildDetailedStudentExportRows(where) {
     return {
       admissionNo: student.admissionNo || "",
       fullName: `${student.firstName || ""} ${student.lastName || ""}`.trim(),
-      gender: student.gender || "",
       dateOfBirth: student.dateOfBirth ? student.dateOfBirth.toISOString().slice(0, 10) : "",
       email: student.email || "",
       guardianName: student.guardianName || "",

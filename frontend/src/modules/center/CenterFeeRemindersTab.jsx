@@ -5,6 +5,14 @@ import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
+const STATUS_OPTIONS = [
+  { value: "PENDING,OVERDUE", label: "Pending & Overdue" },
+  { value: "PAID", label: "Paid" },
+  { value: "PENDING", label: "Pending Only" },
+  { value: "OVERDUE", label: "Overdue Only" },
+  { value: "", label: "All Statuses" }
+];
+
 const DAYS_OVERDUE_OPTIONS = [
   { value: "", label: "All" },
   { value: "1-7", label: "1-7 days overdue" },
@@ -47,6 +55,7 @@ export function CenterFeeRemindersTab() {
   const [levels, setLevels] = useState([]);
   const [batchId, setBatchId] = useState("");
   const [levelId, setLevelId] = useState("");
+  const [statusFilter, setStatusFilter] = useState("PENDING,OVERDUE");
   const [daysOverdueFilter, setDaysOverdueFilter] = useState("");
   const [search, setSearch] = useState("");
 
@@ -79,10 +88,10 @@ export function CenterFeeRemindersTab() {
     try {
       const params = {
         limit: 500, // Get more for calling list
-        offset: 0,
-        status: "PENDING,OVERDUE" // Only show pending and overdue
+        offset: 0
       };
 
+      if (statusFilter) params.status = statusFilter;
       if (levelId) params.levelId = levelId;
       if (search) params.q = search;
 
@@ -102,12 +111,12 @@ export function CenterFeeRemindersTab() {
 
       setInstallments(items);
     } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to load pending fees.");
+      setError(getFriendlyErrorMessage(err) || "Failed to load fee installments.");
       setInstallments([]);
     } finally {
       setLoading(false);
     }
-  }, [levelId, search, daysOverdueFilter]);
+  }, [statusFilter, levelId, search, daysOverdueFilter]);
 
   useEffect(() => {
     fetchInstallments();
@@ -180,6 +189,24 @@ export function CenterFeeRemindersTab() {
       <div className="card-body">
         {/* Filters */}
         <div className="no-print" style={{ display: "grid", gap: "1rem", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", marginBottom: "1.5rem" }}>
+          <div>
+            <label htmlFor="status-filter" style={{ display: "block", marginBottom: "0.25rem", fontSize: 13, fontWeight: 600 }}>
+              Status
+            </label>
+            <select
+              id="status-filter"
+              className="form-input"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div>
             <label htmlFor="batch-filter" style={{ display: "block", marginBottom: "0.25rem", fontSize: 13, fontWeight: 600 }}>
               Batch

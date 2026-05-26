@@ -123,6 +123,54 @@ async function deleteStudentInstallment(id, installmentId) {
   return response.data;
 }
 
+async function listStudentFeeMonthAdjustments(id) {
+  const response = await apiClient.get(`/students/${id}/fees/month-adjustments`);
+  return response.data;
+}
+
+async function createStudentFeeMonthAdjustment(id, payload) {
+  const response = await apiClient.post(`/students/${id}/fees/month-adjustments`, payload);
+  return response.data;
+}
+
+async function previewStudentReceiptAllocation(id, payload) {
+  const response = await apiClient.post(`/students/${id}/fees/receipts/preview-allocation`, payload);
+  return response.data;
+}
+
+async function collectStudentPaymentReceipt(id, payload) {
+  const response = await apiClient.post(`/students/${id}/fees/receipts/collect`, payload);
+  return response.data;
+}
+
+async function listStudentReceipts(id, params = {}) {
+  const response = await apiClient.get(`/students/${id}/fees/receipts`, { params });
+  return response.data;
+}
+
+async function getStudentReceipt(id, receiptId) {
+  const response = await apiClient.get(`/students/${id}/fees/receipts/${receiptId}`);
+  return response.data;
+}
+
+async function refundStudentReceipt(id, receiptId, payload) {
+  const response = await apiClient.post(`/students/${id}/fees/receipts/${receiptId}/refund`, payload);
+  return response.data;
+}
+
+async function cancelStudentReceipt(id, receiptId, payload) {
+  const response = await apiClient.post(`/students/${id}/fees/receipts/${receiptId}/cancel`, payload);
+  return response.data;
+}
+
+async function downloadStudentReceiptPdf(id, receiptId) {
+  const response = await apiClient.get(`/students/${id}/fees/receipts/${receiptId}/pdf`, {
+    responseType: "blob"
+  });
+  const filename = getDownloadFilename(response.headers?.["content-disposition"], `receipt-${receiptId}.pdf`);
+  triggerBlobDownload(response.data, filename);
+}
+
 async function exportStudentsCsv(params = {}) {
   const response = await apiClient.get("/students/export.csv", {
     params,
@@ -184,6 +232,15 @@ export {
   getStudentFeesContext,
   createStudentInstallment,
   deleteStudentInstallment,
+  listStudentFeeMonthAdjustments,
+  createStudentFeeMonthAdjustment,
+  previewStudentReceiptAllocation,
+  collectStudentPaymentReceipt,
+  listStudentReceipts,
+  getStudentReceipt,
+  refundStudentReceipt,
+  cancelStudentReceipt,
+  downloadStudentReceiptPdf,
   bulkImportStudentsCsv,
   getStudentPerformanceSummary,
   getStudentPromotionStatus,

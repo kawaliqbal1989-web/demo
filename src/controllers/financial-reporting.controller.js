@@ -615,6 +615,13 @@ const feesReminders = asyncHandler(async (req, res) => {
   const safeLimit = Number.isFinite(limit) ? Math.min(100, Math.max(1, limit)) : 20;
   const safeOffset = Number.isFinite(offset) ? Math.max(0, offset) : 0;
 
+  const filters = {
+    status: req.query.status,
+    levelId: req.query.levelId ? String(req.query.levelId) : null,
+    batchId: req.query.batchId ? String(req.query.batchId) : null,
+    search: req.query.q ? String(req.query.q) : null
+  };
+
   const data = await safePrisma(
     "feesReminders",
     () =>
@@ -623,7 +630,8 @@ const feesReminders = asyncHandler(async (req, res) => {
         centerId: scope.centerId,
         range,
         limit: safeLimit,
-        offset: safeOffset
+        offset: safeOffset,
+        filters
       }),
     { items: [], total: 0, limit: safeLimit, offset: safeOffset },
     { role: req.auth?.role || null, tenantId: scope.tenantId || null, centerId: scope.centerId || null }

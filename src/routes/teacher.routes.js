@@ -49,6 +49,7 @@ import {
 import {
   getTeacherDashboardAnomaliesController,
   getTeacherDashboardAttendanceProductivityController,
+  getTeacherFinancialOverviewController,
   getTeacherDashboardGradingProductivityController,
   getTeacherDashboardOverviewController,
   getTeacherDashboardTaskQueueController,
@@ -202,6 +203,7 @@ teacherRouter.get("/cockpit/recommendations", getRecommendations);
 teacherRouter.get("/cockpit/interventions", getInterventions);
 
 teacherRouter.get("/dashboard/overview", getTeacherDashboardOverviewController);
+teacherRouter.get("/dashboard/financial-overview", getTeacherFinancialOverviewController);
 teacherRouter.get("/dashboard/attendance-productivity", getTeacherDashboardAttendanceProductivityController);
 teacherRouter.get("/dashboard/grading-productivity", getTeacherDashboardGradingProductivityController);
 teacherRouter.get("/dashboard/task-queue", getTeacherDashboardTaskQueueController);

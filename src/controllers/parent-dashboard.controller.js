@@ -1,5 +1,6 @@
 import { asyncHandler } from "../utils/async-handler.js";
 import { sendSuccess } from "../utils/api-response.js";
+import { getParentFinancialVisibility } from "../services/financial-visibility.service.js";
 import {
   getParentAchievementVisibility,
   getParentAttendanceVisibility,
@@ -79,11 +80,23 @@ const getParentDashboardRemindersController = asyncHandler(async (req, res) => {
   return sendSuccess(res, "Parent reminders fetched", result);
 });
 
+const getParentFinancialOverviewController = asyncHandler(async (req, res) => {
+  const requestedStudentId = resolveStudentId(req);
+  const result = await getParentFinancialVisibility({
+    tenantId: req.auth.tenantId,
+    authUserId: req.auth.userId,
+    studentId: requestedStudentId
+  });
+
+  return sendSuccess(res, "Parent financial overview fetched", result);
+});
+
 export {
   getParentDashboardAchievementsController,
   getParentDashboardAttendanceController,
   getParentDashboardEngagementController,
   getParentDashboardOverviewController,
   getParentDashboardRemindersController,
-  getParentDashboardWorksheetProgressController
+  getParentDashboardWorksheetProgressController,
+  getParentFinancialOverviewController
 };

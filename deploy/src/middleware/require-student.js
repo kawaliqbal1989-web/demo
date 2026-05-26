@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { sendError } from "../utils/api-response.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 async function requireStudent(req, res, next) {
   if (!req.auth?.userId) {
@@ -14,23 +15,54 @@ async function requireStudent(req, res, next) {
     return sendError(res, 403, "Forbidden", "STUDENT_SCOPE_REQUIRED");
   }
 
-  const student = await prisma.student.findFirst({
-    where: {
-      id: req.auth.studentId,
-      tenantId: req.auth.tenantId
-    },
-    select: {
-      id: true,
-      admissionNo: true,
-      firstName: true,
-      lastName: true,
-      hierarchyNodeId: true,
-      levelId: true,
-      isActive: true,
-      isTemporaryExam: true,
-      temporaryExpiresAt: true
+  let student;
+  try {
+    student = await prisma.student.findFirst({
+      where: {
+        id: req.auth.studentId,
+        tenantId: req.auth.tenantId
+      },
+      select: {
+        id: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        hierarchyNodeId: true,
+        levelId: true,
+        isActive: true,
+        isTemporaryExam: true,
+        temporaryExpiresAt: true
+      }
+    });
+  } catch (error) {
+    if (!isSchemaMismatchError(error, ["student", "istemporaryexam", "temporaryexpiresat"])) {
+      throw error;
     }
-  });
+
+    student = await prisma.student.findFirst({
+      where: {
+        id: req.auth.studentId,
+        tenantId: req.auth.tenantId
+      },
+      select: {
+        id: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        hierarchyNodeId: true,
+        levelId: true,
+        isActive: true
+      }
+    });
+
+    if (student) {
+      student = {
+        ...student,
+        isTemporaryExam: false,
+        temporaryExpiresAt: null
+      };
+    }
+  }
 
   if (!student) {
     return sendError(res, 404, "Student not found", "STUDENT_NOT_FOUND");

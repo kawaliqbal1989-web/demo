@@ -40,10 +40,17 @@ async function getParentDashboardReminders({ studentId, limit } = {}) {
   });
 }
 
+async function getParentFinancialSummary({ studentId } = {}) {
+  return apiClient.get("/parent/dashboard/financial-summary", {
+    params: normalizeParams({ studentId })
+  });
+}
+
 export {
   getParentDashboardAchievements,
   getParentDashboardAttendance,
   getParentDashboardEngagement,
+  getParentFinancialSummary,
   getParentDashboardOverview,
   getParentDashboardReminders,
   getParentDashboardWorksheetProgress

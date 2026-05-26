@@ -4,6 +4,7 @@ import {
   assignCourseToStudent,
   confirmPromotion,
   createStudent,
+  createStudentFeeMonthAdjustment,
   createStudentFeePayment,
   createStudentLogin,
   createStudentNote,
@@ -17,6 +18,7 @@ import {
   getStudentFeesContext,
   getPerformanceSummary,
   getPromotionStatus,
+  listStudentFeeMonthAdjustments,
   listStudentNotes,
   listStudents,
   uploadStudentPhoto,
@@ -26,6 +28,15 @@ import {
   updateStudentNote,
   bulkImportStudentsCsv
 } from "../controllers/students.controller.js";
+import {
+  cancelStudentReceipt as cancelStudentReceiptV2,
+  collectStudentPaymentReceipt as collectStudentPaymentReceiptV2,
+  downloadStudentReceiptPdf as downloadStudentReceiptPdfV2,
+  getStudentReceiptById as getStudentReceiptByIdV2,
+  listStudentReceipts as listStudentReceiptsV2,
+  previewStudentReceiptAllocation as previewStudentReceiptAllocationV2,
+  refundStudentReceipt as refundStudentReceiptV2
+} from "../controllers/payment-receipts.controller.js";
 import { requireOperationalRoles, requireRole } from "../middleware/rbac.js";
 import { requireScopeAccess } from "../middleware/scope-access.js";
 import { auditAction } from "../middleware/audit-logger.js";
@@ -92,6 +103,62 @@ studentsRouter.post(
   createStudentFeePayment
 );
 
+studentsRouter.post(
+  "/:id/fees/receipts/preview-allocation",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_PREVIEW_ALLOCATION", "STUDENT", (req) => req.params.id),
+  previewStudentReceiptAllocationV2
+);
+
+studentsRouter.post(
+  "/:id/fees/receipts/collect",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_COLLECT_PAYMENT", "PAYMENT_RECEIPT", (req) => req.params.id),
+  collectStudentPaymentReceiptV2
+);
+
+studentsRouter.get(
+  "/:id/fees/receipts",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_LIST", "PAYMENT_RECEIPT", (req) => req.params.id),
+  listStudentReceiptsV2
+);
+
+studentsRouter.get(
+  "/:id/fees/receipts/:receiptId",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_VIEW", "PAYMENT_RECEIPT", (req) => req.params.receiptId),
+  getStudentReceiptByIdV2
+);
+
+studentsRouter.get(
+  "/:id/fees/receipts/:receiptId/pdf",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_DOWNLOAD_PDF", "PAYMENT_RECEIPT", (req) => req.params.receiptId),
+  downloadStudentReceiptPdfV2
+);
+
+studentsRouter.post(
+  "/:id/fees/receipts/:receiptId/refund",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_REFUND", "PAYMENT_RECEIPT", (req) => req.params.receiptId),
+  refundStudentReceiptV2
+);
+
+studentsRouter.post(
+  "/:id/fees/receipts/:receiptId/cancel",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_RECEIPT_CANCEL", "PAYMENT_RECEIPT", (req) => req.params.receiptId),
+  cancelStudentReceiptV2
+);
+
 studentsRouter.get(
   "/:id/fees",
   requireRole("CENTER", "SUPERADMIN"),
@@ -114,6 +181,22 @@ studentsRouter.delete(
   requireScopeAccess("student", "id"),
   auditAction("STUDENT_DELETE_INSTALLMENT", "STUDENT", (req) => req.params.installmentId),
   deleteStudentInstallment
+);
+
+studentsRouter.get(
+  "/:id/fees/month-adjustments",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_LIST_FEE_MONTH_ADJUSTMENTS", "STUDENT", (req) => req.params.id),
+  listStudentFeeMonthAdjustments
+);
+
+studentsRouter.post(
+  "/:id/fees/month-adjustments",
+  requireRole("CENTER", "SUPERADMIN"),
+  requireScopeAccess("student", "id"),
+  auditAction("STUDENT_CREATE_FEE_MONTH_ADJUSTMENT", "STUDENT", (req) => req.params.id),
+  createStudentFeeMonthAdjustment
 );
 
 studentsRouter.post(

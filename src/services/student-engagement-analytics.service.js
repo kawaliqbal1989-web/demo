@@ -1,7 +1,9 @@
 import { prisma } from "../lib/prisma.js";
+import { logger } from "../lib/logger.js";
 import { clampScore, normalizeGrowthPercent, roundScore, toNumber } from "./health-score.service.js";
 import { checkAndAwardMilestones, computeStreaks } from "./student-coach.service.js";
 import { getLevelPerformance } from "./student-performance.service.js";
+import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 const ENGAGEMENT_CACHE_TTL_MS = 30_000;
 const DEFAULT_LOOKBACK_DAYS = 14;
@@ -46,6 +48,122 @@ function createHttpError(statusCode, message, errorCode) {
   error.statusCode = statusCode;
   error.errorCode = errorCode;
   return error;
+}
+
+function isStudentEngagementSchemaMismatch(error) {
+  return isSchemaMismatchError(error, [
+    "studentengagementsnapshot",
+    "student_milestones",
+    "worksheet_submissions",
+    "worksheet_assignments",
+    "attendance_entries",
+    "exam_enrollment_entries"
+  ]);
+}
+
+function buildSchemaDriftFallbackBundle({ scope, asOf, threshold, lookback }) {
+  const normalizedAsOf = startOfUtcDay(asOf).toISOString();
+  const normalizedWeakTopicThreshold = Number.isFinite(Number(threshold)) ? Number(threshold) : DEFAULT_THRESHOLD;
+  const normalizedWeakTopicLookback = Number.isFinite(Number(lookback)) ? Number(lookback) : DEFAULT_WEAK_TOPIC_LOOKBACK;
+
+  return {
+    meta: {
+      source: {
+        mode: "schema-drift-fallback",
+        liveFallback: true,
+        degraded: true,
+        snapshotDate: normalizedAsOf
+      },
+      scope: {
+        studentId: scope.studentId,
+        studentCode: scope.studentCode,
+        studentName: scope.studentName,
+        hierarchyNodeId: scope.hierarchyNodeId,
+        hierarchyNodeName: scope.hierarchyNodeName,
+        levelId: scope.levelId,
+        levelName: scope.levelName
+      },
+      asOf: normalizedAsOf
+    },
+    overview: {
+      engagementScore: 0,
+      consistencyScore: 0,
+      streakScore: 0,
+      participationScore: 0,
+      completionScore: 0,
+      inactivityRiskScore: 0,
+      momentumScore: 0,
+      engagementBand: "WATCH",
+      totalCompletedWorksheets: 0,
+      pendingWorksheetCount: 0,
+      attendanceRate: null,
+      examParticipationCount: 0,
+      practiceActiveDays: 0,
+      inactiveDays: null,
+      weakTopicCount: 0,
+      achievementCount: 0,
+      lastActivityAt: null
+    },
+    streaks: {
+      attendance: {
+        current: 0,
+        best: 0,
+        weeklyCurrent: 0,
+        target: ATTENDANCE_STREAK_TARGET
+      },
+      practice: {
+        current: 0,
+        best: 0,
+        weeklyCurrent: 0,
+        target: PRACTICE_STREAK_TARGET
+      }
+    },
+    achievements: {
+      items: [],
+      newlyEarned: [],
+      nextHints: [],
+      summary: {
+        total: 0,
+        latestKey: null
+      }
+    },
+    practiceTrends: {
+      items: [],
+      summary: {
+        totalCompleted: 0,
+        pendingAssignments: 0,
+        practiceActiveDays: 0,
+        lastSubmissionAt: null,
+        averageScore: null
+      }
+    },
+    attendanceTrends: {
+      items: [],
+      summary: {
+        attendanceRate: null,
+        totalSessions: 0,
+        presentCount: 0,
+        lateCount: 0,
+        absentCount: 0
+      }
+    },
+    weakTopics: {
+      threshold: normalizedWeakTopicThreshold,
+      lookback: normalizedWeakTopicLookback,
+      items: [],
+      summary: {
+        weakTopicCount: 0,
+        weakestTopic: null
+      }
+    },
+    examParticipation: {
+      items: [],
+      summary: {
+        totalEnrollments: 0,
+        latestEnrollmentAt: null
+      }
+    }
+  };
 }
 
 function cloneData(value) {
@@ -474,16 +592,31 @@ async function computeWeakTopicsLive({ scope, threshold = DEFAULT_THRESHOLD, loo
 }
 
 async function awardEngagementAchievements({ scope, totals, streaks, attendanceRate, weakTopicCount, examParticipationCount, tx = prisma } = {}) {
-  const coachAchievements = await checkAndAwardMilestones(scope.studentId, scope.tenantId, scope.levelId);
-  const existing = await tx.studentMilestone.findMany({
-    where: {
-      tenantId: scope.tenantId,
-      studentId: scope.studentId
-    },
-    select: {
-      key: true
+  let coachAchievements = { newlyEarned: [], nextHints: [] };
+  try {
+    coachAchievements = await checkAndAwardMilestones(scope.studentId, scope.tenantId, scope.levelId);
+  } catch (error) {
+    if (!isStudentEngagementSchemaMismatch(error)) {
+      throw error;
     }
-  });
+  }
+
+  let existing = [];
+  try {
+    existing = await tx.studentMilestone.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        studentId: scope.studentId
+      },
+      select: {
+        key: true
+      }
+    });
+  } catch (error) {
+    if (!isStudentEngagementSchemaMismatch(error)) {
+      throw error;
+    }
+  }
 
   const earnedKeys = new Set(existing.map((item) => item.key));
   const additionalKeys = [];
@@ -519,20 +652,27 @@ async function awardEngagementAchievements({ scope, totals, streaks, attendanceR
     );
   }
 
-  const items = await tx.studentMilestone.findMany({
-    where: {
-      tenantId: scope.tenantId,
-      studentId: scope.studentId
-    },
-    orderBy: [{ earnedAt: "desc" }],
-    select: {
-      key: true,
-      title: true,
-      description: true,
-      icon: true,
-      earnedAt: true
+  let items = [];
+  try {
+    items = await tx.studentMilestone.findMany({
+      where: {
+        tenantId: scope.tenantId,
+        studentId: scope.studentId
+      },
+      orderBy: [{ earnedAt: "desc" }],
+      select: {
+        key: true,
+        title: true,
+        description: true,
+        icon: true,
+        earnedAt: true
+      }
+    });
+  } catch (error) {
+    if (!isStudentEngagementSchemaMismatch(error)) {
+      throw error;
     }
-  });
+  }
 
   return {
     items,
@@ -1056,38 +1196,96 @@ async function getStudentEngagementAnalyticsBundle({
     filters,
     loader: async () => {
       if (!forceLive) {
-        const snapshot = await loadLatestEngagementSnapshot({ scope, asOf, tx });
+        let snapshot = null;
+        try {
+          snapshot = await loadLatestEngagementSnapshot({ scope, asOf, tx });
+        } catch (error) {
+          if (!isStudentEngagementSchemaMismatch(error)) {
+            throw error;
+          }
+
+          logger.warn("student_engagement_snapshot_load_skipped", {
+            tenantId: scope.tenantId,
+            studentId: scope.studentId,
+            code: error?.code || null,
+            detail: String(error?.message || "").slice(0, 240)
+          });
+        }
+
         if (snapshot) {
           const bundle = buildSnapshotBundle({ scope, snapshot, asOf });
-          const liveAchievements = await prisma.studentMilestone.findMany({
-            where: {
-              tenantId: scope.tenantId,
-              studentId: scope.studentId
-            },
-            orderBy: [{ earnedAt: "desc" }],
-            select: {
-              key: true,
-              title: true,
-              description: true,
-              icon: true,
-              earnedAt: true
+          let liveAchievements = [];
+          try {
+            liveAchievements = await tx.studentMilestone.findMany({
+              where: {
+                tenantId: scope.tenantId,
+                studentId: scope.studentId
+              },
+              orderBy: [{ earnedAt: "desc" }],
+              select: {
+                key: true,
+                title: true,
+                description: true,
+                icon: true,
+                earnedAt: true
+              }
+            });
+          } catch (error) {
+            if (!isStudentEngagementSchemaMismatch(error)) {
+              throw error;
             }
-          });
+          }
+
           bundle.achievements.items = liveAchievements;
           bundle.achievements.summary.total = liveAchievements.length;
           return bundle;
         }
       }
 
-      const bundle = await buildLiveEngagementBundle({
-        scope,
-        asOf,
-        tx,
-        weakTopicThreshold: threshold,
-        weakTopicLookback: lookback
-      });
-      await persistStudentEngagementSnapshot({ scope, bundle, asOf, tx });
-      return bundle;
+      try {
+        const bundle = await buildLiveEngagementBundle({
+          scope,
+          asOf,
+          tx,
+          weakTopicThreshold: threshold,
+          weakTopicLookback: lookback
+        });
+
+        try {
+          await persistStudentEngagementSnapshot({ scope, bundle, asOf, tx });
+        } catch (error) {
+          if (!isStudentEngagementSchemaMismatch(error)) {
+            throw error;
+          }
+
+          logger.warn("student_engagement_snapshot_persist_skipped", {
+            tenantId: scope.tenantId,
+            studentId: scope.studentId,
+            code: error?.code || null,
+            detail: String(error?.message || "").slice(0, 240)
+          });
+        }
+
+        return bundle;
+      } catch (error) {
+        if (!isStudentEngagementSchemaMismatch(error)) {
+          throw error;
+        }
+
+        logger.warn("student_engagement_schema_drift_fallback", {
+          tenantId: scope.tenantId,
+          studentId: scope.studentId,
+          code: error?.code || null,
+          detail: String(error?.message || "").slice(0, 240)
+        });
+
+        return buildSchemaDriftFallbackBundle({
+          scope,
+          asOf,
+          threshold,
+          lookback
+        });
+      }
     }
   });
 }

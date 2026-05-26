@@ -359,177 +359,54 @@ function assertBpCenterAccess({ tenantId, bpScope, centerId }) {
   }
 }
 
-async function ensureCenterCapacityTableExists() {
-  try {
-    await prisma.$executeRawUnsafe(`
-      CREATE TABLE IF NOT EXISTS \`centercapacity\` (
-        \`id\` VARCHAR(191) NOT NULL,
-        \`centerId\` VARCHAR(191) NOT NULL,
-        \`maxTeachers\` INT NOT NULL DEFAULT 0,
-        \`maxStudents\` INT NOT NULL DEFAULT 0,
-        \`allowOverAllocation\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`createdAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
-        \`updatedAt\` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
-        UNIQUE INDEX \`centercapacity_centerId_key\`(\`centerId\`),
-        INDEX \`centercapacity_updatedAt_idx\`(\`updatedAt\`),
-        PRIMARY KEY (\`id\`)
-      ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci
-    `);
-
-    // Add foreign key separately; ignore failure when it already exists or centercapacity
-    // was created without it (e.g. due to prior partial DDL).
-    try {
-      await prisma.$executeRawUnsafe(`
-        ALTER TABLE \`centercapacity\`
-          ADD CONSTRAINT \`CenterCapacity_centerId_fkey\`
-          FOREIGN KEY (\`centerId\`) REFERENCES \`centerprofile\`(\`id\`)
-          ON DELETE CASCADE ON UPDATE CASCADE
-      `);
-    } catch {
-      // Constraint already exists or centercapacity can operate without it — not fatal.
-    }
-
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function attemptRawSqlCapacityWrite({ centerId, input }) {
-  // When the centercapacity table is absent, create it on-demand (same as the
-  // migration_center_capacity_schema_restore.sql script but applied inline).
-  await ensureCenterCapacityTableExists();
-
-  const capacityId = `c_${Math.random().toString(36).slice(2)}_${Date.now().toString(36)}`;
-  const now = new Date();
-  const maxTeachers = Number(input.maxTeachers ?? 0);
-  const maxStudents = Number(input.maxStudents ?? 0);
-  const allowOverAllocation = Boolean(input.allowOverAllocation ?? false);
-
-  try {
-    await prisma.$executeRaw`
-      INSERT INTO \`centercapacity\` (id, centerId, maxTeachers, maxStudents, allowOverAllocation, createdAt, updatedAt)
-      VALUES (${capacityId}, ${centerId}, ${maxTeachers}, ${maxStudents}, ${allowOverAllocation}, ${now}, ${now})
-      ON DUPLICATE KEY UPDATE
-        maxTeachers = ${maxTeachers},
-        maxStudents = ${maxStudents},
-        allowOverAllocation = ${allowOverAllocation},
-        updatedAt = ${now}
-    `;
-    return { success: true, persistedId: capacityId };
-  } catch (rawError) {
-    return { success: false, error: rawError };
-  }
-}
-
 async function upsertCenterCapacity({ tenantId, centerId, actor, input, bpScope }) {
   if (actor?.role === "BP") {
     assertBpCenterAccess({ tenantId, bpScope, centerId });
   }
 
-  let snapshot;
-  let previousCapacity;
+  const { snapshot, previousCapacity } = await prisma.$transaction(async (tx) => {
+    const center = await resolveCenterById({ tx, tenantId, centerId });
+    if (!center) {
+      throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+    }
 
-  try {
-    const transactionResult = await prisma.$transaction(async (tx) => {
-      const center = await resolveCenterById({ tx, tenantId, centerId });
-      if (!center) {
-        throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+    await lockCenterCapacityScope({ tx, centerId: center.id });
+
+    const current = await tx.centerCapacity.findUnique({
+      where: {
+        centerId: center.id
       }
-
-      await lockCenterCapacityScope({ tx, centerId: center.id });
-
-      const current = await tx.centerCapacity.findUnique({
-        where: {
-          centerId: center.id
-        }
-      });
-
-      const nextData = {
-        maxTeachers: input.maxTeachers ?? current?.maxTeachers ?? 0,
-        maxStudents: input.maxStudents ?? current?.maxStudents ?? 0,
-        allowOverAllocation: input.allowOverAllocation ?? current?.allowOverAllocation ?? false
-      };
-
-      await tx.centerCapacity.upsert({
-        where: {
-          centerId: center.id
-        },
-        update: nextData,
-        create: {
-          centerId: center.id,
-          ...nextData
-        }
-      });
-
-      const nextSnapshot = await buildCenterSnapshot({
-        tx,
-        tenantId,
-        center,
-        auditLimit: 10
-      });
-
-      return {
-        snapshot: nextSnapshot,
-        previousCapacity: current
-      };
     });
 
-    snapshot = transactionResult.snapshot;
-    previousCapacity = transactionResult.previousCapacity;
-  } catch (error) {
-    if (isCapacityStorageMissingError(error)) {
-      const center = await prisma.centerProfile.findFirst({
-        where: {
-          id: centerId,
-          tenantId
-        },
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          displayName: true,
-          authUser: {
-            select: {
-              hierarchyNodeId: true
-            }
-          },
-          franchiseProfile: {
-            select: {
-              id: true,
-              name: true,
-              displayName: true,
-              businessPartnerId: true
-            }
-          }
-        }
-      });
+    const nextData = {
+      maxTeachers: input.maxTeachers ?? current?.maxTeachers ?? 0,
+      maxStudents: input.maxStudents ?? current?.maxStudents ?? 0,
+      allowOverAllocation: input.allowOverAllocation ?? current?.allowOverAllocation ?? false
+    };
 
-      if (!center) {
-        throw createHttpError(404, "Center not found", "CENTER_NOT_FOUND");
+    await tx.centerCapacity.upsert({
+      where: {
+        centerId: center.id
+      },
+      update: nextData,
+      create: {
+        centerId: center.id,
+        ...nextData
       }
+    });
 
-      const rawSqlResult = await attemptRawSqlCapacityWrite({ centerId, input });
-      if (!rawSqlResult.success) {
-        throw createHttpError(
-          503,
-          "Center capacity storage is not available on this environment",
-          "CENTER_CAPACITY_STORAGE_UNAVAILABLE"
-        );
-      }
+    const nextSnapshot = await buildCenterSnapshot({
+      tx,
+      tenantId,
+      center,
+      auditLimit: 10
+    });
 
-      snapshot = await buildCenterSnapshot({
-        tx: prisma,
-        tenantId,
-        center,
-        auditLimit: 10
-      });
-
-      previousCapacity = null;
-    } else {
-      throw error;
-    }
-  }
+    return {
+      snapshot: nextSnapshot,
+      previousCapacity: current
+    };
+  });
 
   await recordCenterCapacityAudit({
     tenantId,

@@ -5,6 +5,7 @@ import {
   getParentDashboardAchievementsController,
   getParentDashboardAttendanceController,
   getParentDashboardEngagementController,
+  getParentFinancialOverviewController,
   getParentDashboardOverviewController,
   getParentDashboardRemindersController,
   getParentDashboardWorksheetProgressController
@@ -48,6 +49,12 @@ parentRouter.get(
   "/dashboard/reminders",
   auditAction("PARENT_VIEW_REMINDERS", "PARENT", (req) => req.parent.id),
   getParentDashboardRemindersController
+);
+
+parentRouter.get(
+  "/dashboard/financial-summary",
+  auditAction("PARENT_VIEW_DASHBOARD_FINANCIAL", "PARENT", (req) => req.parent.id),
+  getParentFinancialOverviewController
 );
 
 export { parentRouter };

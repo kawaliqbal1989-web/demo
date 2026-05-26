@@ -73,6 +73,8 @@ const roleMenus = {
     { label: "🧮 Virtual Abacus", to: "/teacher/virtual-abacus" },
     { label: "🎯 Exams", to: "/teacher/exam-cycles" },
     { label: "📊 Analytics", to: "/teacher/analytics" },
+    { section: "Finance" },
+    { label: "💳 Fees", to: "/teacher/fees" },
     { section: "Execution" },
     { label: "🧭 Workflow Queue", to: "/teacher/workflows" },
     { section: "System" },

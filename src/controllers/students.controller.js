@@ -10,6 +10,7 @@ import { getLevelPerformance } from "../services/student-performance.service.js"
 import { createBulkNotification } from "../services/notification.service.js";
 import { recordStudentPaymentTransaction } from "../services/financial-ledger.service.js";
 import { assertCanModifyOperational } from "../services/ownership-guard.service.js";
+import { computeStudentFeeTimeline } from "../services/student-fee-due.service.js";
 import {
   assignLevelWithIntegrity,
   evaluatePassThreshold,
@@ -134,6 +135,71 @@ function normalizeConcessionAmount(value) {
     return { error: "Concession must be a non-negative number" };
   }
   return Number(num.toFixed(2));
+}
+
+function normalizeBoolean(value, fallback = false) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "y"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "n"].includes(normalized)) {
+    return false;
+  }
+
+  return fallback;
+}
+
+function parseFeeMonthNumber(value) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 1 || num > 12) {
+    throw makeApiError(400, "month must be 1-12", "VALIDATION_ERROR");
+  }
+  return num;
+}
+
+function parseFeeYearNumber(value) {
+  const num = Number(value);
+  if (!Number.isInteger(num) || num < 2000 || num > 2100) {
+    throw makeApiError(400, "year must be 2000-2100", "VALIDATION_ERROR");
+  }
+  return num;
+}
+
+function startOfUtcMonth(year, month) {
+  return new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+}
+
+function endExclusiveOfUtcMonth(year, month) {
+  return month === 12
+    ? new Date(Date.UTC(year + 1, 0, 1, 0, 0, 0, 0))
+    : new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+}
+
+function normalizeFeeMonthAdjustmentType(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (!["WAIVED", "PAUSED"].includes(normalized)) {
+    throw makeApiError(400, "actionType must be WAIVED or PAUSED", "VALIDATION_ERROR");
+  }
+  return normalized;
+}
+
+function isFeeMonthAdjustmentUniqueCollision(error) {
+  if (!isUniqueConstraintError(error)) return false;
+  if (uniqueTargetsInclude(error, "sfma_tenant_student_month_uq")) return true;
+  return (
+    uniqueTargetsInclude(error, "studentId") &&
+    uniqueTargetsInclude(error, "year") &&
+    uniqueTargetsInclude(error, "month")
+  );
 }
 
 async function getLevelFeeDefaults({ tx, tenantId, levelId }) {
@@ -2135,85 +2201,104 @@ const getStudentFeesContext = asyncHandler(async (req, res) => {
     return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
   }
 
-  const installments = await prisma.studentFeeInstallment.findMany({
-    where: {
-      tenantId: req.auth.tenantId,
-      studentId: student.id
-    },
-    orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
-    select: {
-      id: true,
-      amount: true,
-      dueDate: true,
-      createdAt: true,
-      updatedAt: true
-    }
-  });
-
-  const payments = await prisma.financialTransaction.findMany({
-    where: {
+  const [timeline, installmentTemplates, payments, monthAdjustments] = await Promise.all([
+    computeStudentFeeTimeline({
       tenantId: req.auth.tenantId,
       studentId: student.id,
-      type: { in: ["ENROLLMENT", "RENEWAL", "ADJUSTMENT"] }
-    },
-    orderBy: { createdAt: "desc" },
-    take: 200,
-    select: {
-      id: true,
-      type: true,
-      grossAmount: true,
-      paymentMode: true,
-      receivedAt: true,
-      paymentReference: true,
-      feeScheduleType: true,
-      feeMonth: true,
-      feeYear: true,
-      feeLevelId: true,
-      installmentId: true,
-      createdAt: true,
-      createdBy: { select: { id: true, username: true, email: true, role: true } },
-      feeLevel: { select: { id: true, name: true, rank: true } },
-      installment: { select: { id: true, dueDate: true, amount: true } }
-    }
-  });
+      asOf: new Date()
+    }),
+    prisma.studentFeeInstallment.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id
+      },
+      orderBy: [{ dueDate: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        amount: true,
+        dueDate: true,
+        isRecurringMonthly: true,
+        recurrenceEndDate: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    }),
+    prisma.financialTransaction.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id,
+        type: { in: ["ENROLLMENT", "RENEWAL", "ADJUSTMENT"] }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 200,
+      select: {
+        id: true,
+        type: true,
+        grossAmount: true,
+        paymentMode: true,
+        receivedAt: true,
+        paymentReference: true,
+        feeScheduleType: true,
+        feeMonth: true,
+        feeYear: true,
+        feeLevelId: true,
+        installmentId: true,
+        createdAt: true,
+        createdBy: { select: { id: true, username: true, email: true, role: true } },
+        feeLevel: { select: { id: true, name: true, rank: true } },
+        installment: {
+          select: {
+            id: true,
+            dueDate: true,
+            amount: true,
+            isRecurringMonthly: true,
+            recurrenceEndDate: true
+          }
+        }
+      }
+    }),
+    prisma.studentFeeMonthAdjustment.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id
+      },
+      orderBy: [{ year: "desc" }, { month: "desc" }, { createdAt: "desc" }],
+      select: {
+        id: true,
+        year: true,
+        month: true,
+        adjustmentType: true,
+        remarks: true,
+        createdAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            role: true
+          }
+        }
+      }
+    })
+  ]);
 
-  const paidTotal = payments.reduce(
-    (sum, p) => (p.type === "ENROLLMENT" || p.type === "RENEWAL" ? sum + Number(p.grossAmount || 0) : sum),
-    0
-  );
-  const totalFee = student.totalFeeAmount == null ? null : Number(student.totalFeeAmount);
-  const pendingTotal = totalFee == null ? null : Math.max(0, Number((totalFee - paidTotal).toFixed(2)));
-
-  const paidByInstallmentId = new Map();
-  for (const payment of payments) {
-    if (payment.type !== "ENROLLMENT" && payment.type !== "RENEWAL") continue;
-    if (!payment.installmentId) continue;
-    const prev = paidByInstallmentId.get(payment.installmentId) || 0;
-    paidByInstallmentId.set(payment.installmentId, prev + Number(payment.grossAmount || 0));
-  }
-
-  const now = new Date();
-  const installmentItems = installments.map((inst) => {
-    const amount = Number(inst.amount || 0);
-    const paid = Number((paidByInstallmentId.get(inst.id) || 0).toFixed(2));
-    const pending = Math.max(0, Number((amount - paid).toFixed(2)));
-
-    let status = "PENDING";
-    if (paid >= amount && amount > 0) {
-      status = "PAID";
-    } else if (paid > 0) {
-      status = "PARTIAL";
-    } else if (inst.dueDate && inst.dueDate < now) {
-      status = "OVERDUE";
-    }
-
-    return {
-      ...inst,
-      paid,
-      pending,
-      status
-    };
-  });
+  const installmentItems = (timeline?.dues || []).map((due) => ({
+    id: due.id,
+    sourceInstallmentId: due.sourceInstallmentId,
+    dueDate: due.dueDate,
+    amount: due.amount,
+    originalAmount: due.originalAmount,
+    paid: due.paid,
+    pending: due.pending,
+    status: due.status,
+    month: due.month,
+    year: due.year,
+    monthKey: due.monthKey,
+    isVirtual: due.isVirtual,
+    isRecurringMonthly: due.isRecurringMonthly,
+    adjustmentType: due.adjustmentType,
+    adjustmentRemarks: due.adjustmentRemarks
+  }));
 
   return res.apiSuccess("Student fees context", {
     student: {
@@ -2227,13 +2312,20 @@ const getStudentFeesContext = asyncHandler(async (req, res) => {
       level: student.level
     },
     summary: {
-      totalFee,
-      paid: Number(paidTotal.toFixed(2)),
-      pending: pendingTotal,
-      status: totalFee == null ? null : pendingTotal === 0 ? "PAID" : "PENDING"
+      totalFee: student.totalFeeAmount == null ? null : Number(student.totalFeeAmount),
+      dueTotal: timeline?.summary?.totalDue || 0,
+      paid: timeline?.summary?.totalPaid || 0,
+      pending: timeline?.summary?.totalPending || 0,
+      overdue: timeline?.summary?.totalOverdue || 0,
+      waivedMonths: timeline?.summary?.waivedMonths || 0,
+      pausedMonths: timeline?.summary?.pausedMonths || 0,
+      unallocatedPaymentAmount: timeline?.summary?.unallocatedPaymentAmount || 0,
+      status: timeline?.summary?.status || null
     },
     installments: installmentItems,
-    payments
+    installmentTemplates,
+    payments,
+    monthAdjustments
   });
 });
 
@@ -2256,14 +2348,39 @@ const upsertStudentInstallment = asyncHandler(async (req, res) => {
     return res.apiError(400, "dueDate must be a valid date", "VALIDATION_ERROR");
   }
 
+  const isRecurringMonthly = normalizeBoolean(req.body?.isRecurringMonthly, false);
+  const recurrenceEndDateRaw = req.body?.recurrenceEndDate;
+  const recurrenceEndDate = recurrenceEndDateRaw ? new Date(recurrenceEndDateRaw) : null;
+
+  if (recurrenceEndDateRaw && Number.isNaN(recurrenceEndDate?.getTime?.())) {
+    return res.apiError(400, "recurrenceEndDate must be a valid date", "VALIDATION_ERROR");
+  }
+
+  if (!isRecurringMonthly && recurrenceEndDate) {
+    return res.apiError(400, "recurrenceEndDate is allowed only for recurring installments", "VALIDATION_ERROR");
+  }
+
+  if (isRecurringMonthly && recurrenceEndDate && recurrenceEndDate.getTime() < dueDate.getTime()) {
+    return res.apiError(400, "recurrenceEndDate must be on or after dueDate", "VALIDATION_ERROR");
+  }
+
   const created = await prisma.studentFeeInstallment.create({
     data: {
       tenantId: req.auth.tenantId,
       studentId,
       amount,
-      dueDate
+      dueDate,
+      isRecurringMonthly,
+      recurrenceEndDate: isRecurringMonthly ? recurrenceEndDate : null
     },
-    select: { id: true, amount: true, dueDate: true, createdAt: true }
+    select: {
+      id: true,
+      amount: true,
+      dueDate: true,
+      isRecurringMonthly: true,
+      recurrenceEndDate: true,
+      createdAt: true
+    }
   });
 
   res.locals.entityId = created.id;
@@ -2308,6 +2425,184 @@ const deleteStudentInstallment = asyncHandler(async (req, res) => {
 
   res.locals.entityId = installmentId;
   return res.apiSuccess("Installment deleted", { id: installmentId });
+});
+
+const createStudentFeeMonthAdjustment = asyncHandler(async (req, res) => {
+  assertCanModifyOperational(req.auth.role);
+
+  const studentId = String(req.params.id || "").trim();
+  if (!studentId) {
+    return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
+  }
+
+  const actionType = normalizeFeeMonthAdjustmentType(req.body?.actionType || req.body?.type);
+  const month = parseFeeMonthNumber(req.body?.month);
+  const year = parseFeeYearNumber(req.body?.year);
+  const remarks = String(req.body?.remarks || "").trim();
+
+  if (!remarks) {
+    return res.apiError(400, "remarks is required", "VALIDATION_ERROR");
+  }
+
+  const student = await prisma.student.findFirst({
+    where: {
+      id: studentId,
+      tenantId: req.auth.tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!student) {
+    return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
+  }
+
+  const windowStart = startOfUtcMonth(year, month);
+  const windowEndExclusive = endExclusiveOfUtcMonth(year, month);
+
+  const hasRecurringTemplate = await prisma.studentFeeInstallment.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      studentId: student.id,
+      isRecurringMonthly: true,
+      dueDate: { lt: windowEndExclusive },
+      OR: [
+        { recurrenceEndDate: null },
+        { recurrenceEndDate: { gte: windowStart } }
+      ]
+    },
+    select: { id: true }
+  });
+
+  if (!hasRecurringTemplate) {
+    return res.apiError(
+      409,
+      "No recurring monthly installment template found for the selected month",
+      "RECURRING_TEMPLATE_REQUIRED"
+    );
+  }
+
+  const existing = await prisma.studentFeeMonthAdjustment.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      studentId: student.id,
+      year,
+      month
+    },
+    select: { id: true }
+  });
+
+  if (existing) {
+    return res.apiError(409, "Month adjustment already exists for this student and month", "MONTH_ADJUSTMENT_EXISTS");
+  }
+
+  let created;
+  try {
+    created = await prisma.studentFeeMonthAdjustment.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id,
+        year,
+        month,
+        adjustmentType: actionType,
+        remarks,
+        createdByUserId: req.auth.userId
+      },
+      select: {
+        id: true,
+        studentId: true,
+        year: true,
+        month: true,
+        adjustmentType: true,
+        remarks: true,
+        createdAt: true,
+        createdBy: {
+          select: {
+            id: true,
+            username: true,
+            email: true,
+            role: true
+          }
+        }
+      }
+    });
+  } catch (error) {
+    if (isFeeMonthAdjustmentUniqueCollision(error)) {
+      return res.apiError(409, "Month adjustment already exists for this student and month", "MONTH_ADJUSTMENT_EXISTS");
+    }
+    throw error;
+  }
+
+  await recordAudit({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    role: req.auth.role,
+    action: "STUDENT_FEE_MONTH_ADJUSTMENT_CREATE",
+    entityType: "FEE_MONTH_ADJUSTMENT",
+    entityId: created.id,
+    metadata: {
+      studentId: student.id,
+      year,
+      month,
+      actionType,
+      remarks
+    }
+  });
+
+  res.locals.entityId = created.id;
+  return res.apiSuccess("Fee month adjustment created", created, 201);
+});
+
+const listStudentFeeMonthAdjustments = asyncHandler(async (req, res) => {
+  const studentId = String(req.params.id || "").trim();
+  if (!studentId) {
+    return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
+  }
+
+  const student = await prisma.student.findFirst({
+    where: {
+      id: studentId,
+      tenantId: req.auth.tenantId
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!student) {
+    return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
+  }
+
+  const items = await prisma.studentFeeMonthAdjustment.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      studentId: student.id
+    },
+    orderBy: [{ year: "desc" }, { month: "desc" }, { createdAt: "desc" }],
+    select: {
+      id: true,
+      studentId: true,
+      year: true,
+      month: true,
+      adjustmentType: true,
+      remarks: true,
+      createdAt: true,
+      createdBy: {
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          role: true
+        }
+      }
+    }
+  });
+
+  return res.apiSuccess("Fee month adjustments fetched", {
+    studentId: student.id,
+    items
+  });
 });
 
 const createStudentLogin = asyncHandler(async (req, res) => {
@@ -3083,6 +3378,8 @@ export {
   getStudentFeesContext,
   upsertStudentInstallment,
   deleteStudentInstallment,
+  createStudentFeeMonthAdjustment,
+  listStudentFeeMonthAdjustments,
   createStudentFeePayment,
   createStudentLogin,
   resetStudentPassword,

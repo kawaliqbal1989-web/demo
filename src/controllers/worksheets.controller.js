@@ -5,7 +5,6 @@ import { createBulkNotification } from "../services/notification.service.js";
 import { assertCanModifyAcademic } from "../services/ownership-guard.service.js";
 import { parsePagination } from "../utils/pagination.js";
 import { recordAudit } from "../utils/audit.js";
-import { resolveScopedLevelIdsForAuth } from "../services/course-scope.service.js";
 
 const listWorksheets = asyncHandler(async (req, res) => {
   const { take, skip, orderBy } = parsePagination(req.query);
@@ -18,19 +17,6 @@ const listWorksheets = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     ...(levelId ? { levelId } : {})
   };
-
-  const scopedLevelIds = await resolveScopedLevelIdsForAuth({ auth: req.auth });
-  if (Array.isArray(scopedLevelIds)) {
-    if (!scopedLevelIds.length) {
-      return res.apiSuccess("Worksheets fetched", []);
-    }
-
-    if (levelId && !scopedLevelIds.includes(levelId)) {
-      return res.apiSuccess("Worksheets fetched", []);
-    }
-
-    where.levelId = levelId ? levelId : { in: scopedLevelIds };
-  }
 
   if (published === "true") {
     where.isPublished = true;

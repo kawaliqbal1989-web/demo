@@ -8,6 +8,7 @@ function createHttpError(statusCode, message, errorCode) {
 }
 
 const ALLOWED_FEE_SCHEDULE_TYPES = ["ADVANCE", "MONTHLY", "QUARTERLY", "HALF_YEARLY", "YEARLY", "LEVEL_WISE"];
+const ALLOWED_PAYMENT_MODES = ["CASH", "UPI", "BANK_TRANSFER", "CARD", "CHEQUE", "ONLINE_GATEWAY", "ONLINE", "GPAY", "PAYTM"];
 
 function toDecimal(value) {
   if (value === null || value === undefined || value === "") {
@@ -451,8 +452,8 @@ async function recordStudentPaymentTransaction({
   const normalizedPaymentMode = paymentMode === null || paymentMode === undefined || paymentMode === ""
     ? null
     : String(paymentMode).trim().toUpperCase();
-  if (normalizedPaymentMode && !["CASH", "ONLINE", "GPAY", "PAYTM"].includes(normalizedPaymentMode)) {
-    throw createHttpError(400, "paymentMode must be CASH, ONLINE, GPAY, or PAYTM", "VALIDATION_ERROR");
+  if (normalizedPaymentMode && !ALLOWED_PAYMENT_MODES.includes(normalizedPaymentMode)) {
+    throw createHttpError(400, `paymentMode must be one of ${ALLOWED_PAYMENT_MODES.join(", ")}`, "VALIDATION_ERROR");
   }
 
   const normalizedSchedule = feeScheduleType === null || feeScheduleType === undefined || feeScheduleType === ""

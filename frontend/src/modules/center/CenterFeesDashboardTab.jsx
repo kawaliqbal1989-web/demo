@@ -13,13 +13,26 @@ function formatMoney(value) {
 }
 
 function getStatusBadge(overdue, pending, paid) {
-  if (overdue > 0) {
-    return <span className="badge badge-danger">OVERDUE</span>;
-  } else if (pending > 0) {
-    return <span className="badge badge-warning">PENDING</span>;
-  } else if (paid > 0) {
+  const overdueAmount = Number(overdue || 0);
+  const pendingAmount = Number(pending || 0);
+  const paidAmount = Number(paid || 0);
+
+  if (pendingAmount <= 0 && paidAmount > 0) {
     return <span className="badge badge-success">PAID</span>;
   }
+
+  if (overdueAmount > 0 && pendingAmount > 0) {
+    return <span className="badge badge-danger">OVERDUE</span>;
+  }
+
+  if (pendingAmount > 0) {
+    return <span className="badge badge-warning">PENDING</span>;
+  }
+
+  if (paidAmount > 0) {
+    return <span className="badge badge-success">PAID</span>;
+  }
+
   return <span className="badge badge-secondary">NO DATA</span>;
 }
 
@@ -217,6 +230,7 @@ export function CenterFeesDashboardTab() {
                 <tr>
                   <th style={{ width: "120px" }}>Student Code</th>
                   <th>Student Name</th>
+                  <th style={{ width: "120px", textAlign: "right" }}>Total Fee</th>
                   <th style={{ width: "100px", textAlign: "right" }}>Paid</th>
                   <th style={{ width: "100px", textAlign: "right" }}>Overdue</th>
                   <th style={{ width: "100px", textAlign: "right" }}>Pending</th>
@@ -231,6 +245,9 @@ export function CenterFeesDashboardTab() {
                     <td>{student.admissionNo || "—"}</td>
                     <td>
                       <strong>{student.firstName || ""} {student.lastName || ""}</strong>
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 600 }}>
+                      {student.totalFeeAmount == null ? "—" : `₹${formatMoney(student.totalFeeAmount)}`}
                     </td>
                     <td style={{ textAlign: "right", color: "var(--color-text-success)", fontWeight: 600 }}>
                       ₹{formatMoney(student.paidInRange || 0)}

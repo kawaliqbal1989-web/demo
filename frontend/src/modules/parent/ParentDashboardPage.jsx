@@ -9,6 +9,7 @@ import {
   getParentDashboardAchievements,
   getParentDashboardAttendance,
   getParentDashboardEngagement,
+  getParentFinancialSummary,
   getParentDashboardOverview,
   getParentDashboardReminders,
   getParentDashboardWorksheetProgress
@@ -43,6 +44,7 @@ function ParentDashboardPage() {
     engagement: null,
     achievements: null,
     reminders: null,
+    financial: null,
     meta: null
   });
   const [selectedStudentId, setSelectedStudentId] = useState("");
@@ -65,7 +67,8 @@ function ParentDashboardPage() {
           getParentDashboardWorksheetProgress(params),
           getParentDashboardEngagement(params),
           getParentDashboardAchievements(params),
-          getParentDashboardReminders({ ...params, limit: 8 })
+          getParentDashboardReminders({ ...params, limit: 8 }),
+          getParentFinancialSummary(params)
         ]);
 
         if (cancelled) {
@@ -78,6 +81,7 @@ function ParentDashboardPage() {
         const engagementEnvelope = unwrapEnvelope(responses[3]);
         const achievementsEnvelope = unwrapEnvelope(responses[4]);
         const remindersEnvelope = unwrapEnvelope(responses[5]);
+        const financialEnvelope = unwrapEnvelope(responses[6]);
 
         setDashboard({
           overview: overviewEnvelope.data,
@@ -86,6 +90,7 @@ function ParentDashboardPage() {
           engagement: engagementEnvelope.data,
           achievements: achievementsEnvelope.data,
           reminders: remindersEnvelope.data,
+          financial: financialEnvelope.data,
           meta: overviewEnvelope.meta
         });
       } catch {
@@ -117,6 +122,7 @@ function ParentDashboardPage() {
   const engagement = dashboard.engagement || { weakTopics: { items: [] }, examParticipation: { items: [] } };
   const achievements = dashboard.achievements?.achievements || { items: [], summary: {} };
   const reminders = dashboard.reminders || { items: [], unreadCount: 0, total: 0 };
+  const financial = dashboard.financial || { householdSummary: {}, childSummaries: [], reminders: [] };
 
   const activeStudentId = selectedStudentId || selectedStudent?.studentId || "";
 
@@ -201,11 +207,35 @@ function ParentDashboardPage() {
       </section>
 
       <div className="engagement-dashboard__metric-grid">
+        <MetricCard label="Household pending fees" value={`Rs ${Number(financial.householdSummary?.totalPending || 0).toLocaleString("en-IN")}`} sublabel={`${financial.householdSummary?.studentsWithPending || 0} children with pending fees`} icon="💳" accent="#b45309" />
+        <MetricCard label="Household overdue" value={`Rs ${Number(financial.householdSummary?.totalOverdue || 0).toLocaleString("en-IN")}`} sublabel={`${financial.householdSummary?.studentsWithOverdue || 0} children overdue`} icon="⚠️" accent="#dc2626" />
         <MetricCard label="Household summary" value={String(householdSummary.studentCount ?? linkedStudents.length ?? 0)} sublabel="Linked students" icon="🏠" accent="#0f766e" />
         <MetricCard label="Average engagement" value={formatScore(householdSummary.averageEngagementScore)} sublabel="Across visible students" icon="📈" accent="#2563eb" />
         <MetricCard label="At-risk students" value={String(householdSummary.atRiskStudents ?? 0)} sublabel="Engagement band at risk" icon="⚠️" accent="#dc2626" />
         <MetricCard label="Unread reminders" value={String(householdSummary.totalUnreadReminders ?? reminders.unreadCount ?? 0)} sublabel={`${reminders.total ?? 0} active reminders`} icon="🔔" accent="#7c3aed" />
       </div>
+
+      {Array.isArray(financial.reminders) && financial.reminders.length ? (
+        <section className="card" style={{ display: "grid", gap: 8 }}>
+          <div className="section-header">
+            <span className="section-header__text">Fee Alerts for Selected Child</span>
+          </div>
+          {financial.reminders.map((reminder) => (
+            <article
+              key={reminder.id}
+              style={{
+                borderRadius: 10,
+                padding: "10px 12px",
+                border: `1px solid ${reminder.severity === "critical" ? "#fecaca" : reminder.severity === "warning" ? "#fde68a" : "#bae6fd"}`,
+                background: reminder.severity === "critical" ? "#fff1f2" : reminder.severity === "warning" ? "#fffbeb" : "#f0f9ff"
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>{reminder.title}</div>
+              <div style={{ fontSize: 12, color: "#4b5563" }}>{reminder.message}</div>
+            </article>
+          ))}
+        </section>
+      ) : null}
 
       <div className="engagement-dashboard__content-grid">
         <div className="engagement-dashboard__content-main">
@@ -348,6 +378,22 @@ function ParentDashboardPage() {
                 </article>
               ))}
             </div>
+          </SectionCard>
+
+          <SectionCard title="Child fee snapshot" subtitle="Role-safe fee visibility across linked children.">
+            {Array.isArray(financial.childSummaries) && financial.childSummaries.length ? (
+              <div className="engagement-dashboard__table-list">
+                {financial.childSummaries.slice(0, 8).map((child) => (
+                  <div key={child.studentId} className="engagement-dashboard__table-row">
+                    <span>{child.studentName}</span>
+                    <strong>Rs {Number(child.totalPending || 0).toLocaleString("en-IN")}</strong>
+                    <span>{child.nextDue?.monthLabel || child.status || "No pending due"}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon="💳" title="Child fee snapshot" description="No fee dues are visible for linked students." />
+            )}
           </SectionCard>
         </div>
       </div>

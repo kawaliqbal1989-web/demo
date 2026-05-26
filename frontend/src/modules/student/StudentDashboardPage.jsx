@@ -8,6 +8,7 @@ import { SkeletonLoader } from "../../components/SkeletonLoader";
 import {
   getStudentDashboardAchievements,
   getStudentDashboardAttendanceTrends,
+  getStudentFinancialSummary,
   getStudentDashboardOverview,
   getStudentDashboardPracticeTrends,
   getStudentDashboardReminders,
@@ -36,6 +37,42 @@ function unwrapEnvelope(response) {
   };
 }
 
+function shouldShowFinancialReminder(reminder) {
+  if (!reminder?.dismissKey || !reminder?.reappearToken) {
+    return true;
+  }
+
+  try {
+    const raw = localStorage.getItem(`student_finance_reminder_${reminder.dismissKey}`);
+    if (!raw) {
+      return true;
+    }
+
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    const dismissedUntil = Number(parsed?.dismissedUntil || 0);
+    if (dismissedUntil > now && parsed?.reappearToken === reminder.reappearToken) {
+      return false;
+    }
+  } catch {
+    return true;
+  }
+
+  return true;
+}
+
+function dismissFinancialReminder(reminder) {
+  if (!reminder?.dismissKey || !reminder?.reappearToken) {
+    return;
+  }
+
+  const payload = {
+    reappearToken: reminder.reappearToken,
+    dismissedUntil: Date.now() + 6 * 60 * 60 * 1000
+  };
+  localStorage.setItem(`student_finance_reminder_${reminder.dismissKey}`, JSON.stringify(payload));
+}
+
 function StudentDashboardPage() {
   const [dashboard, setDashboard] = useState({
     overview: null,
@@ -45,6 +82,7 @@ function StudentDashboardPage() {
     attendance: null,
     weakTopics: null,
     reminders: null,
+    financial: null,
     meta: null
   });
   const [loading, setLoading] = useState(true);
@@ -66,7 +104,8 @@ function StudentDashboardPage() {
           getStudentDashboardPracticeTrends(),
           getStudentDashboardAttendanceTrends(),
           getStudentDashboardWeakTopics({ threshold: 60, lookback: 20 }),
-          getStudentDashboardReminders({ limit: 8 })
+          getStudentDashboardReminders({ limit: 8 }),
+          getStudentFinancialSummary()
         ]);
 
         if (cancelled) {
@@ -80,6 +119,7 @@ function StudentDashboardPage() {
         const attendanceEnvelope = unwrapEnvelope(responses[4]);
         const weakTopicsEnvelope = unwrapEnvelope(responses[5]);
         const remindersEnvelope = unwrapEnvelope(responses[6]);
+        const financialEnvelope = unwrapEnvelope(responses[7]);
 
         setDashboard({
           overview: overviewEnvelope.data,
@@ -89,6 +129,7 @@ function StudentDashboardPage() {
           attendance: attendanceEnvelope.data,
           weakTopics: weakTopicsEnvelope.data,
           reminders: remindersEnvelope.data,
+          financial: financialEnvelope.data,
           meta: overviewEnvelope.meta
         });
       } catch {
@@ -117,6 +158,8 @@ function StudentDashboardPage() {
   const attendance = dashboard.attendance || { items: [], summary: {} };
   const weakTopics = dashboard.weakTopics || { items: [], summary: {} };
   const reminders = dashboard.reminders || { items: [], total: 0, unreadCount: 0 };
+  const financial = dashboard.financial || { summary: {}, reminders: [], receipts: [], upcomingDues: [] };
+  const visibleFinancialReminders = (Array.isArray(financial.reminders) ? financial.reminders : []).filter(shouldShowFinancialReminder);
 
   const weeklyMomentumCards = useMemo(() => ([
     {
@@ -202,7 +245,52 @@ function StudentDashboardPage() {
         </div>
       </section>
 
+      {visibleFinancialReminders.length ? (
+        <section className="card" style={{ display: "grid", gap: 10 }}>
+          <div className="section-header">
+            <span className="section-header__text">Fee Reminders</span>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {visibleFinancialReminders.map((reminder) => (
+              <article
+                key={reminder.id}
+                style={{
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  border: `1px solid ${reminder.severity === "critical" ? "#fecaca" : reminder.severity === "warning" ? "#fde68a" : "#bae6fd"}`,
+                  background: reminder.severity === "critical" ? "#fff1f2" : reminder.severity === "warning" ? "#fffbeb" : "#f0f9ff",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  alignItems: "flex-start"
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>{reminder.title}</div>
+                  <div style={{ fontSize: 12, color: "#4b5563" }}>{reminder.message}</div>
+                </div>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ width: "auto", fontSize: 11, padding: "4px 8px" }}
+                  onClick={() => {
+                    dismissFinancialReminder(reminder);
+                    setRefreshToken((value) => value + 1);
+                  }}
+                >
+                  Dismiss
+                </button>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
       <div className="engagement-dashboard__metric-grid">
+        <MetricCard label="Pending fee" value={`Rs ${Number(financial.summary?.totalPending || 0).toLocaleString("en-IN")}`} sublabel={financial.summary?.nextDue?.monthLabel || "No upcoming due"} icon="💳" accent="#b45309" />
+        <MetricCard label="Overdue" value={`Rs ${Number(financial.summary?.totalOverdue || 0).toLocaleString("en-IN")}`} sublabel={Number(financial.summary?.totalOverdue || 0) > 0 ? "Immediate action required" : "No overdue dues"} icon="⚠️" accent="#dc2626" />
+        <MetricCard label="Waived months" value={String(financial.summary?.waivedMonths || 0)} sublabel={`${financial.summary?.pausedMonths || 0} paused months`} icon="🛡️" accent="#0369a1" />
+        <MetricCard label="Latest payment" value={financial.latestPayment?.amount ? `Rs ${Number(financial.latestPayment.amount).toLocaleString("en-IN")}` : "-"} sublabel={financial.latestPayment?.paidAt ? formatDate(financial.latestPayment.paidAt) : "No recent payment"} icon="🧾" accent="#047857" />
         <MetricCard label="Engagement band" value={formatBandLabel(overview.engagementBand)} sublabel={`${formatScore(overview.engagementScore)} / 100`} icon="⚡" accent="#0f766e" />
         <MetricCard label="Daily streak" value={`${streaks?.practice?.current ?? 0} days`} sublabel={`Target ${streaks?.practice?.target ?? 14} days`} icon="🔥" accent="#ea580c" />
         <MetricCard label="Attendance consistency" value={formatPercent(attendance.summary?.attendanceRate)} sublabel={`${attendance.summary?.presentCount ?? 0} present of ${attendance.summary?.totalSessions ?? 0}`} icon="🗓️" accent="#2563eb" />
@@ -368,6 +456,26 @@ function StudentDashboardPage() {
               emptyTitle="Operational reminders"
               emptyDescription="No student engagement reminders need your attention right now."
             />
+          </SectionCard>
+
+          <SectionCard
+            title="Recent receipts"
+            subtitle="Immutable receipt history from your recorded fee transactions."
+            aside={<Link to="/student/fees" className="button secondary" style={{ width: "auto" }}>Open fee details</Link>}
+          >
+            {Array.isArray(financial.receipts) && financial.receipts.length ? (
+              <div className="engagement-dashboard__table-list">
+                {financial.receipts.slice(0, 5).map((receipt) => (
+                  <div key={receipt.id} className="engagement-dashboard__table-row">
+                    <span>{receipt.receiptNumber || "Receipt"}</span>
+                    <strong>Rs {Number(receipt.amount || 0).toLocaleString("en-IN")}</strong>
+                    <span>{formatDate(receipt.collectedAt)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon="🧾" title="Recent receipts" description="No receipts available yet." />
+            )}
           </SectionCard>
         </div>
       </div>

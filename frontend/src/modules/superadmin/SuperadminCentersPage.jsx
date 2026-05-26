@@ -369,18 +369,6 @@ function SuperadminCentersPage() {
         maxTeachers: Number(capacityForm.maxTeachers)
       });
       toast.success("Center capacity updated.");
-      
-      // Refresh capacity data immediately after save to ensure frontend shows persisted values
-      try {
-        const refreshedResponse = await getBpCenterCapacitySummary({ centerId: capacityCenter.profileId, limit: 1, offset: 0 });
-        const refreshedSnapshot = refreshedResponse?.data?.items?.[0] || null;
-        if (refreshedSnapshot) {
-          setCapacitySummary(refreshedSnapshot);
-        }
-      } catch (refreshErr) {
-        // Silent fail on refresh - capacity save was already successful
-      }
-      
       closeCapacityModal({ force: true });
     } catch (err) {
       const message = getFriendlyErrorMessage(err) || "Failed to update center capacity.";
@@ -430,14 +418,15 @@ function SuperadminCentersPage() {
     setBrandingSaving(true);
     setBrandingMessage("");
     try {
-      await saUpdateCenterBranding(selectedCenterId, {
+      const result = await saUpdateCenterBranding(selectedCenterId, {
         ...brandingForm,
         customBrandName: brandingForm.customBrandName.trim(),
         customLogoUrl: brandingForm.customLogoUrl.trim(),
         brandingNotes: brandingForm.brandingNotes.trim()
       });
-
-      await refreshSelectedCenterDetail(selectedCenterId);
+      const detail = result?.data || null;
+      setSelectedCenterDetail(detail);
+      applyBrandingForm(detail);
       setBrandingMessage("Center branding updated.");
     } catch (err) {
       setBrandingMessage(getFriendlyErrorMessage(err) || "Failed to save center branding.");
@@ -470,7 +459,7 @@ function SuperadminCentersPage() {
     return true;
   };
 
-  const canRemoveCenterLogo = Boolean(selectedCenterDetail?.customLogoUrl || selectedCenterDetail?.logoFilePath || selectedCenterDetail?.logoUrl);
+  const canRemoveCenterLogo = Boolean(selectedCenterDetail?.customLogoUrl || selectedCenterDetail?.logoFilePath);
   const effectiveCenterLogoPreviewUrl = selectedCenterDetail?.customLogoUrl
     || selectedCenterDetail?.effectiveBranding?.logoUrl
     || selectedCenterDetail?.logoUrl

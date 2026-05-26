@@ -6,7 +6,6 @@ import {
   upsertCenterCapacity
 } from "../services/capacity/capacity.service.js";
 import { normalizeCapacityPatchInput } from "../services/capacity/capacity.validation.js";
-import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 
 const patchCenterCapacity = asyncHandler(async (req, res) => {
   const data = await upsertCenterCapacity({
@@ -36,10 +35,6 @@ const getBpCenterCapacitySummary = asyncHandler(async (req, res) => {
 
     return res.apiSuccess("Center capacity summary fetched", data);
   } catch (error) {
-    if (!isSchemaMismatchError(error, ["centercapacity", "centerprofile", "center_capacity"])) {
-      throw error;
-    }
-
     return res.apiSuccess("Center capacity summary fetched", {
       items: [],
       pagination: {

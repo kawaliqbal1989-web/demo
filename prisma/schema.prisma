@@ -252,6 +252,11 @@ enum FinancialTransactionType {
 
 enum PaymentMode {
   CASH
+  UPI
+  BANK_TRANSFER
+  CARD
+  CHEQUE
+  ONLINE_GATEWAY
   ONLINE
   GPAY
   PAYTM
@@ -682,11 +687,18 @@ model Tenant {
   teacherOperationalWorkflowHistories TeacherOperationalWorkflowHistory[]
   teacherOperationalWorkflowTasks  TeacherOperationalWorkflowTask[]
   financialTransactions            FinancialTransaction[]
+  receiptSequences                 ReceiptSequence[]
+  paymentReceipts                  PaymentReceipt[]
+  paymentTransactions              PaymentTransaction[]
+  receiptAllocations               ReceiptAllocation[]
+  refundTransactions               RefundTransaction[]
+  receiptAuditLogs                 ReceiptAuditLog[]
   settlementWorkflowHistories      SettlementWorkflowHistory[]
   settlementWorkflowTasks          SettlementWorkflowTask[]
   settlementEscalations            SettlementEscalation[]
   settlementSupportingRecords      SettlementSupportingRecord[]
   feeInstallments                  StudentFeeInstallment[]
+  feeMonthAdjustments              StudentFeeMonthAdjustment[]
   certificates                     Certificate[]
   franchiseProfiles                FranchiseProfile[]
   franchiseAddresses               FranchiseAddress[]
@@ -792,9 +804,15 @@ model AuthUser {
   settlementWorkflowHistoryActions SettlementWorkflowHistory[]    @relation("SettlementWorkflowHistoryActor")
   settlementWorkflowTasks        SettlementWorkflowTask[]         @relation("SettlementWorkflowTaskTargetUser")
   settlementSupportingRecords    SettlementSupportingRecord[]     @relation("SettlementSupportingRecordUploadedBy")
+  createdFeeMonthAdjustments     StudentFeeMonthAdjustment[]      @relation("StudentFeeMonthAdjustmentCreatedBy")
   superadminProfile              Superadmin?
   promotedProgressions           StudentLevelProgressionHistory[]
   financialTransactions          FinancialTransaction[]
+  paymentReceiptsCollected       PaymentReceipt[]                 @relation("PaymentReceiptCollectedBy")
+  paymentReceiptsCancelled       PaymentReceipt[]                 @relation("PaymentReceiptCancelledBy")
+  paymentTransactionsCreated     PaymentTransaction[]             @relation("PaymentTransactionCreatedBy")
+  refundTransactionsProcessed    RefundTransaction[]              @relation("RefundTransactionProcessedBy")
+  receiptAuditLogs               ReceiptAuditLog[]                @relation("ReceiptAuditActor")
   certificatesIssued             Certificate[]                    @relation("CertificateIssuedBy")
   certificatesRevoked            Certificate[]                    @relation("CertificateRevokedBy")
   approvedCenterBranding         CenterProfile[]                  @relation("CenterBrandingApprovedBy")
@@ -1059,6 +1077,10 @@ model HierarchyNode {
   partners              BusinessPartner[]
   centerTransactions    FinancialTransaction[] @relation("FinancialCenter")
   franchiseTransactions FinancialTransaction[] @relation("FinancialFranchise")
+  receiptSequences      ReceiptSequence[]
+  paymentReceipts       PaymentReceipt[]
+  paymentTransactions   PaymentTransaction[]
+  refundTransactions    RefundTransaction[]
   batches               Batch[]
   enrollments           Enrollment[]
   attendanceSessions    AttendanceSession[]
@@ -1425,6 +1447,10 @@ model Student {
   progressionHistory    StudentLevelProgressionHistory[]
   abuseFlags            AbuseFlag[]
   financialTransactions FinancialTransaction[]
+  paymentReceipts       PaymentReceipt[]
+  paymentTransactions   PaymentTransaction[]
+  receiptAllocations    ReceiptAllocation[]
+  refundTransactions    RefundTransaction[]
   certificates          Certificate[]
   batchEnrollments      Enrollment[]
   attendanceEntries     AttendanceEntry[]
@@ -1434,6 +1460,7 @@ model Student {
   worksheetAssignments  WorksheetAssignment[]
 
   feeInstallments StudentFeeInstallment[]
+  feeMonthAdjustments StudentFeeMonthAdjustment[]
 
   currentTeacher AuthUser? @relation("StudentCurrentTeacher", fields: [currentTeacherUserId], references: [id], onDelete: SetNull)
 
@@ -1481,22 +1508,74 @@ enum InstallmentStatus {
   OVERDUE
 }
 
+enum FeeMonthAdjustmentType {
+  WAIVED
+  PAUSED
+}
+
+enum PaymentReceiptStatus {
+  ACTIVE
+  PARTIALLY_REFUNDED
+  REFUNDED
+  CANCELLED
+}
+
+enum ReceiptAllocationType {
+  DUE
+  OVERPAYMENT
+  REVERSAL
+}
+
+enum ReceiptAuditAction {
+  CREATED
+  ALLOCATED
+  REFUNDED
+  CANCELLED
+  PDF_RENDERED
+}
+
 model StudentFeeInstallment {
   id        String   @id @default(cuid())
   tenantId  String
   studentId String
   amount    Decimal  @db.Decimal(10, 2)
   dueDate   DateTime
+  isRecurringMonthly Boolean  @default(false)
+  recurrenceEndDate  DateTime?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   tenant   Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   student  Student                @relation(fields: [studentId], references: [id], onDelete: Cascade)
   payments FinancialTransaction[]
+  receiptAllocations ReceiptAllocation[]
 
   @@index([tenantId, studentId, dueDate])
+  @@index([tenantId, studentId, isRecurringMonthly, dueDate], map: "sfi_tenant_student_recur_due_idx")
   @@index([studentId])
    @@map("studentfeeinstallment")
+}
+
+model StudentFeeMonthAdjustment {
+  id              String                 @id @default(cuid())
+  tenantId        String
+  studentId       String
+  year            Int
+  month           Int
+  adjustmentType  FeeMonthAdjustmentType
+  remarks         String                 @db.Text
+  createdByUserId String
+  createdAt       DateTime               @default(now())
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student   Student  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  createdBy AuthUser @relation("StudentFeeMonthAdjustmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, studentId, year, month], map: "sfma_tenant_student_month_uq")
+  @@index([tenantId, studentId, createdAt], map: "sfma_tenant_student_ct_idx")
+  @@index([tenantId, year, month], map: "sfma_tenant_year_month_idx")
+  @@index([createdByUserId, createdAt], map: "sfma_actor_ct_idx")
+  @@map("studentfeemonthadjustment")
 }
 
 model AbuseFlag {
@@ -3035,12 +3114,177 @@ model FinancialTransaction {
   settlement      Settlement?            @relation(fields: [settlementId], references: [id], onDelete: SetNull)
   feeLevel        Level?                 @relation(fields: [feeLevelId], references: [id], onDelete: SetNull)
   installment     StudentFeeInstallment? @relation(fields: [installmentId], references: [id], onDelete: SetNull)
+  paymentTransaction PaymentTransaction?
 
   @@index([tenantId, createdAt])
   @@index([tenantId, type, createdAt])
   @@index([studentId, createdAt])
   @@index([settlementId])
     @@map("financialtransaction")
+}
+
+model ReceiptSequence {
+  id            String   @id @default(cuid())
+  tenantId      String
+  centerId      String
+  financialYear Int
+  prefix        String
+  lastNumber    Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  center HierarchyNode @relation(fields: [centerId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, centerId, financialYear, prefix], map: "receiptsequence_scope_uq")
+  @@index([tenantId, centerId, financialYear], map: "receiptsequence_scope_idx")
+  @@map("receiptsequence")
+}
+
+model PaymentReceipt {
+  id               String               @id @default(cuid())
+  tenantId         String
+  centerId         String
+  studentId        String
+  receiptNumber    String
+  financialYear    Int
+  sequenceNumber   Int
+  prefix           String
+  status           PaymentReceiptStatus @default(ACTIVE)
+  paymentMode      PaymentMode
+  totalAmount      Decimal              @db.Decimal(10, 2)
+  allocatedAmount  Decimal              @db.Decimal(10, 2)
+  unallocatedAmount Decimal             @db.Decimal(10, 2)
+  referenceNumber  String?
+  transactionId    String?
+  notes            String?              @db.Text
+  collectedAt      DateTime
+  collectedByUserId String
+  cancelledAt      DateTime?
+  cancelledByUserId String?
+  cancelReason     String?              @db.Text
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  center      HierarchyNode @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  student     Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  collectedBy AuthUser     @relation("PaymentReceiptCollectedBy", fields: [collectedByUserId], references: [id], onDelete: Restrict)
+  cancelledBy AuthUser?    @relation("PaymentReceiptCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: SetNull)
+
+  paymentTransactions PaymentTransaction[]
+  allocations         ReceiptAllocation[]
+  refunds             RefundTransaction[]
+  auditLogs           ReceiptAuditLog[]
+
+  @@unique([tenantId, receiptNumber], map: "paymentreceipt_tenant_receipt_uq")
+  @@index([tenantId, centerId, createdAt], map: "paymentreceipt_tenant_center_ct_idx")
+  @@index([tenantId, studentId, createdAt], map: "paymentreceipt_tenant_student_ct_idx")
+  @@index([tenantId, status, createdAt], map: "paymentreceipt_tenant_status_ct_idx")
+  @@map("paymentreceipt")
+}
+
+model PaymentTransaction {
+  id                   String    @id @default(cuid())
+  tenantId             String
+  receiptId            String
+  financialTransactionId String?
+  studentId            String
+  centerId             String
+  amount               Decimal   @db.Decimal(10, 2)
+  paymentMode          PaymentMode
+  referenceNumber      String?
+  transactionId        String?
+  collectedAt          DateTime
+  createdByUserId      String
+  createdAt            DateTime  @default(now())
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  receipt PaymentReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  student Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  center HierarchyNode @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  createdBy AuthUser   @relation("PaymentTransactionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  financialTransaction FinancialTransaction? @relation(fields: [financialTransactionId], references: [id], onDelete: SetNull)
+
+  @@unique([financialTransactionId], map: "paymenttransaction_financial_uq")
+  @@index([tenantId, centerId, createdAt], map: "paymenttransaction_tenant_center_ct_idx")
+  @@index([tenantId, studentId, createdAt], map: "paymenttransaction_tenant_student_ct_idx")
+  @@map("paymenttransaction")
+}
+
+model ReceiptAllocation {
+  id                    String                @id @default(cuid())
+  tenantId              String
+  receiptId             String
+  studentId             String
+  allocationType        ReceiptAllocationType @default(DUE)
+  sourceInstallmentId   String?
+  dueDate               DateTime?
+  dueYear               Int?
+  dueMonth              Int?
+  dueStatusBefore       String?
+  duePendingBefore      Decimal?              @db.Decimal(10, 2)
+  allocatedAmount       Decimal               @db.Decimal(10, 2)
+  duePendingAfter       Decimal?              @db.Decimal(10, 2)
+  reversalOfAllocationId String?
+  createdAt             DateTime              @default(now())
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  receipt PaymentReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  student Student       @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  sourceInstallment StudentFeeInstallment? @relation(fields: [sourceInstallmentId], references: [id], onDelete: SetNull)
+  reversalOfAllocation ReceiptAllocation? @relation("ReceiptAllocationReversal", fields: [reversalOfAllocationId], references: [id], onDelete: SetNull)
+  reversalEntries ReceiptAllocation[] @relation("ReceiptAllocationReversal")
+
+  @@index([tenantId, receiptId, createdAt], map: "receiptallocation_receipt_ct_idx")
+  @@index([tenantId, studentId, createdAt], map: "receiptallocation_student_ct_idx")
+  @@index([sourceInstallmentId], map: "receiptallocation_installment_idx")
+  @@map("receiptallocation")
+}
+
+model RefundTransaction {
+  id                String              @id @default(cuid())
+  tenantId          String
+  receiptId         String
+  studentId         String
+  centerId          String
+  amount            Decimal             @db.Decimal(10, 2)
+  paymentMode       PaymentMode
+  referenceNumber   String?
+  transactionId     String?
+  reason            String              @db.Text
+  processedAt       DateTime
+  processedByUserId String
+  createdAt         DateTime            @default(now())
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  receipt     PaymentReceipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  student     Student      @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  center      HierarchyNode @relation(fields: [centerId], references: [id], onDelete: Restrict)
+  processedBy AuthUser     @relation("RefundTransactionProcessedBy", fields: [processedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, centerId, processedAt], map: "refundtransaction_center_pt_idx")
+  @@index([tenantId, studentId, processedAt], map: "refundtransaction_student_pt_idx")
+  @@index([tenantId, receiptId, processedAt], map: "refundtransaction_receipt_pt_idx")
+  @@map("refundtransaction")
+}
+
+model ReceiptAuditLog {
+  id          String            @id @default(cuid())
+  tenantId    String
+  receiptId   String
+  actorUserId String?
+  action      ReceiptAuditAction
+  metadata    Json?
+  createdAt   DateTime          @default(now())
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  receipt  PaymentReceipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  actor    AuthUser?     @relation("ReceiptAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, receiptId, createdAt], map: "receiptauditlog_receipt_ct_idx")
+  @@index([actorUserId, createdAt], map: "receiptauditlog_actor_ct_idx")
+  @@map("receiptauditlog")
 }
 
 model SettlementWorkflowHistory {

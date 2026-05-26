@@ -460,11 +460,14 @@ function getStudentExportWhere(req) {
   }
 
   const teacherUserId = req.query.teacherUserId ? String(req.query.teacherUserId) : "";
-  if (teacherUserId) {
+  const batchId = req.query.batchId ? String(req.query.batchId) : "";
+  
+  if (teacherUserId || batchId) {
     where.batchEnrollments = {
       some: {
         status: "ACTIVE",
-        assignedTeacherUserId: teacherUserId
+        ...(teacherUserId ? { assignedTeacherUserId: teacherUserId } : {}),
+        ...(batchId ? { batchId: batchId } : {})
       }
     };
   }
@@ -484,7 +487,6 @@ function getStudentExportWhere(req) {
 const STUDENT_EXPORT_COLUMNS = [
   { key: "admissionNo", header: "Admission No" },
   { key: "fullName", header: "Full Name" },
-  { key: "gender", header: "Gender" },
   { key: "dateOfBirth", header: "Date Of Birth" },
   { key: "email", header: "Student Email" },
   { key: "guardianName", header: "Guardian Name" },
@@ -530,7 +532,6 @@ async function buildDetailedStudentExportRows(where) {
     admissionNo: true,
     firstName: true,
     lastName: true,
-    gender: true,
     email: true,
     dateOfBirth: true,
     guardianName: true,
@@ -688,7 +689,6 @@ async function buildDetailedStudentExportRows(where) {
     return {
       admissionNo: student.admissionNo || "",
       fullName: `${student.firstName || ""} ${student.lastName || ""}`.trim(),
-      gender: student.gender || "",
       dateOfBirth: student.dateOfBirth ? student.dateOfBirth.toISOString().slice(0, 10) : "",
       email: student.email || "",
       guardianName: student.guardianName || "",
@@ -1000,11 +1000,14 @@ const listStudents = asyncHandler(async (req, res) => {
   }
 
   const teacherUserId = req.query.teacherUserId ? String(req.query.teacherUserId) : "";
-  if (teacherUserId) {
+  const batchId = req.query.batchId ? String(req.query.batchId) : "";
+  
+  if (teacherUserId || batchId) {
     where.batchEnrollments = {
       some: {
         status: "ACTIVE",
-        assignedTeacherUserId: teacherUserId
+        ...(teacherUserId ? { assignedTeacherUserId: teacherUserId } : {}),
+        ...(batchId ? { batchId: batchId } : {})
       }
     };
   }
@@ -1089,6 +1092,16 @@ const listStudents = asyncHandler(async (req, res) => {
   }
 
   data = data.map((student) => withEffectiveStudentLevel(student));
+
+  // Add batch name to student object
+  data = data.map((student) => {
+    const activeBatch = student.batchEnrollments && student.batchEnrollments[0];
+    return {
+      ...student,
+      batchName: activeBatch?.batch?.name || null,
+      batchId: activeBatch?.batch?.id || null
+    };
+  });
 
   res.setHeader("X-Pagination-Limit", String(limit));
   res.setHeader("X-Pagination-Offset", String(offset));

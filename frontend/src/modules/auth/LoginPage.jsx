@@ -68,7 +68,7 @@ function LoginPage() {
             <form className="login-form-body" onSubmit={onSubmit} noValidate>
               <div className="login-field">
                 <label htmlFor="username" className="login-label">
-                  Username
+                  Username or Email
                 </label>
                 <div className="login-input-wrap">
                   <span className="login-input-icon" aria-hidden="true">
@@ -81,7 +81,7 @@ function LoginPage() {
                     id="username"
                     name="username"
                     className="input login-input"
-                    placeholder="Enter username"
+                    placeholder="Enter username or email"
                     autoComplete="username"
                     value={username}
                     onChange={(event) => setUsername(event.target.value.toUpperCase())}

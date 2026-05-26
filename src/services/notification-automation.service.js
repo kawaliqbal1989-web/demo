@@ -1,24 +1,6 @@
 import { prisma } from "../lib/prisma.js";
-function isNotificationStorageMissingError(error) {
-  const code = String(error?.code || "");
-  if (!["P2021", "P2022", "P2010"].includes(code)) {
-    return false;
-  }
-
-  const modelName = String(error?.meta?.modelName || "").toLowerCase();
-  const table = String(error?.meta?.table || "").toLowerCase();
-  const message = String(error?.message || "").toLowerCase();
-
-  return (
-    modelName.includes("notification") ||
-    table.includes("notification") ||
-    message.includes("notification") ||
-    message.includes("unknown column") ||
-    message.includes("does not exist")
-  );
-}
-
-import { getCenterHealthScore, getAttendanceAnomalies, getFeeCollectionPulse, getTeacherWorkload } from "./leadership-intel.service.js";
+import { getCenterHealthScore, getAttendanceAnomalies, getTeacherWorkload } from "./leadership-intel.service.js";
+import { computeFeeTimelinesForStudents } from "./student-fee-due.service.js";
 
 /**
  * Notification Automation Engine
@@ -46,13 +28,57 @@ function getStudentName(student) {
   return [student?.firstName, student?.lastName].filter(Boolean).join(" ") || student?.admissionNo || "Student";
 }
 
-function getOutstandingAmount(installment) {
-  const amount = Number(installment?.amount || 0);
-  const paid = Array.isArray(installment?.payments)
-    ? installment.payments.reduce((sum, payment) => sum + Number(payment.grossAmount || 0), 0)
-    : 0;
+function toSafeNumber(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === "bigint") return Number(value);
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
 
-  return Math.max(0, amount - paid);
+function roundMoney(value) {
+  return Number(toSafeNumber(value).toFixed(2));
+}
+
+function startOfDay(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+}
+
+function addDays(value, days) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+async function computeTimelinesByStudentChunked({ tenantId, studentIds, asOf }) {
+  const ids = Array.from(new Set((studentIds || []).map((id) => String(id).trim()).filter(Boolean)));
+  const result = new Map();
+
+  if (!ids.length) {
+    return result;
+  }
+
+  for (const chunk of chunkArray(ids, 200)) {
+    const partial = await computeFeeTimelinesForStudents({
+      tenantId,
+      studentIds: chunk,
+      asOf
+    });
+
+    for (const [studentId, timeline] of partial.entries()) {
+      result.set(String(studentId), timeline);
+    }
+  }
+
+  return result;
 }
 
 async function isDuplicate(tenantId, recipientUserId, type, entityId) {
@@ -255,51 +281,111 @@ async function runRiskAlertRule(tenantId) {
 async function runFeeOverdueRule(tenantId) {
   const generated = [];
 
-  const overdueInstallments = await prisma.studentFeeInstallment.findMany({
-    where: {
-      tenantId,
-      dueDate: { lt: new Date() }
-    },
+  const centers = await prisma.centerProfile.findMany({
+    where: { tenantId, isActive: true },
     select: {
       id: true,
-      amount: true,
-      dueDate: true,
-      payments: { select: { grossAmount: true } },
-      studentId: true,
-      student: { select: { firstName: true, lastName: true, hierarchyNodeId: true } }
-    },
-    orderBy: { dueDate: "asc" },
-    take: 200
+      code: true,
+      name: true,
+      displayName: true,
+      authUser: {
+        select: {
+          hierarchyNodeId: true
+        }
+      }
+    }
   });
 
-  const centerGroups = {};
-  for (const inst of overdueInstallments) {
-    const outstanding = getOutstandingAmount(inst);
-    if (outstanding <= 0) continue;
-    const nodeId = inst.student?.hierarchyNodeId;
-    if (!nodeId) continue;
-    if (!centerGroups[nodeId]) centerGroups[nodeId] = [];
-    centerGroups[nodeId].push({ ...inst, outstandingAmount: outstanding });
-  }
+  for (const center of centers) {
+    const centerNodeId = getCenterNodeId(center);
+    if (!centerNodeId) {
+      continue;
+    }
 
-  for (const [nodeId, installments] of Object.entries(centerGroups)) {
-    const totalOverdue = installments.reduce((sum, installment) => sum + Number(installment.outstandingAmount || 0), 0);
+    const students = await prisma.student.findMany({
+      where: {
+        tenantId,
+        hierarchyNodeId: centerNodeId,
+        isActive: true
+      },
+      select: {
+        id: true
+      }
+    });
+
+    const studentIds = students.map((row) => String(row.id));
+    if (!studentIds.length) {
+      continue;
+    }
+
+    const timelinesByStudent = await computeTimelinesByStudentChunked({
+      tenantId,
+      studentIds,
+      asOf: new Date()
+    });
+
+    let totalOverdueAmount = 0;
+    let overdueDueCount = 0;
+    let oldestOverdueDate = null;
+
+    for (const timeline of timelinesByStudent.values()) {
+      for (const due of timeline.dues || []) {
+        if (String(due.status || "").toUpperCase() !== "OVERDUE") continue;
+
+        const pending = roundMoney(due.pending);
+        if (pending <= 0) continue;
+
+        totalOverdueAmount = roundMoney(totalOverdueAmount + pending);
+        overdueDueCount += 1;
+
+        const dueDate = due.dueDate instanceof Date ? due.dueDate : new Date(due.dueDate);
+        if (!oldestOverdueDate || dueDate.getTime() < oldestOverdueDate.getTime()) {
+          oldestOverdueDate = dueDate;
+        }
+      }
+    }
+
+    if (totalOverdueAmount <= 0 || overdueDueCount <= 0) {
+      continue;
+    }
+
     const centerAdmins = await prisma.authUser.findMany({
-      where: { tenantId, hierarchyNodeId: nodeId, role: "CENTER", isActive: true },
+      where: { tenantId, hierarchyNodeId: centerNodeId, role: "CENTER", isActive: true },
       select: { id: true }
     });
 
-    for (const admin of centerAdmins) {
+    const centerNode = await prisma.hierarchyNode.findUnique({
+      where: { id: centerNodeId },
+      select: { parentId: true }
+    });
+
+    const franchiseUsers = centerNode?.parentId
+      ? await prisma.authUser.findMany({
+          where: {
+            tenantId,
+            hierarchyNodeId: centerNode.parentId,
+            role: { in: ["FRANCHISE", "BP"] },
+            isActive: true
+          },
+          select: { id: true }
+        })
+      : [];
+
+    const recipients = [...centerAdmins, ...franchiseUsers];
+    const centerName = getCenterName(center);
+    const oldestDueText = oldestOverdueDate ? oldestOverdueDate.toLocaleDateString() : "N/A";
+
+    for (const recipient of recipients) {
       generated.push({
         tenantId,
-        recipientUserId: admin.id,
+        recipientUserId: recipient.id,
         type: "FEE_OVERDUE",
-        priority: totalOverdue > 50000 ? "HIGH" : "NORMAL",
+        priority: totalOverdueAmount > 50000 ? "HIGH" : "NORMAL",
         category: "FINANCE",
         title: "Fee Overdue Alert",
-        message: `${installments.length} overdue installments totaling ₹${totalOverdue.toLocaleString("en-IN")}. Oldest due: ${installments[0].dueDate.toLocaleDateString()}.`,
+        message: `${centerName} has ${overdueDueCount} overdue due item${overdueDueCount > 1 ? "s" : ""} totaling ₹${totalOverdueAmount.toLocaleString("en-IN")}. Oldest due: ${oldestDueText}.`,
         entityType: "FEE_COLLECTION",
-        entityId: nodeId,
+        entityId: centerNodeId,
         expiresAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000)
       });
     }
@@ -312,39 +398,82 @@ async function runFeeOverdueRule(tenantId) {
 // Notifies students about fees due within 7 days
 async function runFeeUpcomingRule(tenantId) {
   const generated = [];
-  const sevenDaysOut = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const today = startOfDay(new Date());
+  const sevenDaysOut = addDays(today, 7);
 
-  const upcoming = await prisma.studentFeeInstallment.findMany({
+  const students = await prisma.student.findMany({
     where: {
       tenantId,
-      dueDate: { gte: new Date(), lte: sevenDaysOut }
-    },
-    select: {
-      id: true,
-      amount: true,
-      dueDate: true,
-      payments: { select: { grossAmount: true } },
-      studentId: true,
-      student: {
-        select: {
-          firstName: true,
-          lastName: true,
-          authUsers: {
-            where: { tenantId, role: "STUDENT", isActive: true },
-            select: { id: true },
-            take: 1
-          }
+      isActive: true,
+      authUsers: {
+        some: {
+          tenantId,
+          role: "STUDENT",
+          isActive: true
         }
       }
     },
-    take: 500
+    select: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      admissionNo: true,
+      authUsers: {
+        where: {
+          tenantId,
+          role: "STUDENT",
+          isActive: true
+        },
+        select: {
+          id: true
+        },
+        take: 1
+      }
+    }
   });
 
-  for (const inst of upcoming) {
-    if (getOutstandingAmount(inst) <= 0) continue;
-    const recipientUserId = inst.student?.authUsers?.[0]?.id;
+  const studentIds = students.map((row) => String(row.id));
+  const timelinesByStudent = await computeTimelinesByStudentChunked({
+    tenantId,
+    studentIds,
+    asOf: sevenDaysOut
+  });
+
+  for (const student of students) {
+    const recipientUserId = student.authUsers?.[0]?.id;
     if (!recipientUserId) continue;
-    const daysLeft = Math.ceil((inst.dueDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+
+    const timeline = timelinesByStudent.get(String(student.id));
+    if (!timeline) continue;
+
+    const upcomingRows = (timeline.dues || []).filter((due) => {
+      const pending = roundMoney(due.pending);
+      if (pending <= 0) return false;
+
+      const dueDate = due.dueDate instanceof Date ? due.dueDate : new Date(due.dueDate);
+      return dueDate.getTime() >= today.getTime() && dueDate.getTime() <= sevenDaysOut.getTime();
+    });
+
+    if (!upcomingRows.length) continue;
+
+    let nextDueDate = null;
+    let totalUpcomingAmount = 0;
+
+    for (const due of upcomingRows) {
+      const pending = roundMoney(due.pending);
+      totalUpcomingAmount = roundMoney(totalUpcomingAmount + pending);
+
+      const dueDate = due.dueDate instanceof Date ? due.dueDate : new Date(due.dueDate);
+      if (!nextDueDate || dueDate.getTime() < nextDueDate.getTime()) {
+        nextDueDate = dueDate;
+      }
+    }
+
+    if (!nextDueDate || totalUpcomingAmount <= 0) continue;
+
+    const diffMs = nextDueDate.getTime() - Date.now();
+    const daysLeft = Math.max(0, Math.ceil(diffMs / (24 * 60 * 60 * 1000)));
+
     generated.push({
       tenantId,
       recipientUserId,
@@ -352,10 +481,10 @@ async function runFeeUpcomingRule(tenantId) {
       priority: daysLeft <= 2 ? "HIGH" : "NORMAL",
       category: "FINANCE",
       title: "Fee Due Soon",
-      message: `Your fee installment of ₹${Number(inst.amount).toLocaleString("en-IN")} is due in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}.`,
-      entityType: "FEE_INSTALLMENT",
-      entityId: inst.id,
-      expiresAt: inst.dueDate
+      message: `₹${totalUpcomingAmount.toLocaleString("en-IN")} is due in ${daysLeft} day${daysLeft !== 1 ? "s" : ""} across ${upcomingRows.length} installment${upcomingRows.length !== 1 ? "s" : ""}.`,
+      entityType: "STUDENT",
+      entityId: String(student.id),
+      expiresAt: nextDueDate
     });
   }
 
@@ -623,26 +752,14 @@ async function runAllAutomationRules(tenantId) {
 
 // ── Cleanup: Remove expired notifications ──
 async function cleanupExpiredNotifications(tenantId) {
-  try {
-    const result = await prisma.notification.deleteMany({
-      where: {
-        tenantId,
-        expiresAt: { not: null, lt: new Date() },
-        isRead: true
-      }
-    });
-    return { deleted: result.count };
-  } catch (error) {
-    if (!isNotificationStorageMissingError(error)) {
-      throw error;
+  const result = await prisma.notification.deleteMany({
+    where: {
+      tenantId,
+      expiresAt: { not: null, lt: new Date() },
+      isRead: true
     }
-
-    return {
-      deleted: 0,
-      skipped: true,
-      reason: "NOTIFICATION_STORAGE_UNAVAILABLE"
-    };
-  }
+  });
+  return { deleted: result.count };
 }
 
 // ── Notification Preferences ──

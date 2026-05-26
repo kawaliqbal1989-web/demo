@@ -59,6 +59,16 @@ async function listMyStudents({ q = "" } = {}) {
   return response.data;
 }
 
+async function getTeacherFinancialOverview({ limit = 25, offset = 0 } = {}) {
+  const response = await apiClient.get("/teacher/dashboard/financial-overview", {
+    params: {
+      limit,
+      offset
+    }
+  });
+  return response.data;
+}
+
 async function getStudent(studentId) {
   const response = await apiClient.get(`/teacher/students/${studentId}`);
   return response.data;
@@ -320,6 +330,7 @@ async function getStudent360(studentId) {
 
 export {
   getTeacherMe,
+  getTeacherFinancialOverview,
   updateTeacherProfile,
   listMyBatches,
   getBatchRoster,

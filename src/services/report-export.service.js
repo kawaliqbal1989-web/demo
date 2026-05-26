@@ -6,17 +6,6 @@ import { resolveCenterOperationalScope } from "./center-operational-analytics.se
 
 const EXPORT_BATCH_SIZE = 500;
 const EXPORT_ARTIFACT_ROOT = path.resolve(process.cwd(), "uploads", "report-exports");
-const WORKFLOW_LIFECYCLE_SCHEMA_TOKENS = Object.freeze([
-  "franchiseoperationalworkflow",
-  "franchiseoperationalworkflowhistory",
-  "franchiseoperationalworkflowtask",
-  "centeroperationalworkflow",
-  "centeroperationalworkflowhistory",
-  "teacheroperationalworkflow",
-  "teacheroperationalworkflowhistory",
-  "settlementworkflowtask",
-  "settlementworkflowhistory"
-]);
 
 function coerceDisplayValue(value) {
   if (value === null || value === undefined || value === "") {
@@ -151,36 +140,6 @@ function createCursorWhere(cursor, primaryKey, secondaryKey = "id") {
         [secondaryKey]: { gt: cursor[secondaryKey] }
       }
     ]
-  };
-}
-
-function isWorkflowLifecycleSchemaMismatchError(error) {
-  const code = String(error?.code || "");
-  if (!["P2021", "P2022", "P2010"].includes(code)) {
-    return false;
-  }
-
-  const message = String(error?.message || "").toLowerCase();
-  const modelName = String(error?.meta?.modelName || "").toLowerCase();
-  const table = String(error?.meta?.table || "").toLowerCase();
-  const combined = `${message} ${modelName} ${table}`;
-
-  return WORKFLOW_LIFECYCLE_SCHEMA_TOKENS.some((token) => combined.includes(token));
-}
-
-function safeWorkflowLifecycleRowSource(rowSourceFactory) {
-  return async function* safeRowSource() {
-    try {
-      const rowSource = rowSourceFactory();
-      for await (const batch of rowSource) {
-        yield batch;
-      }
-    } catch (error) {
-      if (isWorkflowLifecycleSchemaMismatchError(error)) {
-        return;
-      }
-      throw error;
-    }
   };
 }
 
@@ -712,7 +671,7 @@ async function getDynamicSheetDescriptors({ report, reportContext }) {
           { key: "expectedVersion", label: "Expected Version" },
           { key: "resultingVersion", label: "Resulting Version" }
         ],
-        rowSource: safeWorkflowLifecycleRowSource(() => paginateWorkflowHistory(prisma.franchiseOperationalWorkflowHistory, scopes.franchiseWhere))
+        rowSource: () => paginateWorkflowHistory(prisma.franchiseOperationalWorkflowHistory, scopes.franchiseWhere)
       },
       {
         id: "center-history",
@@ -729,7 +688,7 @@ async function getDynamicSheetDescriptors({ report, reportContext }) {
           { key: "expectedVersion", label: "Expected Version" },
           { key: "resultingVersion", label: "Resulting Version" }
         ],
-        rowSource: safeWorkflowLifecycleRowSource(() => paginateWorkflowHistory(prisma.centerOperationalWorkflowHistory, scopes.centerWhere))
+        rowSource: () => paginateWorkflowHistory(prisma.centerOperationalWorkflowHistory, scopes.centerWhere)
       },
       {
         id: "teacher-history",
@@ -746,7 +705,7 @@ async function getDynamicSheetDescriptors({ report, reportContext }) {
           { key: "expectedVersion", label: "Expected Version" },
           { key: "resultingVersion", label: "Resulting Version" }
         ],
-        rowSource: safeWorkflowLifecycleRowSource(() => paginateWorkflowHistory(prisma.teacherOperationalWorkflowHistory, scopes.teacherWhere))
+        rowSource: () => paginateWorkflowHistory(prisma.teacherOperationalWorkflowHistory, scopes.teacherWhere)
       },
       {
         id: "settlement-history",
@@ -763,10 +722,10 @@ async function getDynamicSheetDescriptors({ report, reportContext }) {
           { key: "expectedVersion", label: "Expected Version" },
           { key: "resultingVersion", label: "Resulting Version" }
         ],
-        rowSource: safeWorkflowLifecycleRowSource(() => paginateWorkflowHistory(prisma.settlementWorkflowHistory, scopes.settlementWhere, {
+        rowSource: () => paginateWorkflowHistory(prisma.settlementWorkflowHistory, scopes.settlementWhere, {
           includeSettlementId: true,
           includeWorkflowId: false
-        }))
+        })
       },
       {
         id: "franchise-tasks",
@@ -783,7 +742,7 @@ async function getDynamicSheetDescriptors({ report, reportContext }) {
           { key: "dueAt", label: "Due At" },
           { key: "completedAt", label: "Completed At" }
         ],
-        rowSource: safeWorkflowLifecycleRowSource(() => paginateWorkflowTasks(scopes.franchiseWhere))
+        rowSource: () => paginateWorkflowTasks(scopes.franchiseWhere)
       }
     ];
   }

@@ -36,9 +36,14 @@ async function getStudentDashboardReminders({ limit } = {}) {
   });
 }
 
+async function getStudentFinancialSummary() {
+  return apiClient.get("/student/dashboard/financial-summary");
+}
+
 export {
   getStudentDashboardAchievements,
   getStudentDashboardAttendanceTrends,
+  getStudentFinancialSummary,
   getStudentDashboardOverview,
   getStudentDashboardPracticeTrends,
   getStudentDashboardReminders,

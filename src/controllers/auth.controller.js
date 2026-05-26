@@ -334,18 +334,21 @@ async function canAuthenticateUser(user) {
 
 const login = asyncHandler(async (req, res) => {
   const { tenantCode = "DEFAULT", username, password } = req.body;
+  const loginId = String(username || "").trim();
+  const normalizedUsername = loginId.toUpperCase();
+  const normalizedEmail = loginId.toLowerCase();
 
   const tenant = await prisma.tenant.findUnique({
     where: { code: tenantCode },
     select: { id: true, code: true }
   });
 
-  if (!tenant || !username || !password) {
+  if (!tenant || !loginId || !password) {
     await recordAudit({
       tenantId: tenant?.id || "tenant_default",
       action: "LOGIN_ATTEMPT",
       entityType: "AUTH",
-      metadata: { username, tenantCode, success: false, reason: "invalid_credentials_input" }
+      metadata: { username: loginId, tenantCode, success: false, reason: "invalid_credentials_input" }
     });
 
     return res.apiError(401, "Invalid credentials", "INVALID_CREDENTIALS");
@@ -354,7 +357,11 @@ const login = asyncHandler(async (req, res) => {
   const user = await prisma.authUser.findFirst({
     where: {
       tenantId: tenant.id,
-      username
+      OR: [
+        { username: loginId },
+        { username: normalizedUsername },
+        { email: normalizedEmail }
+      ]
     },
     select: {
       id: true,
@@ -380,7 +387,7 @@ const login = asyncHandler(async (req, res) => {
       role: user?.role,
       action: "LOGIN_ATTEMPT",
       entityType: "AUTH",
-      metadata: { username, tenantCode, success: false, reason: "user_not_found_or_inactive_scope" }
+      metadata: { username: loginId, tenantCode, success: false, reason: "user_not_found_or_inactive_scope" }
     });
 
     return res.apiError(401, "Invalid credentials", "INVALID_CREDENTIALS");
@@ -412,6 +419,7 @@ const login = asyncHandler(async (req, res) => {
       entityType: "AUTH",
       metadata: {
         username,
+        loginId,
         tenantCode,
         success: false,
         reason: nextAttempts >= 5 ? "account_locked" : "password_mismatch"
@@ -461,7 +469,7 @@ const login = asyncHandler(async (req, res) => {
     role: user.role,
     action: "LOGIN_ATTEMPT",
     entityType: "AUTH",
-    metadata: { username, tenantCode, success: true }
+    metadata: { username: loginId, tenantCode, success: true }
   });
 
   const displayName = await resolveDisplayName({

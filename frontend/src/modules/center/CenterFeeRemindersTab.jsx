@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import toast from "react-hot-toast";
-import { getFeesPendingInstallments } from "../../services/reportsService";
+import { getFeesReminders } from "../../services/reportsService";
 import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
@@ -40,13 +40,18 @@ function calculateDaysOverdue(dueDate) {
   return diffDays > 0 ? diffDays : 0;
 }
 
-function getStatusBadge(daysOverdue) {
-  if (daysOverdue === 0) {
-    return <span className="badge badge-warning">DUE SOON</span>;
-  } else if (daysOverdue > 0) {
+function getStatusBadge(status) {
+  const normalized = String(status || "").toUpperCase();
+  if (normalized === "PAID") {
+    return <span className="badge badge-success">PAID</span>;
+  }
+  if (normalized === "PENDING") {
+    return <span className="badge badge-warning">PENDING</span>;
+  }
+  if (normalized === "OVERDUE") {
     return <span className="badge badge-danger">OVERDUE</span>;
   }
-  return <span className="badge badge-success">PAID</span>;
+  return <span className="badge badge-secondary">NO DATA</span>;
 }
 
 export function CenterFeeRemindersTab() {
@@ -96,13 +101,13 @@ export function CenterFeeRemindersTab() {
       if (levelId) params.levelId = levelId;
       if (search) params.q = search;
 
-      const res = await getFeesPendingInstallments(params);
+      const res = await getFeesReminders(params);
       let items = res?.data?.items || res?.items || [];
 
       // Filter by days overdue if selected
       if (daysOverdueFilter) {
         items = items.filter((item) => {
-          const days = calculateDaysOverdue(item.dueDate);
+          const days = calculateDaysOverdue(item.nextDueDate || item.dueDate);
           if (daysOverdueFilter === "1-7") return days >= 1 && days <= 7;
           if (daysOverdueFilter === "8-30") return days >= 8 && days <= 30;
           if (daysOverdueFilter === "31+") return days > 30;
@@ -152,8 +157,8 @@ export function CenterFeeRemindersTab() {
       formatDate(item.lastPaymentDate),
       item.student?.teacher?.name || "—",
       item.student?.batch?.name || "—",
-      formatDate(item.dueDate),
-      calculateDaysOverdue(item.dueDate)
+      formatDate(item.nextDueDate || item.dueDate),
+      calculateDaysOverdue(item.nextDueDate || item.dueDate)
     ]);
 
     const csvContent = [
@@ -183,7 +188,7 @@ export function CenterFeeRemindersTab() {
       <div className="card-header no-print">
         <h3>Fee Reminders & Calling List</h3>
         <p style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
-          View students with pending fees. Print or export for calling reminders.
+          View students by fee status for reminder calls. Print or export for follow-ups.
         </p>
       </div>
 
@@ -315,7 +320,7 @@ export function CenterFeeRemindersTab() {
         {/* Empty State */}
         {!loading && installments.length === 0 && !error && (
           <div style={{ textAlign: "center", padding: "2rem", color: "var(--color-text-muted)" }}>
-            No pending fees found. Try adjusting filters.
+            No students found for the selected fee filters.
           </div>
         )}
 
@@ -323,7 +328,7 @@ export function CenterFeeRemindersTab() {
         {!loading && installments.length > 0 && (
           <>
             <div className="no-print" style={{ marginBottom: "1rem", fontSize: 14, fontWeight: 600 }}>
-              Total: {installments.length} student{installments.length > 1 ? "s" : ""} with pending fees
+              Total: {installments.length} student{installments.length > 1 ? "s" : ""} matching the selected status
             </div>
 
             <div className="dash-table-wrap" style={{ overflowX: "auto" }}>
@@ -345,7 +350,7 @@ export function CenterFeeRemindersTab() {
                 </thead>
                 <tbody>
                   {installments.map((item) => {
-                    const daysOverdue = calculateDaysOverdue(item.dueDate);
+                    const daysOverdue = calculateDaysOverdue(item.nextDueDate || item.dueDate);
                     return (
                       <tr key={item.id}>
                         <td>{item.student?.studentCode || "—"}</td>
@@ -371,11 +376,11 @@ export function CenterFeeRemindersTab() {
                         <td>{formatDate(item.lastPaymentDate)}</td>
                         <td>{item.student?.teacher?.name || "—"}</td>
                         <td>{item.student?.batch?.name || "—"}</td>
-                        <td>{formatDate(item.dueDate)}</td>
+                        <td>{formatDate(item.nextDueDate || item.dueDate)}</td>
                         <td style={{ textAlign: "center", fontWeight: 600 }}>
                           {daysOverdue > 0 ? daysOverdue : "—"}
                         </td>
-                        <td className="no-print">{getStatusBadge(daysOverdue)}</td>
+                        <td className="no-print">{getStatusBadge(item.status)}</td>
                       </tr>
                     );
                   })}

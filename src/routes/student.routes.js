@@ -58,6 +58,7 @@ import {
 import {
   getStudentDashboardAchievementsController,
   getStudentDashboardAttendanceTrendsController,
+  getStudentFinancialOverviewController,
   getStudentDashboardOverviewController,
   getStudentDashboardPracticeTrendsController,
   getStudentDashboardRemindersController,
@@ -118,6 +119,12 @@ studentRouter.get(
   "/dashboard/reminders",
   auditAction("STUDENT_VIEW_DASHBOARD_REMINDERS", "STUDENT", (req) => req.student.id),
   getStudentDashboardRemindersController
+);
+
+studentRouter.get(
+  "/dashboard/financial-summary",
+  auditAction("STUDENT_VIEW_DASHBOARD_FINANCIAL", "STUDENT", (req) => req.student.id),
+  getStudentFinancialOverviewController
 );
 
 studentRouter.patch(

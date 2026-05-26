@@ -1,23 +1,4 @@
 import { prisma } from "../lib/prisma.js";
-function isNotificationStorageMissingError(error) {
-  const code = String(error?.code || "");
-  if (!["P2021", "P2022", "P2010"].includes(code)) {
-    return false;
-  }
-
-  const modelName = String(error?.meta?.modelName || "").toLowerCase();
-  const table = String(error?.meta?.table || "").toLowerCase();
-  const message = String(error?.message || "").toLowerCase();
-
-  return (
-    modelName.includes("notification") ||
-    table.includes("notification") ||
-    message.includes("notification") ||
-    message.includes("unknown column") ||
-    message.includes("does not exist")
-  );
-}
-
 import { getCenterHealthScore, getAttendanceAnomalies, getFeeCollectionPulse, getTeacherWorkload } from "./leadership-intel.service.js";
 
 /**
@@ -594,6 +575,103 @@ async function runTeacherOverloadRule(tenantId) {
   return createBulkAutoNotifications(generated);
 }
 
+// ── Rule: Teacher Batch Fee Overdue ──
+// Notifies teachers about overdue fees in their batches (weekly)
+async function runTeacherBatchFeeRule(tenantId) {
+  const generated = [];
+
+  // Find all active batches with overdue installments
+  const overdueInstallments = await prisma.studentFeeInstallment.findMany({
+    where: {
+      tenantId,
+      dueDate: { lt: new Date() }
+    },
+    select: {
+      id: true,
+      amount: true,
+      dueDate: true,
+      payments: { select: { grossAmount: true } },
+      studentId: true,
+      student: {
+        select: {
+          firstName: true,
+          lastName: true,
+          hierarchyNodeId: true,
+          batchEnrollments: {
+            where: { status: "ACTIVE" },
+            select: {
+              batchId: true,
+              assignedTeacherUserId: true,
+              batch: { select: { name: true } }
+            },
+            take: 1
+          }
+        }
+      }
+    },
+    orderBy: { dueDate: "asc" },
+    take: 500
+  });
+
+  // Group by teacher
+  const teacherGroups = {};
+  for (const inst of overdueInstallments) {
+    const outstanding = getOutstandingAmount(inst);
+    if (outstanding <= 0) continue;
+
+    const enrollment = inst.student?.batchEnrollments?.[0];
+    const teacherId = enrollment?.assignedTeacherUserId;
+    const batchId = enrollment?.batchId;
+    const batchName = enrollment?.batch?.name;
+
+    if (!teacherId || !batchId) continue;
+
+    if (!teacherGroups[teacherId]) {
+      teacherGroups[teacherId] = {
+        students: [],
+        batches: new Set(),
+        totalOverdue: 0
+      };
+    }
+
+    teacherGroups[teacherId].students.push({
+      studentId: inst.studentId,
+      studentName: getStudentName(inst.student),
+      outstandingAmount: outstanding,
+      batchId,
+      batchName
+    });
+    teacherGroups[teacherId].batches.add(batchName);
+    teacherGroups[teacherId].totalOverdue += outstanding;
+  }
+
+  // Create notifications for teachers
+  for (const [teacherId, data] of Object.entries(teacherGroups)) {
+    const batchNames = Array.from(data.batches).join(", ");
+    const studentCount = data.students.length;
+    const totalOverdue = data.totalOverdue;
+
+    // Get the first batch ID for the action URL
+    const firstBatchId = data.students[0]?.batchId;
+
+    generated.push({
+      tenantId,
+      recipientUserId: teacherId,
+      type: "FEE_BATCH_OVERDUE",
+      priority: studentCount > 5 || totalOverdue > 10000 ? "HIGH" : "NORMAL",
+      category: "FINANCE",
+      title: "Pending Fees in Your Batches",
+      message: `You have ${studentCount} student${studentCount > 1 ? "s" : ""} with overdue fees totaling ₹${totalOverdue.toLocaleString("en-IN")} across your batches: ${batchNames}. Please remind them during class.`,
+      entityType: "BATCH",
+      entityId: firstBatchId || null,
+      actionUrl: `/center/fees?tab=reminders&batchId=${firstBatchId || ""}`,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    });
+  }
+
+  return createBulkAutoNotifications(generated);
+}
+
 // ── Main Automation Runner ──
 // Runs all rules for a tenant. Called by SA or scheduled job.
 async function runAllAutomationRules(tenantId) {
@@ -606,7 +684,8 @@ async function runAllAutomationRules(tenantId) {
     { name: "attendanceDrop", fn: () => runAttendanceDropRule(tenantId) },
     { name: "staleBatch", fn: () => runStaleBatchRule(tenantId) },
     { name: "healthScoreDrop", fn: () => runHealthScoreDropRule(tenantId) },
-    { name: "teacherOverload", fn: () => runTeacherOverloadRule(tenantId) }
+    { name: "teacherOverload", fn: () => runTeacherOverloadRule(tenantId) },
+    { name: "teacherBatchFees", fn: () => runTeacherBatchFeeRule(tenantId) }
   ];
 
   for (const rule of rules) {
@@ -623,26 +702,14 @@ async function runAllAutomationRules(tenantId) {
 
 // ── Cleanup: Remove expired notifications ──
 async function cleanupExpiredNotifications(tenantId) {
-  try {
-    const result = await prisma.notification.deleteMany({
-      where: {
-        tenantId,
-        expiresAt: { not: null, lt: new Date() },
-        isRead: true
-      }
-    });
-    return { deleted: result.count };
-  } catch (error) {
-    if (!isNotificationStorageMissingError(error)) {
-      throw error;
+  const result = await prisma.notification.deleteMany({
+    where: {
+      tenantId,
+      expiresAt: { not: null, lt: new Date() },
+      isRead: true
     }
-
-    return {
-      deleted: 0,
-      skipped: true,
-      reason: "NOTIFICATION_STORAGE_UNAVAILABLE"
-    };
-  }
+  });
+  return { deleted: result.count };
 }
 
 // ── Notification Preferences ──
@@ -688,6 +755,7 @@ export {
   runStaleBatchRule,
   runHealthScoreDropRule,
   runTeacherOverloadRule,
+  runTeacherBatchFeeRule,
   cleanupExpiredNotifications,
   getUserPreferences,
   updateUserPreference,

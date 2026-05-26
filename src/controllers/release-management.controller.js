@@ -94,6 +94,8 @@ const MIGRATION_SEQUENCE = [
   { wave: "wave4", file: "migration_center_capacity_schema_restore.sql", phase: 9, order: 26, description: "Restore CenterCapacity table required by BP/superadmin capacity governance endpoints" },
   { wave: "wave4", file: "migration_business_partner_code_normalization.sql", phase: 9, order: 27, description: "Normalize legacy business partner codes from BP-001/BP-002 to BP001/BP002" },
   { wave: "wave4", file: "migration_bp_branding_governance.sql", phase: 9, order: 28, description: "Add superadmin-managed BP branding metadata columns and FK tracking" },
+  { wave: "wave4", file: "migration_student_fee_recurring_waiver.sql", phase: 9, order: 29, description: "Recurring student fee templates with month waiver/pause history" },
+  { wave: "wave4", file: "migration_payment_receipt_engine.sql", phase: 9, order: 30, description: "Immutable payment receipts, allocations, refunds, and receipt audit trail" },
 ];
 
 const handleGetMigrationSequence = asyncHandler(async (req, res) => {

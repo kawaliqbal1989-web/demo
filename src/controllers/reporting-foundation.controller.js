@@ -152,44 +152,6 @@ function buildExportQueuedResponse({ job, coalesced }) {
   };
 }
 
-function isReportExportStorageMissingError(error) {
-  const code = String(error?.code || "");
-  if (!["P2021", "P2022", "P2010"].includes(code)) {
-    return false;
-  }
-
-  const modelName = String(error?.meta?.modelName || "").toLowerCase();
-  const table = String(error?.meta?.table || "").toLowerCase();
-  const message = String(error?.message || "").toLowerCase();
-
-  return (
-    modelName.includes("reportexport") ||
-    table.includes("reportexport") ||
-    table.includes("report_export") ||
-    message.includes("reportexport") ||
-    message.includes("report_export") ||
-    message.includes("unknown column") ||
-    message.includes("does not exist") ||
-    message.includes("no such table") ||
-    message.includes("unknown table")
-  );
-}
-
-function isPrismaSchemaMismatchError(error) {
-  const code = String(error?.code || "");
-  if (!["P2021", "P2022", "P2010"].includes(code)) {
-    return false;
-  }
-
-  const message = String(error?.message || "").toLowerCase();
-  return (
-    message.includes("unknown column") ||
-    message.includes("does not exist") ||
-    message.includes("no such table") ||
-    message.includes("unknown table")
-  );
-}
-
 function normalizeWindowHours(value, fallback = 24) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < 1) {
@@ -201,19 +163,145 @@ function normalizeWindowHours(value, fallback = 24) {
 function buildOperationsDashboardFallback(windowHours, reason) {
   const now = new Date();
   const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
-      const emptyChart = Array.from({ length: normalizedWindowHours }, (_, index) => ({
-        label: String(index).padStart(2, "0") + ":00",
-        startAt: new Date(now.getTime() - (normalizedWindowHours - index) * 60 * 60 * 1000).toISOString(),
-        value: 0
-      }));
+  const emptyChart = Array.from({ length: normalizedWindowHours }, (_, index) => ({
+    label: String(index).padStart(2, "0") + ":00",
+    startAt: new Date(now.getTime() - (normalizedWindowHours - index) * 60 * 60 * 1000).toISOString(),
+    value: 0
+  }));
 
-      return {
-        generatedAt: now,
-        windowHours: normalizedWindowHours,
-        thresholds: {
-          queuedMs: 0,
-          processingMs: 0,
-          staleHeartbeatMs: 0
+  return {
+    generatedAt: now,
+    windowHours: normalizedWindowHours,
+    thresholds: {
+      queuedMs: 0,
+      processingMs: 0,
+      staleHeartbeatMs: 0
+    },
+    backlog: {
+      statusCounts: {},
+      formatCounts: {},
+      queueCounts: {},
+      oldestQueuedAt: null,
+      oldestQueuedAgeMs: 0,
+      nextRetryAt: null,
+      retryWaitCount: 0
+    },
+    throughput: {
+      completedCount: 0,
+      failedCount: 0,
+      retriedCount: 0,
+      averageQueueMs: 0,
+      averageProcessingMs: 0,
+      averageEndToEndMs: 0,
+      totalCompletedBytes: 0,
+      averageCompletedBytes: 0,
+      queueSlaBreachesCompleted: 0,
+      processingSlaBreachesCompleted: 0
+    },
+    charts: {
+      throughput: emptyChart,
+      saturation: emptyChart,
+      workerUtilization: emptyChart
+    },
+    distributions: {
+      duration: [],
+      queueNames: [],
+      reportKeys: [],
+      scopeRoles: [],
+      retryHeatmap: []
+    },
+    workers: {
+      active: [],
+      counts: {
+        activeWorkers: 0,
+        staleWorkers: 0,
+        staleProcessingJobs: 0
+      }
+    },
+    artifacts: {
+      statusCounts: {},
+      availableCount: 0,
+      availableBytes: 0,
+      expiringSoonCount: 0,
+      overdueExpiredCount: 0,
+      expiringSoon: [],
+      overdueExpired: []
+    },
+    schedules: {
+      statusCounts: {},
+      dueSoonCount: 0,
+      dueSoon: []
+    },
+    sla: {
+      queuedBreaches: 0,
+      processingBreaches: 0,
+      staleLeaseBreaches: 0,
+      incidents: []
+    },
+    recent: {
+      jobs: [],
+      activity: [],
+      downloads: []
+    },
+    skipped: true,
+    reason
+  };
+}
+
+function buildProductionReadinessFallback(windowHours, reason) {
+  const now = new Date();
+  const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
+
+  return {
+    generatedAt: now,
+    windowHours: normalizedWindowHours,
+    summary: {
+      overallScore: 0,
+      productionCertified: false,
+      openRecommendations: 1,
+      queuedBreaches: 0,
+      processingBreaches: 0
+    },
+    deployments: {
+      countsByCheckpoint: {},
+      recent: [],
+      latest: null
+    },
+    backups: {
+      recent: [],
+      latest: null,
+      restoreValidatedCount: 0,
+      integrityFailures: 0
+    },
+    recovery: {
+      recent: [],
+      latest: null,
+      averageContinuityScore: 0
+    },
+    failover: {
+      recent: [],
+      latest: null,
+      passCount: 0,
+      averageScore: 0
+    },
+    security: {
+      status: "UNKNOWN",
+      score: 0,
+      checks: [],
+      recommendations: []
+    },
+    diagnostics: {
+      runtime: {
+        summary: {
+          statusCounts: {},
+          queuedSlaBreaches: 0,
+          processingSlaBreaches: 0,
+          retryWaitCount: 0,
+          expiredArtifacts: 0,
+          thresholds: {
+            queuedMs: 0,
+            processingMs: 0
+          }
         },
         backlog: {
           statusCounts: {},
@@ -236,18 +324,6 @@ function buildOperationsDashboardFallback(windowHours, reason) {
           queueSlaBreachesCompleted: 0,
           processingSlaBreachesCompleted: 0
         },
-        charts: {
-          throughput: emptyChart,
-          saturation: emptyChart,
-          workerUtilization: emptyChart
-        },
-        distributions: {
-          duration: [],
-          queueNames: [],
-          reportKeys: [],
-          scopeRoles: [],
-          retryHeatmap: []
-        },
         workers: {
           active: [],
           counts: {
@@ -265,128 +341,14 @@ function buildOperationsDashboardFallback(windowHours, reason) {
           expiringSoon: [],
           overdueExpired: []
         },
-        schedules: {
-          statusCounts: {},
-          dueSoonCount: 0,
-          dueSoon: []
-        },
-        sla: {
-          queuedBreaches: 0,
-          processingBreaches: 0,
-          staleLeaseBreaches: 0,
-          incidents: []
-        },
-        recent: {
-          jobs: [],
-          activity: [],
-          downloads: []
-        },
-        skipped: true,
-        reason
-      };
-    }
-
-    function buildProductionReadinessFallback(windowHours, reason) {
-      const now = new Date();
-      const normalizedWindowHours = normalizeWindowHours(windowHours, 24);
-
-      return {
-        generatedAt: now,
-        windowHours: normalizedWindowHours,
-        summary: {
-          overallScore: 0,
-          productionCertified: false,
-          openRecommendations: 1,
-          queuedBreaches: 0,
-          processingBreaches: 0
-        },
-        deployments: {
-          countsByCheckpoint: {},
-          recent: [],
-          latest: null
-        },
-        backups: {
-          recent: [],
-          latest: null,
-          restoreValidatedCount: 0,
-          integrityFailures: 0
-        },
-        recovery: {
-          recent: [],
-          latest: null,
-          averageContinuityScore: 0
-        },
-        failover: {
-          recent: [],
-          latest: null,
-          passCount: 0,
-          averageScore: 0
-        },
-        security: {
-          status: "UNKNOWN",
-          score: 0,
-          checks: [],
-          recommendations: []
-        },
-        diagnostics: {
-          runtime: {
-            summary: {
-              statusCounts: {},
-              queuedSlaBreaches: 0,
-              processingSlaBreaches: 0,
-              retryWaitCount: 0,
-              expiredArtifacts: 0,
-              thresholds: {
-                queuedMs: 0,
-                processingMs: 0
-              }
-            },
-            backlog: {
-              statusCounts: {},
-              formatCounts: {},
-              queueCounts: {},
-              oldestQueuedAt: null,
-              oldestQueuedAgeMs: 0,
-              nextRetryAt: null,
-              retryWaitCount: 0
-            },
-            throughput: {
-              completedCount: 0,
-              failedCount: 0,
-              retriedCount: 0,
-              averageQueueMs: 0,
-              averageProcessingMs: 0,
-              averageEndToEndMs: 0,
-              totalCompletedBytes: 0,
-              averageCompletedBytes: 0,
-              queueSlaBreachesCompleted: 0,
-              processingSlaBreachesCompleted: 0
-            },
-            workers: {
-              active: [],
-              counts: {
-                activeWorkers: 0,
-                staleWorkers: 0,
-                staleProcessingJobs: 0
-              }
-            },
-            artifacts: {
-              statusCounts: {},
-              availableCount: 0,
-              availableBytes: 0,
-              expiringSoonCount: 0,
-              overdueExpiredCount: 0,
-              expiringSoon: [],
-              overdueExpired: []
-            },
-            incidents: []
-          },
-          recommendations: ["Production dashboard fallback active until export operations storage is available."]
-        },
-        skipped: true,
-        reason
-      };
-    }
+        incidents: []
+      },
+      recommendations: ["Production dashboard fallback active until export operations storage is available."]
+    },
+    skipped: true,
+    reason
+  };
+}
 
 function buildScheduleViewerWhere(auth) {
   const where = {
@@ -484,28 +446,7 @@ const getPrintableReport = asyncHandler(async (req, res) => {
 
 const exportPdfReport = asyncHandler(async (req, res) => {
   const reportKey = getResolvedReportKey(req.params.reportKey);
-  let exportResult;
-  try {
-    exportResult = await prepareTrackedExport({ req, reportKey, format: "PDF" });
-  } catch (error) {
-    if (isReportExportStorageMissingError(error)) {
-      return res.apiError(
-        503,
-        "Report export storage is not ready on this environment",
-        "REPORT_EXPORT_STORAGE_UNAVAILABLE"
-      );
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      return res.apiError(
-        503,
-        "Report data storage is not ready on this environment",
-        "REPORT_DATA_SCHEMA_MISMATCH"
-      );
-    }
-    throw error;
-  }
-
-  const { coalesced, result } = exportResult;
+  const { coalesced, result } = await prepareTrackedExport({ req, reportKey, format: "PDF" });
   const status = result.job.status === "COMPLETED" && result.job.artifact?.status === "AVAILABLE" ? 200 : 202;
   res.setHeader("X-Export-Job-Id", result.job.id);
   res.setHeader("X-Export-Job-Status", result.job.status);
@@ -522,28 +463,7 @@ const exportPdfReport = asyncHandler(async (req, res) => {
 
 const exportExcelReport = asyncHandler(async (req, res) => {
   const reportKey = getResolvedReportKey(req.params.reportKey);
-  let exportResult;
-  try {
-    exportResult = await prepareTrackedExport({ req, reportKey, format: "XLSX" });
-  } catch (error) {
-    if (isReportExportStorageMissingError(error)) {
-      return res.apiError(
-        503,
-        "Report export storage is not ready on this environment",
-        "REPORT_EXPORT_STORAGE_UNAVAILABLE"
-      );
-    }
-    if (isPrismaSchemaMismatchError(error)) {
-      return res.apiError(
-        503,
-        "Report data storage is not ready on this environment",
-        "REPORT_DATA_SCHEMA_MISMATCH"
-      );
-    }
-    throw error;
-  }
-
-  const { coalesced, result } = exportResult;
+  const { coalesced, result } = await prepareTrackedExport({ req, reportKey, format: "XLSX" });
   const status = result.job.status === "COMPLETED" && result.job.artifact?.status === "AVAILABLE" ? 200 : 202;
   res.setHeader("X-Export-Job-Id", result.job.id);
   res.setHeader("X-Export-Job-Status", result.job.status);

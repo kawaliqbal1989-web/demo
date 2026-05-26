@@ -31,7 +31,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
   }
   
   if (levelId) {
-    additionalWhere += ` AND s.currentLevelId = '${levelId.replace(/'/g, "''")}'`;
+    additionalWhere += ` AND s.levelId = '${levelId.replace(/'/g, "''")}'`;
   }
   
   if (search) {
@@ -82,8 +82,14 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
         HAVING pendingAmount > 0
       ) due ON due.studentId = s.id
       WHERE s.tenantId = ?
-        AND s.hierarchyNodeId = ?
         AND s.isActive = 1
+        AND EXISTS (
+          SELECT 1 FROM Enrollment eScope
+          WHERE eScope.studentId = s.id
+            AND eScope.tenantId = ?
+            AND eScope.hierarchyNodeId = ?
+            AND eScope.status = 'ACTIVE'
+        )
         ${additionalWhere}
         ${statusWhere}
     ) x
@@ -95,6 +101,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
     centerId,
     PAYMENT_TYPES[0],
     PAYMENT_TYPES[1],
+    tenantId,
     tenantId,
     tenantId,
     centerId
@@ -149,8 +156,14 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
       HAVING pendingAmount > 0
     ) due ON due.studentId = s.id
     WHERE s.tenantId = ?
-      AND s.hierarchyNodeId = ?
       AND s.isActive = 1
+      AND EXISTS (
+        SELECT 1 FROM Enrollment eScope
+        WHERE eScope.studentId = s.id
+          AND eScope.tenantId = ?
+          AND eScope.hierarchyNodeId = ?
+          AND eScope.status = 'ACTIVE'
+      )
       ${additionalWhere}
       ${statusWhere}
     ORDER BY due.overdueCount DESC, due.nextDueDate ASC, due.pendingAmount DESC, s.admissionNo ASC
@@ -167,6 +180,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
     centerId,
     PAYMENT_TYPES[0],
     PAYMENT_TYPES[1],
+    tenantId,
     tenantId,
     tenantId,
     centerId,
@@ -251,14 +265,16 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
   let additionalWhere = "";
   if (batchId) {
     additionalWhere += ` AND EXISTS (
-      SELECT 1 FROM BatchEnrollment be 
+      SELECT 1 FROM Enrollment be 
       WHERE be.studentId = s.id 
+      AND be.tenantId = '${tenantId.replace(/'/g, "''")}'
+      AND be.hierarchyNodeId = '${centerId.replace(/'/g, "''")}'
       AND be.batchId = '${batchId.replace(/'/g, "''")}'
       AND be.status = 'ACTIVE'
     )`;
   }
   if (levelId) {
-    additionalWhere += ` AND s.currentLevelId = '${levelId.replace(/'/g, "''")}'`;
+    additionalWhere += ` AND s.levelId = '${levelId.replace(/'/g, "''")}'`;
   }
   if (search) {
     const escapedSearch = search.replace(/'/g, "''").replace(/%/g, '\\%').replace(/_/g, '\\_');
@@ -306,14 +322,25 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
         ) p ON p.installmentId = i.id
         WHERE i.tenantId = ?
           AND s2.tenantId = ?
-          AND s2.hierarchyNodeId = ?
+          AND EXISTS (
+            SELECT 1 FROM Enrollment eScope
+            WHERE eScope.studentId = i.studentId
+              AND eScope.tenantId = ?
+              AND eScope.hierarchyNodeId = ?
+              AND eScope.status = 'ACTIVE'
+          )
         GROUP BY i.studentId
       ) due ON due.studentId = s.id
       WHERE s.tenantId = ?
-        AND s.hierarchyNodeId = ?
         AND s.isActive = 1
+        AND EXISTS (
+          SELECT 1 FROM Enrollment eScope
+          WHERE eScope.studentId = s.id
+            AND eScope.tenantId = ?
+            AND eScope.hierarchyNodeId = ?
+            AND eScope.status = 'ACTIVE'
+        )
         ${additionalWhere}
-        AND (COALESCE(paid.paidInRange, 0) > 0 OR COALESCE(due.duePending, 0) > 0)
     ) x
   `;
 
@@ -321,8 +348,8 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
     countSql,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1], from, toExclusive,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1],
-    tenantId, tenantId, centerId,
-    tenantId, centerId
+    tenantId, tenantId, tenantId, centerId,
+    tenantId, tenantId, centerId
   );
 
   const total = toSafeNumber(Array.isArray(totalRows) ? totalRows[0]?.total : 0);
@@ -370,14 +397,25 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
       ) p ON p.installmentId = i.id
       WHERE i.tenantId = ?
         AND s2.tenantId = ?
-        AND s2.hierarchyNodeId = ?
+        AND EXISTS (
+          SELECT 1 FROM Enrollment eScope
+          WHERE eScope.studentId = i.studentId
+            AND eScope.tenantId = ?
+            AND eScope.hierarchyNodeId = ?
+            AND eScope.status = 'ACTIVE'
+        )
       GROUP BY i.studentId
     ) due ON due.studentId = s.id
     WHERE s.tenantId = ?
-      AND s.hierarchyNodeId = ?
       AND s.isActive = 1
+      AND EXISTS (
+        SELECT 1 FROM Enrollment eScope
+        WHERE eScope.studentId = s.id
+          AND eScope.tenantId = ?
+          AND eScope.hierarchyNodeId = ?
+          AND eScope.status = 'ACTIVE'
+      )
       ${additionalWhere}
-      AND (COALESCE(paid.paidInRange, 0) > 0 OR COALESCE(due.duePending, 0) > 0)
     ORDER BY COALESCE(due.overduePending, 0) DESC,
       COALESCE(due.duePending, 0) DESC,
       COALESCE(paid.paidInRange, 0) DESC,
@@ -389,8 +427,8 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
     dataSql,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1], from, toExclusive,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1],
+    tenantId, tenantId, tenantId, centerId,
     tenantId, tenantId, centerId,
-    tenantId, centerId,
     limit, offset
   );
 
@@ -497,8 +535,14 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
         HAVING pendingAmount > 0
       ) due ON due.studentId = s.id
       WHERE s.tenantId = ${tenantId}
-        AND s.hierarchyNodeId = ${centerId}
         AND s.isActive = 1
+        AND EXISTS (
+          SELECT 1 FROM Enrollment eScope
+          WHERE eScope.studentId = s.id
+            AND eScope.tenantId = ${tenantId}
+            AND eScope.hierarchyNodeId = ${centerId}
+            AND eScope.status = 'ACTIVE'
+        )
     ) x
   `;
 
@@ -535,15 +579,27 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
       ) p ON p.installmentId = i.id
       WHERE i.tenantId = ${tenantId}
         AND s2.tenantId = ${tenantId}
-        AND s2.hierarchyNodeId = ${centerId}
+        AND EXISTS (
+          SELECT 1 FROM Enrollment eScope
+          WHERE eScope.studentId = i.studentId
+            AND eScope.tenantId = ${tenantId}
+            AND eScope.hierarchyNodeId = ${centerId}
+            AND eScope.status = 'ACTIVE'
+        )
         AND i.dueDate >= ${from}
         AND i.dueDate < ${toExclusive}
       GROUP BY i.studentId
       HAVING pendingAmount > 0
     ) due ON due.studentId = s.id
     WHERE s.tenantId = ${tenantId}
-      AND s.hierarchyNodeId = ${centerId}
       AND s.isActive = 1
+      AND EXISTS (
+        SELECT 1 FROM Enrollment eScope
+        WHERE eScope.studentId = s.id
+          AND eScope.tenantId = ${tenantId}
+          AND eScope.hierarchyNodeId = ${centerId}
+          AND eScope.status = 'ACTIVE'
+      )
     ORDER BY due.overdueAmount DESC, due.pendingAmount DESC, s.admissionNo ASC
     LIMIT ${limit} OFFSET ${offset}
   `;

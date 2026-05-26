@@ -464,14 +464,15 @@ function groupByStudentId(items = []) {
   return map;
 }
 
-async function computeFeeTimelinesForStudents({ tenantId, studentIds, asOf = new Date(), tx = prisma }) {
-  const ids = Array.from(new Set((studentIds || []).map((id) => String(id).trim()).filter(Boolean)));
-  if (!ids.length) {
-    return new Map();
-  }
+function isUnknownSelectFieldError(error, fieldNames = []) {
+  const message = String(error?.message || "");
+  if (!message) return false;
+  return fieldNames.some((field) => message.includes(`Unknown field \`${field}\``) || message.includes(`Unknown arg \`${field}\``));
+}
 
-  const [installments, payments, monthAdjustments] = await Promise.all([
-    tx.studentFeeInstallment.findMany({
+async function fetchInstallmentsWithSchemaFallback({ tx, tenantId, ids }) {
+  try {
+    return await tx.studentFeeInstallment.findMany({
       where: {
         tenantId,
         studentId: { in: ids }
@@ -486,8 +487,33 @@ async function computeFeeTimelinesForStudents({ tenantId, studentIds, asOf = new
         recurrenceEndDate: true,
         createdAt: true
       }
-    }),
-    tx.financialTransaction.findMany({
+    });
+  } catch (error) {
+    if (!isUnknownSelectFieldError(error, ["recurrenceEndDate", "createdAt"])) {
+      throw error;
+    }
+
+    // Production compatibility fallback: older schemas may not include recurrence metadata columns.
+    return tx.studentFeeInstallment.findMany({
+      where: {
+        tenantId,
+        studentId: { in: ids }
+      },
+      orderBy: [{ dueDate: "asc" }],
+      select: {
+        id: true,
+        studentId: true,
+        amount: true,
+        dueDate: true,
+        isRecurringMonthly: true
+      }
+    });
+  }
+}
+
+async function fetchPaymentsWithSchemaFallback({ tx, tenantId, ids }) {
+  try {
+    return await tx.financialTransaction.findMany({
       where: {
         tenantId,
         studentId: { in: ids },
@@ -506,8 +532,35 @@ async function computeFeeTimelinesForStudents({ tenantId, studentIds, asOf = new
         receivedAt: true,
         createdAt: true
       }
-    }),
-    tx.studentFeeMonthAdjustment.findMany({
+    });
+  } catch (error) {
+    if (!isUnknownSelectFieldError(error, ["feeScheduleType", "feeMonth", "feeYear", "installmentId"])) {
+      throw error;
+    }
+
+    // Fallback preserves FIFO allocation behavior when schedule-specific fields are unavailable.
+    return tx.financialTransaction.findMany({
+      where: {
+        tenantId,
+        studentId: { in: ids },
+        type: { in: ["ENROLLMENT", "RENEWAL", "ADJUSTMENT"] }
+      },
+      orderBy: [{ receivedAt: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        studentId: true,
+        type: true,
+        grossAmount: true,
+        receivedAt: true,
+        createdAt: true
+      }
+    });
+  }
+}
+
+async function fetchMonthAdjustmentsWithSchemaFallback({ tx, tenantId, ids }) {
+  try {
+    return await tx.studentFeeMonthAdjustment.findMany({
       where: {
         tenantId,
         studentId: { in: ids }
@@ -523,7 +576,41 @@ async function computeFeeTimelinesForStudents({ tenantId, studentIds, asOf = new
         createdByUserId: true,
         createdAt: true
       }
-    })
+    });
+  } catch (error) {
+    if (!isUnknownSelectFieldError(error, ["createdByUserId"])) {
+      throw error;
+    }
+
+    return tx.studentFeeMonthAdjustment.findMany({
+      where: {
+        tenantId,
+        studentId: { in: ids }
+      },
+      orderBy: [{ year: "asc" }, { month: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        studentId: true,
+        year: true,
+        month: true,
+        adjustmentType: true,
+        remarks: true,
+        createdAt: true
+      }
+    });
+  }
+}
+
+async function computeFeeTimelinesForStudents({ tenantId, studentIds, asOf = new Date(), tx = prisma }) {
+  const ids = Array.from(new Set((studentIds || []).map((id) => String(id).trim()).filter(Boolean)));
+  if (!ids.length) {
+    return new Map();
+  }
+
+  const [installments, payments, monthAdjustments] = await Promise.all([
+    fetchInstallmentsWithSchemaFallback({ tx, tenantId, ids }),
+    fetchPaymentsWithSchemaFallback({ tx, tenantId, ids }),
+    fetchMonthAdjustmentsWithSchemaFallback({ tx, tenantId, ids })
   ]);
 
   const installmentsByStudent = groupByStudentId(installments);

@@ -222,39 +222,14 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
   const toExclusive = range.toExclusive;
   const { batchId, levelId, search } = filters;
 
-  // Build additional WHERE conditions using Prisma's Sql helper
-  const studentFilterConditions = [];
-  
-  if (batchId) {
-    studentFilterConditions.push(prisma.$queryRaw`EXISTS (
-      SELECT 1 FROM BatchEnrollment be 
-      WHERE be.studentId = s.id 
-      AND be.batchId = ${batchId}
-      AND be.status = 'ACTIVE'
-    )`);
-  }
-  
-  if (levelId) {
-    studentFilterConditions.push(prisma.$queryRaw`s.currentLevelId = ${levelId}`);
-  }
-  
-  if (search) {
-    const searchPattern = `%${search}%`;
-    studentFilterConditions.push(prisma.$queryRaw`(
-      s.firstName LIKE ${searchPattern} OR 
-      s.lastName LIKE ${searchPattern} OR 
-      s.admissionNo LIKE ${searchPattern}
-    )`);
-  }
-
   // For now, use a simpler approach - build complete WHERE as string
   let additionalWhere = "";
   if (batchId) {
     additionalWhere += ` AND EXISTS (
-      SELECT 1 FROM BatchEnrollment be 
-      WHERE be.studentId = s.id 
-      AND be.batchId = '${batchId.replace(/'/g, "''")}'
-      AND be.status = 'ACTIVE'
+      SELECT 1 FROM Enrollment e
+      WHERE e.studentId = s.id
+      AND e.batchId = '${batchId.replace(/'/g, "''")}'
+      AND e.status = 'ACTIVE'
     )`;
   }
   if (levelId) {
@@ -294,7 +269,6 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
           SUM(CASE WHEN i.dueDate < NOW() THEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) ELSE 0 END) AS overduePending,
           SUM(CASE WHEN i.dueDate < NOW() AND (i.amount - COALESCE(p.paidAmount, 0)) > 0 THEN 1 ELSE 0 END) AS overdueCount
         FROM StudentFeeInstallment i
-        JOIN Student s2 ON s2.id = i.studentId
         LEFT JOIN (
           SELECT installmentId, SUM(grossAmount) AS paidAmount
           FROM FinancialTransaction
@@ -305,8 +279,6 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
           GROUP BY installmentId
         ) p ON p.installmentId = i.id
         WHERE i.tenantId = ?
-          AND s2.tenantId = ?
-          AND s2.hierarchyNodeId = ?
         GROUP BY i.studentId
       ) due ON due.studentId = s.id
       WHERE s.tenantId = ?
@@ -321,7 +293,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
     countSql,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1], from, toExclusive,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1],
-    tenantId, tenantId, centerId,
+    tenantId,
     tenantId, centerId
   );
 
@@ -358,7 +330,6 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
         SUM(CASE WHEN i.dueDate < NOW() THEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) ELSE 0 END) AS overduePending,
         SUM(CASE WHEN i.dueDate < NOW() AND (i.amount - COALESCE(p.paidAmount, 0)) > 0 THEN 1 ELSE 0 END) AS overdueCount
       FROM StudentFeeInstallment i
-      JOIN Student s2 ON s2.id = i.studentId
       LEFT JOIN (
         SELECT installmentId, SUM(grossAmount) AS paidAmount
         FROM FinancialTransaction
@@ -369,8 +340,6 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
         GROUP BY installmentId
       ) p ON p.installmentId = i.id
       WHERE i.tenantId = ?
-        AND s2.tenantId = ?
-        AND s2.hierarchyNodeId = ?
       GROUP BY i.studentId
     ) due ON due.studentId = s.id
     WHERE s.tenantId = ?
@@ -389,7 +358,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
     dataSql,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1], from, toExclusive,
     tenantId, centerId, PAYMENT_TYPES[0], PAYMENT_TYPES[1],
-    tenantId, tenantId, centerId,
+    tenantId,
     tenantId, centerId,
     limit, offset
   );

@@ -202,7 +202,7 @@ function TeacherDashboardPage() {
 
         {!financialLoading && (!Array.isArray(financial?.items) || financial.items.length === 0) ? (
           <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
-            No assigned-student fee dues are currently visible for this teacher scope.
+            No assigned students are currently visible for this teacher scope.
           </p>
         ) : null}
       </div>

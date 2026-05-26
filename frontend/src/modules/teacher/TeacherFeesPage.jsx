@@ -173,7 +173,7 @@ function TeacherFeesPage() {
               </div>
             ) : (
               <p style={{ color: "var(--color-text-muted)", margin: 0 }}>
-                No assigned students with visible fee records yet.
+                No assigned students found for the current teacher scope.
               </p>
             )}
 

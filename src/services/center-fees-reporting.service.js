@@ -43,10 +43,41 @@ function chunkArray(items, chunkSize) {
 }
 
 function buildStudentWhere({ tenantId, centerId, filters = {} }) {
+  const teacherId = filters?.teacherId ? String(filters.teacherId) : null;
+  const enrollmentSome = {
+    tenantId,
+    hierarchyNodeId: centerId,
+    status: "ACTIVE",
+    ...(filters?.batchId ? { batchId: String(filters.batchId) } : {})
+  };
+
+  if (teacherId) {
+    // Support both direct assignment and batch-level assignment models.
+    enrollmentSome.OR = [
+      { assignedTeacherUserId: teacherId },
+      { batch: { primaryTeacherUserId: teacherId } },
+      {
+        batch: {
+          teacherAssignments: {
+            some: {
+              tenantId,
+              teacherUserId: teacherId
+            }
+          }
+        }
+      }
+    ];
+  }
+
   const where = {
     tenantId,
     hierarchyNodeId: centerId,
-    isActive: true
+    isActive: true,
+    // Student-wise fee dashboard must always start from active enrollments,
+    // then enrich with financial signals (dues/payments) if present.
+    batchEnrollments: {
+      some: enrollmentSome
+    }
   };
 
   if (filters?.levelId) {
@@ -60,17 +91,6 @@ function buildStudentWhere({ tenantId, centerId, filters = {} }) {
       { lastName: { contains: search } },
       { admissionNo: { contains: search } }
     ];
-  }
-
-  if (filters?.batchId) {
-    where.batchEnrollments = {
-      some: {
-        tenantId,
-        hierarchyNodeId: centerId,
-        batchId: String(filters.batchId),
-        status: "ACTIVE"
-      }
-    };
   }
 
   return where;
@@ -180,12 +200,12 @@ async function getLastPaymentDateByStudent({ tenantId, centerId, studentIds }) {
   return map;
 }
 
-async function getPaidInRangeByStudent({ tenantId, centerId, studentIds, from, toExclusive }) {
+async function getPaidInRangeByStudent({ tenantId, centerId, studentIds, from, toExclusive, tx = prisma }) {
   const ids = (studentIds || []).map((id) => String(id));
   const map = new Map();
   if (!ids.length) return map;
 
-  const rows = await prisma.financialTransaction.groupBy({
+  const rows = await tx.financialTransaction.groupBy({
     by: ["studentId"],
     where: {
       tenantId,
@@ -359,9 +379,14 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
       (row) => String(row.status || "").toUpperCase() === "OVERDUE" && round2(row.pending) > 0
     ).length;
 
-    if (paidInRange <= 0 && duePending <= 0) {
-      continue;
-    }
+    const hasFinancialActivity = paidInRange > 0 || duePending > 0 || overduePending > 0;
+    const financialStatus = !hasFinancialActivity
+      ? "NOT_STARTED"
+      : overduePending > 0
+        ? "OVERDUE"
+        : duePending > 0
+          ? "PENDING"
+          : "PAID";
 
     materialized.push({
       id: studentId,
@@ -374,7 +399,9 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
       paidInRange,
       duePending,
       overduePending,
-      overdueCount
+      overdueCount,
+      hasFinancialActivity,
+      financialStatus
     });
   }
 

@@ -74,6 +74,30 @@ function getLatestPaymentFromTransactions(transactions = []) {
   };
 }
 
+function resolveFinancialStatus({ summary = {}, latestPayment = null }) {
+  const totalPending = round2(summary.totalPending);
+  const totalOverdue = round2(summary.totalOverdue);
+  const rawStatus = String(summary.status || "").trim().toUpperCase();
+
+  if (rawStatus) {
+    return rawStatus;
+  }
+
+  if (totalOverdue > 0) {
+    return "OVERDUE";
+  }
+
+  if (totalPending > 0) {
+    return "PENDING";
+  }
+
+  if (latestPayment?.amount && round2(latestPayment.amount) > 0) {
+    return "PAID";
+  }
+
+  return "NOT_STARTED";
+}
+
 function buildRiskLevel({ totalPending, totalOverdue, oldestOverdueDays }) {
   if (totalOverdue > 0 && oldestOverdueDays >= 30) {
     return "HIGH";
@@ -262,7 +286,7 @@ async function listTeacherStudentFinancialRows({ tenantId, teacherUserId, hierar
         totalOverdue: round2(summary.totalOverdue),
         waivedMonths: Number(summary.waivedMonths || 0),
         pausedMonths: Number(summary.pausedMonths || 0),
-        status: summary.status || null
+        status: resolveFinancialStatus({ summary, latestPayment })
       },
       latestPayment,
       nextDue: nextDue

@@ -3,6 +3,7 @@ import toast from "react-hot-toast";
 import { getFeesReminders } from "../../services/reportsService";
 import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
+import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
 const STATUS_OPTIONS = [
@@ -24,6 +25,11 @@ function formatMoney(value) {
   const num = Number(value);
   if (!Number.isFinite(num)) return "0.00";
   return num.toFixed(2);
+}
+
+function pickTeacherLabel(teacher) {
+  if (!teacher || typeof teacher !== "object") return "";
+  return teacher.teacherProfile?.fullName || teacher.fullName || teacher.username || teacher.email || "";
 }
 
 function formatDate(value) {
@@ -58,8 +64,10 @@ export function CenterFeeRemindersTab() {
   // Filter state
   const [batches, setBatches] = useState([]);
   const [levels, setLevels] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [batchId, setBatchId] = useState("");
   const [levelId, setLevelId] = useState("");
+  const [teacherId, setTeacherId] = useState("");
   const [statusFilter, setStatusFilter] = useState("PENDING,OVERDUE");
   const [daysOverdueFilter, setDaysOverdueFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -73,12 +81,14 @@ export function CenterFeeRemindersTab() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [batchesRes, levelsRes] = await Promise.all([
+        const [batchesRes, levelsRes, teachersRes] = await Promise.all([
           listBatches({ limit: 200, offset: 0 }),
-          listLevels()
+          listLevels(),
+          listTeachers({ limit: 200, offset: 0 })
         ]);
         setBatches(batchesRes?.data?.items || batchesRes?.items || []);
         setLevels(Array.isArray(levelsRes?.data) ? levelsRes.data : levelsRes || []);
+        setTeachers(teachersRes?.data?.items || teachersRes?.items || []);
       } catch (err) {
         console.error("Failed to load filter data:", err);
       }
@@ -99,6 +109,7 @@ export function CenterFeeRemindersTab() {
       if (statusFilter) params.status = statusFilter;
       if (batchId) params.batchId = batchId;
       if (levelId) params.levelId = levelId;
+      if (teacherId) params.teacherId = teacherId;
       if (search) params.q = search;
 
       const res = await getFeesReminders(params);
@@ -122,7 +133,7 @@ export function CenterFeeRemindersTab() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, batchId, levelId, search, daysOverdueFilter]);
+  }, [statusFilter, batchId, levelId, teacherId, search, daysOverdueFilter]);
 
   useEffect(() => {
     fetchInstallments();
@@ -246,6 +257,25 @@ export function CenterFeeRemindersTab() {
               {levels.map((level) => (
                 <option key={level.id} value={level.id}>
                   {level.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label htmlFor="teacher-filter" style={{ display: "block", marginBottom: "0.25rem", fontSize: 13, fontWeight: 600 }}>
+              Teacher
+            </label>
+            <select
+              id="teacher-filter"
+              className="form-input"
+              value={teacherId}
+              onChange={(e) => setTeacherId(e.target.value)}
+            >
+              <option value="">All Teachers</option>
+              {teachers.map((teacher) => (
+                <option key={teacher.id} value={teacher.id}>
+                  {pickTeacherLabel(teacher)}
                 </option>
               ))}
             </select>

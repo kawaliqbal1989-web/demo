@@ -510,6 +510,7 @@ const feesPendingInstallments = asyncHandler(async (req, res) => {
     status: req.query.status,
     levelId: req.query.levelId,
     batchId: req.query.batchId,
+    teacherId: req.query.teacherId ? String(req.query.teacherId) : null,
     search: req.query.q
   };
 
@@ -553,6 +554,7 @@ const feesStudentWise = asyncHandler(async (req, res) => {
   const filters = {
     batchId: req.query.batchId ? String(req.query.batchId) : null,
     levelId: req.query.levelId ? String(req.query.levelId) : null,
+    teacherId: req.query.teacherId ? String(req.query.teacherId) : null,
     search: req.query.q ? String(req.query.q) : null
   };
 
@@ -619,6 +621,7 @@ const feesReminders = asyncHandler(async (req, res) => {
     status: req.query.status,
     levelId: req.query.levelId ? String(req.query.levelId) : null,
     batchId: req.query.batchId ? String(req.query.batchId) : null,
+    teacherId: req.query.teacherId ? String(req.query.teacherId) : null,
     search: req.query.q ? String(req.query.q) : null
   };
 

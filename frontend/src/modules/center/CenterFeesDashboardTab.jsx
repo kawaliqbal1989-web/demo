@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import { getFeesStudentWise } from "../../services/reportsService";
 import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
+import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
 function formatMoney(value) {
@@ -12,7 +13,16 @@ function formatMoney(value) {
   return num.toFixed(2);
 }
 
-function getStatusBadge(overdue, pending, paid) {
+function pickTeacherLabel(teacher) {
+  if (!teacher || typeof teacher !== "object") return "";
+  return teacher.teacherProfile?.fullName || teacher.fullName || teacher.username || teacher.email || "";
+}
+
+function getStatusBadge(overdue, pending, paid, financialStatus) {
+  if (String(financialStatus || "").toUpperCase() === "NOT_STARTED") {
+    return <span className="badge badge-secondary">NOT_STARTED</span>;
+  }
+
   const overdueAmount = Number(overdue || 0);
   const pendingAmount = Number(pending || 0);
   const paidAmount = Number(paid || 0);
@@ -40,8 +50,10 @@ export function CenterFeesDashboardTab() {
   // Filter state
   const [batches, setBatches] = useState([]);
   const [levels, setLevels] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [batchId, setBatchId] = useState("");
   const [levelId, setLevelId] = useState("");
+  const [teacherId, setTeacherId] = useState("");
   const [search, setSearch] = useState("");
 
   // Data state
@@ -54,12 +66,14 @@ export function CenterFeesDashboardTab() {
   useEffect(() => {
     const load = async () => {
       try {
-        const [batchesRes, levelsRes] = await Promise.all([
+        const [batchesRes, levelsRes, teachersRes] = await Promise.all([
           listBatches({ limit: 200, offset: 0 }),
-          listLevels()
+          listLevels(),
+          listTeachers({ limit: 200, offset: 0 })
         ]);
         setBatches(batchesRes?.data?.items || batchesRes?.items || []);
         setLevels(Array.isArray(levelsRes?.data) ? levelsRes.data : levelsRes || []);
+        setTeachers(teachersRes?.data?.items || teachersRes?.items || []);
       } catch (err) {
         console.error("Failed to load filter data:", err);
       }
@@ -79,6 +93,7 @@ export function CenterFeesDashboardTab() {
 
       if (levelId) params.levelId = levelId;
       if (batchId) params.batchId = batchId;
+      if (teacherId) params.teacherId = teacherId;
       if (search) params.q = search;
 
       const res = await getFeesStudentWise(params);
@@ -104,7 +119,7 @@ export function CenterFeesDashboardTab() {
     } finally {
       setLoading(false);
     }
-  }, [levelId, batchId, search]);
+  }, [levelId, batchId, teacherId, search]);
 
   useEffect(() => {
     fetchStudents();
@@ -189,6 +204,25 @@ export function CenterFeesDashboardTab() {
           </div>
 
           <div>
+            <label htmlFor="teacher-filter" style={{ display: "block", marginBottom: "0.25rem", fontSize: 13, fontWeight: 600 }}>
+              Teacher
+            </label>
+            <select
+              id="teacher-filter"
+              className="form-input"
+              value={teacherId}
+              onChange={(e) => setTeacherId(e.target.value)}
+            >
+              <option value="">All Teachers</option>
+              {teachers.map((teacher) => (
+                <option key={teacher.id} value={teacher.id}>
+                  {pickTeacherLabel(teacher)}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <label htmlFor="search-filter" style={{ display: "block", marginBottom: "0.25rem", fontSize: 13, fontWeight: 600 }}>
               Search Student
             </label>
@@ -219,7 +253,7 @@ export function CenterFeesDashboardTab() {
         {/* Student List Table */}
         {!loading && !error && students.length === 0 && (
           <div style={{ padding: "2rem", textAlign: "center", color: "var(--color-text-muted)" }}>
-            No students found with fee activity in the selected period.
+            No active enrolled students found for the selected filters.
           </div>
         )}
 
@@ -269,7 +303,8 @@ export function CenterFeesDashboardTab() {
                       {getStatusBadge(
                         student.overduePending || 0,
                         student.duePending || 0,
-                        student.paidInRange || 0
+                        student.paidInRange || 0,
+                        student.financialStatus
                       )}
                     </td>
                     <td>

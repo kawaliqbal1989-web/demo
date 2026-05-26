@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { computeFeeTimelinesForStudents } from "./student-fee-due.service.js";
+import { logger } from "../lib/logger.js";
 
 const PAYMENT_TYPES = ["ENROLLMENT", "RENEWAL"];
 
@@ -42,14 +43,17 @@ function chunkArray(items, chunkSize) {
   return chunks;
 }
 
-function buildStudentWhere({ tenantId, centerId, filters = {} }) {
+function buildStudentWhere({ tenantId, centerId, filters = {}, strictEnrollmentActive = true }) {
   const teacherId = filters?.teacherId ? String(filters.teacherId) : null;
   const enrollmentSome = {
     tenantId,
     hierarchyNodeId: centerId,
-    status: "ACTIVE",
     ...(filters?.batchId ? { batchId: String(filters.batchId) } : {})
   };
+
+  if (strictEnrollmentActive) {
+    enrollmentSome.status = "ACTIVE";
+  }
 
   if (teacherId) {
     // Support both direct assignment and batch-level assignment models.
@@ -71,7 +75,6 @@ function buildStudentWhere({ tenantId, centerId, filters = {} }) {
 
   const where = {
     tenantId,
-    hierarchyNodeId: centerId,
     isActive: true,
     // Student-wise fee dashboard must always start from active enrollments,
     // then enrich with financial signals (dues/payments) if present.
@@ -94,6 +97,69 @@ function buildStudentWhere({ tenantId, centerId, filters = {} }) {
   }
 
   return where;
+}
+
+async function logEnrollmentScopeDiagnostics({ tenantId, centerId, filters = {}, strictWhere, fallbackWhere, tx = prisma }) {
+  try {
+    const [
+      tenantEnrollmentCount,
+      centerEnrollmentCount,
+      centerActiveEnrollmentCount,
+      centerStatusBreakdown,
+      centerStudentCount,
+      strictStudentCount,
+      fallbackStudentCount
+    ] = await Promise.all([
+      tx.enrollment.count({ where: { tenantId } }),
+      tx.enrollment.count({ where: { tenantId, hierarchyNodeId: centerId } }),
+      tx.enrollment.count({ where: { tenantId, hierarchyNodeId: centerId, status: "ACTIVE" } }),
+      tx.enrollment.groupBy({ by: ["status"], where: { tenantId, hierarchyNodeId: centerId }, _count: { _all: true } }),
+      tx.student.count({ where: { tenantId, isActive: true } }),
+      tx.student.count({ where: strictWhere }),
+      tx.student.count({ where: fallbackWhere })
+    ]);
+
+    logger.warn("center_fees_enrollment_scope_diagnostics", {
+      tenantId,
+      centerId,
+      filters,
+      enrollmentCount: {
+        tenant: tenantEnrollmentCount,
+        center: centerEnrollmentCount,
+        centerActiveStatus: centerActiveEnrollmentCount
+      },
+      centerStatusBreakdown: centerStatusBreakdown.map((row) => ({ status: row.status, count: row._count?._all || 0 })),
+      studentCount: {
+        tenantActive: centerStudentCount,
+        strictWhere: strictStudentCount,
+        fallbackWhere: fallbackStudentCount
+      },
+      strictWhere,
+      fallbackWhere
+    });
+  } catch (error) {
+    logger.error("center_fees_enrollment_scope_diagnostics_failed", {
+      tenantId,
+      centerId,
+      error: error?.message || String(error)
+    });
+  }
+}
+
+async function resolveStudentWhereWithEnrollmentFallback({ tenantId, centerId, filters = {}, tx = prisma }) {
+  const strictWhere = buildStudentWhere({ tenantId, centerId, filters, strictEnrollmentActive: true });
+  const strictCount = await tx.student.count({ where: strictWhere });
+
+  if (strictCount > 0) {
+    return strictWhere;
+  }
+
+  // Production compatibility fallback: some environments have legacy enrollment status values.
+  // If strict ACTIVE scope yields zero, widen to enrollment presence while preserving tenant/center/teacher/batch filters.
+  const fallbackWhere = buildStudentWhere({ tenantId, centerId, filters, strictEnrollmentActive: false });
+  await logEnrollmentScopeDiagnostics({ tenantId, centerId, filters, strictWhere, fallbackWhere, tx });
+
+  return fallbackWhere;
 }
 
 async function computeTimelinesByStudentChunked({ tenantId, studentIds, asOf = new Date() }) {
@@ -157,6 +223,41 @@ async function getActiveEnrollmentMeta({ tenantId, centerId, studentIds }) {
       }
     }
   });
+
+  if (rows.length < ids.length) {
+    const foundIds = new Set(rows.map((row) => String(row.studentId)));
+    const missingIds = ids.filter((id) => !foundIds.has(id));
+    if (missingIds.length) {
+      const fallbackRows = await prisma.enrollment.findMany({
+        where: {
+          tenantId,
+          hierarchyNodeId: centerId,
+          studentId: { in: missingIds }
+        },
+        orderBy: [{ createdAt: "desc" }],
+        select: {
+          studentId: true,
+          batch: {
+            select: {
+              name: true,
+              primaryTeacher: {
+                select: {
+                  username: true,
+                  email: true,
+                  teacherProfile: {
+                    select: {
+                      fullName: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+      rows.push(...fallbackRows);
+    }
+  }
 
   for (const row of rows) {
     const studentId = String(row.studentId);
@@ -230,7 +331,7 @@ async function getPaidInRangeByStudent({ tenantId, centerId, studentIds, from, t
 }
 
 async function listPendingInstallments({ tenantId, centerId, range, limit, offset, filters = {} }) {
-  const where = buildStudentWhere({ tenantId, centerId, filters });
+  const where = await resolveStudentWhereWithEnrollmentFallback({ tenantId, centerId, filters, tx: prisma });
 
   const students = await prisma.student.findMany({
     where,
@@ -339,7 +440,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
 }
 
 async function listStudentWise({ tenantId, centerId, range, limit, offset, filters = {} }) {
-  const where = buildStudentWhere({ tenantId, centerId, filters });
+  const where = await resolveStudentWhereWithEnrollmentFallback({ tenantId, centerId, filters, tx: prisma });
 
   const students = await prisma.student.findMany({
     where,
@@ -507,7 +608,7 @@ function resolveReminderStatus(summary = {}) {
 }
 
 async function listReminders({ tenantId, centerId, range, limit, offset, filters = {} }) {
-  const where = buildStudentWhere({ tenantId, centerId, filters });
+  const where = await resolveStudentWhereWithEnrollmentFallback({ tenantId, centerId, filters, tx: prisma });
 
   const students = await prisma.student.findMany({
     where,

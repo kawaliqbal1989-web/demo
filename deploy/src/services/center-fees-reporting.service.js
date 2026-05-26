@@ -23,7 +23,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
   
   if (batchId) {
     additionalWhere += ` AND EXISTS (
-      SELECT 1 FROM Enrollment e2
+      SELECT 1 FROM enrollment e2
       WHERE e2.studentId = s.id
       AND e2.batchId = '${batchId.replace(/'/g, "''")}'
       AND e2.status = 'ACTIVE'
@@ -60,17 +60,17 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
     SELECT COUNT(1) AS total
     FROM (
       SELECT s.id
-      FROM Student s
+      FROM student s
       JOIN (
         SELECT
           i.studentId,
           SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS pendingAmount,
           MIN(CASE WHEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN i.dueDate ELSE NULL END) AS nextDueDate,
           SUM(CASE WHEN i.dueDate < NOW() AND GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN 1 ELSE 0 END) AS overdueCount
-        FROM StudentFeeInstallment i
+        FROM studentfeeinstallment i
         LEFT JOIN (
           SELECT installmentId, SUM(grossAmount) AS paidAmount
-          FROM FinancialTransaction
+          FROM financialtransaction
           WHERE tenantId = ?
             AND centerId = ?
             AND installmentId IS NOT NULL
@@ -84,7 +84,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
       WHERE s.tenantId = ?
         AND s.isActive = 1
         AND EXISTS (
-          SELECT 1 FROM Enrollment eScope
+          SELECT 1 FROM enrollment eScope
           WHERE eScope.studentId = s.id
             AND eScope.tenantId = ?
             AND eScope.hierarchyNodeId = ?
@@ -120,31 +120,31 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
       s.lastName,
       s.phonePrimary,
       s.guardianPhone,
-      (SELECT MAX(t2.receivedAt) FROM FinancialTransaction t2
+      (SELECT MAX(t2.receivedAt) FROM financialtransaction t2
        WHERE t2.tenantId = ?
          AND t2.centerId = ?
          AND t2.studentId = s.id
          AND t2.type IN (?, ?)) AS lastPaymentDate,
-      (SELECT b2.name FROM Enrollment e2 
-       LEFT JOIN Batch b2 ON b2.id = e2.batchId 
+      (SELECT b2.name FROM enrollment e2 
+       LEFT JOIN batch b2 ON b2.id = e2.batchId 
        WHERE e2.studentId = s.id AND e2.status = 'ACTIVE' 
        LIMIT 1) AS batchName,
-      (SELECT tp2.fullName FROM Enrollment e3
-       LEFT JOIN Batch b3 ON b3.id = e3.batchId
-       LEFT JOIN TeacherProfile tp2 ON tp2.authUserId = b3.primaryTeacherUserId
+      (SELECT tp2.fullName FROM enrollment e3
+       LEFT JOIN batch b3 ON b3.id = e3.batchId
+       LEFT JOIN teacherprofile tp2 ON tp2.authUserId = b3.primaryTeacherUserId
        WHERE e3.studentId = s.id AND e3.status = 'ACTIVE'
        LIMIT 1) AS teacherName
-    FROM Student s
+    FROM student s
     JOIN (
       SELECT
         i.studentId,
         SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS pendingAmount,
         MIN(CASE WHEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN i.dueDate ELSE NULL END) AS nextDueDate,
         SUM(CASE WHEN i.dueDate < NOW() AND GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) > 0 THEN 1 ELSE 0 END) AS overdueCount
-      FROM StudentFeeInstallment i
+      FROM studentfeeinstallment i
       LEFT JOIN (
         SELECT installmentId, SUM(grossAmount) AS paidAmount
-        FROM FinancialTransaction
+        FROM financialtransaction
         WHERE tenantId = ?
           AND centerId = ?
           AND installmentId IS NOT NULL
@@ -158,7 +158,7 @@ async function listPendingInstallments({ tenantId, centerId, range, limit, offse
     WHERE s.tenantId = ?
       AND s.isActive = 1
       AND EXISTS (
-        SELECT 1 FROM Enrollment eScope
+        SELECT 1 FROM enrollment eScope
         WHERE eScope.studentId = s.id
           AND eScope.tenantId = ?
           AND eScope.hierarchyNodeId = ?
@@ -241,7 +241,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
   
   if (batchId) {
     studentFilterConditions.push(prisma.$queryRaw`EXISTS (
-      SELECT 1 FROM BatchEnrollment be 
+      SELECT 1 FROM batchenrollment be 
       WHERE be.studentId = s.id 
       AND be.batchId = ${batchId}
       AND be.status = 'ACTIVE'
@@ -265,7 +265,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
   let additionalWhere = "";
   if (batchId) {
     additionalWhere += ` AND EXISTS (
-      SELECT 1 FROM Enrollment be 
+      SELECT 1 FROM enrollment be 
       WHERE be.studentId = s.id 
       AND be.tenantId = '${tenantId.replace(/'/g, "''")}'
       AND be.hierarchyNodeId = '${centerId.replace(/'/g, "''")}'
@@ -289,12 +289,12 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
     SELECT COUNT(1) AS total
     FROM (
       SELECT s.id
-      FROM Student s
+      FROM student s
       LEFT JOIN (
         SELECT
           studentId,
           SUM(grossAmount) AS paidInRange
-        FROM FinancialTransaction
+        FROM financialtransaction
         WHERE tenantId = ?
           AND centerId = ?
           AND studentId IS NOT NULL
@@ -309,11 +309,11 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
           SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS duePending,
           SUM(CASE WHEN i.dueDate < NOW() THEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) ELSE 0 END) AS overduePending,
           SUM(CASE WHEN i.dueDate < NOW() AND (i.amount - COALESCE(p.paidAmount, 0)) > 0 THEN 1 ELSE 0 END) AS overdueCount
-        FROM StudentFeeInstallment i
-        JOIN Student s2 ON s2.id = i.studentId
+        FROM studentfeeinstallment i
+        JOIN student s2 ON s2.id = i.studentId
         LEFT JOIN (
           SELECT installmentId, SUM(grossAmount) AS paidAmount
-          FROM FinancialTransaction
+          FROM financialtransaction
           WHERE tenantId = ?
             AND centerId = ?
             AND installmentId IS NOT NULL
@@ -323,7 +323,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
         WHERE i.tenantId = ?
           AND s2.tenantId = ?
           AND EXISTS (
-            SELECT 1 FROM Enrollment eScope
+            SELECT 1 FROM enrollment eScope
             WHERE eScope.studentId = i.studentId
               AND eScope.tenantId = ?
               AND eScope.hierarchyNodeId = ?
@@ -334,7 +334,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
       WHERE s.tenantId = ?
         AND s.isActive = 1
         AND EXISTS (
-          SELECT 1 FROM Enrollment eScope
+          SELECT 1 FROM enrollment eScope
           WHERE eScope.studentId = s.id
             AND eScope.tenantId = ?
             AND eScope.hierarchyNodeId = ?
@@ -364,12 +364,12 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
       COALESCE(due.duePending, 0) AS duePending,
       COALESCE(due.overduePending, 0) AS overduePending,
       COALESCE(due.overdueCount, 0) AS overdueCount
-    FROM Student s
+    FROM student s
     LEFT JOIN (
       SELECT
         studentId,
         SUM(grossAmount) AS paidInRange
-      FROM FinancialTransaction
+      FROM financialtransaction
       WHERE tenantId = ?
         AND centerId = ?
         AND studentId IS NOT NULL
@@ -384,11 +384,11 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
         SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS duePending,
         SUM(CASE WHEN i.dueDate < NOW() THEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) ELSE 0 END) AS overduePending,
         SUM(CASE WHEN i.dueDate < NOW() AND (i.amount - COALESCE(p.paidAmount, 0)) > 0 THEN 1 ELSE 0 END) AS overdueCount
-      FROM StudentFeeInstallment i
-      JOIN Student s2 ON s2.id = i.studentId
+      FROM studentfeeinstallment i
+      JOIN student s2 ON s2.id = i.studentId
       LEFT JOIN (
         SELECT installmentId, SUM(grossAmount) AS paidAmount
-        FROM FinancialTransaction
+        FROM financialtransaction
         WHERE tenantId = ?
           AND centerId = ?
           AND installmentId IS NOT NULL
@@ -398,7 +398,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
       WHERE i.tenantId = ?
         AND s2.tenantId = ?
         AND EXISTS (
-          SELECT 1 FROM Enrollment eScope
+          SELECT 1 FROM enrollment eScope
           WHERE eScope.studentId = i.studentId
             AND eScope.tenantId = ?
             AND eScope.hierarchyNodeId = ?
@@ -409,7 +409,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
     WHERE s.tenantId = ?
       AND s.isActive = 1
       AND EXISTS (
-        SELECT 1 FROM Enrollment eScope
+        SELECT 1 FROM enrollment eScope
         WHERE eScope.studentId = s.id
           AND eScope.tenantId = ?
           AND eScope.hierarchyNodeId = ?
@@ -472,9 +472,9 @@ async function getMonthlyDues({ tenantId, centerId, range }) {
           THEN GREATEST(i.amount - COALESCE(SUM(t.grossAmount), 0), 0)
           ELSE 0
         END AS overduePending
-      FROM StudentFeeInstallment i
-      JOIN Student s ON s.id = i.studentId
-      LEFT JOIN FinancialTransaction t
+      FROM studentfeeinstallment i
+      JOIN student s ON s.id = i.studentId
+      LEFT JOIN financialtransaction t
         ON t.installmentId = i.id
         AND t.tenantId = i.tenantId
         AND t.centerId = ${centerId}
@@ -510,16 +510,16 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
     SELECT COUNT(1) AS total
     FROM (
       SELECT s.id
-      FROM Student s
+      FROM student s
       JOIN (
         SELECT
           i.studentId,
           SUM(GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0)) AS pendingAmount
-        FROM StudentFeeInstallment i
-        JOIN Student s2 ON s2.id = i.studentId
+        FROM studentfeeinstallment i
+        JOIN student s2 ON s2.id = i.studentId
         LEFT JOIN (
           SELECT installmentId, SUM(grossAmount) AS paidAmount
-          FROM FinancialTransaction
+          FROM financialtransaction
           WHERE tenantId = ${tenantId}
             AND centerId = ${centerId}
             AND installmentId IS NOT NULL
@@ -537,7 +537,7 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
       WHERE s.tenantId = ${tenantId}
         AND s.isActive = 1
         AND EXISTS (
-          SELECT 1 FROM Enrollment eScope
+          SELECT 1 FROM enrollment eScope
           WHERE eScope.studentId = s.id
             AND eScope.tenantId = ${tenantId}
             AND eScope.hierarchyNodeId = ${centerId}
@@ -558,7 +558,7 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
       due.overdueAmount,
       due.overdueCount,
       due.nextDueDate
-    FROM Student s
+    FROM student s
     JOIN (
       SELECT
         i.studentId,
@@ -566,11 +566,11 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
         SUM(CASE WHEN i.dueDate < NOW() THEN GREATEST(i.amount - COALESCE(p.paidAmount, 0), 0) ELSE 0 END) AS overdueAmount,
         SUM(CASE WHEN i.dueDate < NOW() AND (i.amount - COALESCE(p.paidAmount, 0)) > 0 THEN 1 ELSE 0 END) AS overdueCount,
         MIN(CASE WHEN (i.amount - COALESCE(p.paidAmount, 0)) > 0 THEN i.dueDate ELSE NULL END) AS nextDueDate
-      FROM StudentFeeInstallment i
-      JOIN Student s2 ON s2.id = i.studentId
+      FROM studentfeeinstallment i
+      JOIN student s2 ON s2.id = i.studentId
       LEFT JOIN (
         SELECT installmentId, SUM(grossAmount) AS paidAmount
-        FROM FinancialTransaction
+        FROM financialtransaction
         WHERE tenantId = ${tenantId}
           AND centerId = ${centerId}
           AND installmentId IS NOT NULL
@@ -580,7 +580,7 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
       WHERE i.tenantId = ${tenantId}
         AND s2.tenantId = ${tenantId}
         AND EXISTS (
-          SELECT 1 FROM Enrollment eScope
+          SELECT 1 FROM enrollment eScope
           WHERE eScope.studentId = i.studentId
             AND eScope.tenantId = ${tenantId}
             AND eScope.hierarchyNodeId = ${centerId}
@@ -594,7 +594,7 @@ async function listReminders({ tenantId, centerId, range, limit, offset }) {
     WHERE s.tenantId = ${tenantId}
       AND s.isActive = 1
       AND EXISTS (
-        SELECT 1 FROM Enrollment eScope
+        SELECT 1 FROM enrollment eScope
         WHERE eScope.studentId = s.id
           AND eScope.tenantId = ${tenantId}
           AND eScope.hierarchyNodeId = ${centerId}

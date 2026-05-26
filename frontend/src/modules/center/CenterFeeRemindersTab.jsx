@@ -5,6 +5,7 @@ import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
 import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { useAuth } from "../../hooks/useAuth";
 
 const STATUS_OPTIONS = [
   { value: "PENDING,OVERDUE", label: "Pending & Overdue" },
@@ -61,6 +62,8 @@ function getStatusBadge(status) {
 }
 
 export function CenterFeeRemindersTab() {
+  const { isAuthenticated, authBootstrapPending, mustChangePassword } = useAuth();
+
   // Filter state
   const [batches, setBatches] = useState([]);
   const [levels, setLevels] = useState([]);
@@ -79,6 +82,10 @@ export function CenterFeeRemindersTab() {
 
   // Load filter dropdowns
   useEffect(() => {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
+      return;
+    }
+
     const load = async () => {
       try {
         const [batchesRes, levelsRes, teachersRes] = await Promise.all([
@@ -94,10 +101,15 @@ export function CenterFeeRemindersTab() {
       }
     };
     load();
-  }, []);
+  }, [authBootstrapPending, isAuthenticated, mustChangePassword]);
 
   // Fetch pending installments
   const fetchInstallments = useCallback(async () => {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -133,7 +145,7 @@ export function CenterFeeRemindersTab() {
     } finally {
       setLoading(false);
     }
-  }, [statusFilter, batchId, levelId, teacherId, search, daysOverdueFilter]);
+  }, [authBootstrapPending, isAuthenticated, mustChangePassword, statusFilter, batchId, levelId, teacherId, search, daysOverdueFilter]);
 
   useEffect(() => {
     fetchInstallments();

@@ -5,6 +5,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { getTeacherFinancialOverview } from "../../services/teacherPortalService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { useAuth } from "../../hooks/useAuth";
 
 const PAGE_SIZE = 25;
 
@@ -13,6 +14,7 @@ function toCurrency(value) {
 }
 
 function TeacherFeesPage() {
+  const { isAuthenticated, authBootstrapPending, mustChangePassword } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [offset, setOffset] = useState(0);
@@ -26,6 +28,11 @@ function TeacherFeesPage() {
   });
 
   useEffect(() => {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
 
     async function load() {
@@ -55,7 +62,7 @@ function TeacherFeesPage() {
     return () => {
       cancelled = true;
     };
-  }, [offset]);
+  }, [authBootstrapPending, isAuthenticated, mustChangePassword, offset]);
 
   const hasPrev = offset > 0;
   const hasNext = Number(payload.total || 0) > offset + Number(payload.limit || PAGE_SIZE);

@@ -6,6 +6,7 @@ import { listBatches } from "../../services/batchesService";
 import { listLevels } from "../../services/levelsService";
 import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { useAuth } from "../../hooks/useAuth";
 
 function formatMoney(value) {
   const num = Number(value);
@@ -47,6 +48,8 @@ function getStatusBadge(overdue, pending, paid, financialStatus) {
 }
 
 export function CenterFeesDashboardTab() {
+  const { isAuthenticated, authBootstrapPending, mustChangePassword } = useAuth();
+
   // Filter state
   const [batches, setBatches] = useState([]);
   const [levels, setLevels] = useState([]);
@@ -64,6 +67,10 @@ export function CenterFeesDashboardTab() {
 
   // Load filter dropdowns
   useEffect(() => {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
+      return;
+    }
+
     const load = async () => {
       try {
         const [batchesRes, levelsRes, teachersRes] = await Promise.all([
@@ -79,10 +86,15 @@ export function CenterFeesDashboardTab() {
       }
     };
     load();
-  }, []);
+  }, [authBootstrapPending, isAuthenticated, mustChangePassword]);
 
   // Fetch student-wise fee data
   const fetchStudents = useCallback(async () => {
+    if (authBootstrapPending || !isAuthenticated || mustChangePassword) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
@@ -119,7 +131,7 @@ export function CenterFeesDashboardTab() {
     } finally {
       setLoading(false);
     }
-  }, [levelId, batchId, teacherId, search]);
+  }, [authBootstrapPending, isAuthenticated, mustChangePassword, levelId, batchId, teacherId, search]);
 
   useEffect(() => {
     fetchStudents();

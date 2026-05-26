@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma.js";
+import { logger } from "../lib/logger.js";
 import { computeFeeTimelinesForStudents, computeStudentFeeTimeline } from "./student-fee-due.service.js";
 import { createNotification } from "./notification.service.js";
 import { resolveParentVisibilityScope } from "./parent-visibility.service.js";
@@ -203,20 +204,50 @@ async function listTeacherStudentFinancialRows({ tenantId, teacherUserId, hierar
     teacherScopeFilters.push({ batchId: { in: batchIds } });
   }
 
-  const where = {
+  const primaryWhere = {
     tenantId,
     hierarchyNodeId,
     status: "ACTIVE",
     OR: teacherScopeFilters
   };
 
-  const totalDistinctRows = await tx.enrollment.groupBy({
+  let effectiveWhere = primaryWhere;
+  let totalDistinctRows = await tx.enrollment.groupBy({
     by: ["studentId"],
-    where
+    where: effectiveWhere
   });
 
+  if (!totalDistinctRows.length) {
+    const fallbackScopeFilters = [
+      ...teacherScopeFilters,
+      { student: { currentTeacherUserId: teacherUserId } }
+    ];
+
+    const fallbackWhere = {
+      tenantId,
+      hierarchyNodeId,
+      OR: fallbackScopeFilters
+    };
+
+    totalDistinctRows = await tx.enrollment.groupBy({
+      by: ["studentId"],
+      where: fallbackWhere
+    });
+
+    if (totalDistinctRows.length) {
+      effectiveWhere = fallbackWhere;
+      logger.warn("teacher_financial_scope_fallback_applied", {
+        tenantId,
+        hierarchyNodeId,
+        teacherUserId,
+        fallbackReason: "NO_ACTIVE_ENROLLMENT_SCOPE_MATCH",
+        totalDistinctStudents: totalDistinctRows.length
+      });
+    }
+  }
+
   const enrollments = await tx.enrollment.findMany({
-    where,
+    where: effectiveWhere,
     distinct: ["studentId"],
     orderBy: [{ student: { admissionNo: "asc" } }, { studentId: "asc" }],
     skip: Math.max(0, Number(offset) || 0),

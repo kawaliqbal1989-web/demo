@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { MetricCard } from "../../components/MetricCard";
 import { PageHeader } from "../../components/PageHeader";
@@ -9,6 +9,24 @@ import { useAuth } from "../../hooks/useAuth";
 
 const PAGE_SIZE = 25;
 
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDate(value) {
+  if (!value) return "-";
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return "-";
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+const STATUS_STYLES = {
+  PAID:     { background: "#ecfccb", color: "#3f6212" },
+  PENDING:  { background: "#fffbeb", color: "#b45309" },
+  OVERDUE:  { background: "#fee2e2", color: "#b91c1c" },
+  NOT_SET:  { background: "#f3f4f6", color: "#374151" }
+};
+function statusStyle(s) {
+  return STATUS_STYLES[String(s || "").toUpperCase()] || STATUS_STYLES.NOT_SET;
+}
+
 function toCurrency(value) {
   return `Rs ${Number(value || 0).toLocaleString("en-IN")}`;
 }
@@ -18,6 +36,8 @@ function TeacherFeesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [offset, setOffset] = useState(0);
+  const [q, setQ] = useState("");
+  const initialized = useRef(false);
   const [payload, setPayload] = useState({
     widgets: null,
     alerts: [],
@@ -41,6 +61,7 @@ function TeacherFeesPage() {
       try {
         const response = await getTeacherFinancialOverview({ limit: PAGE_SIZE, offset });
         if (cancelled) return;
+        initialized.current = true;
         setPayload(response?.data?.data || {
           widgets: null,
           alerts: [],
@@ -75,6 +96,16 @@ function TeacherFeesPage() {
     collectionRisk: payload?.widgets?.collectionRisk || "NONE"
   }), [payload]);
 
+  const filteredItems = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return payload.items || [];
+    return (payload.items || []).filter(
+      (row) =>
+        String(row.studentName || "").toLowerCase().includes(term) ||
+        String(row.admissionNo || "").toLowerCase().includes(term)
+    );
+  }, [payload.items, q]);
+
   return (
     <section className="dash-section">
       <PageHeader
@@ -88,7 +119,7 @@ function TeacherFeesPage() {
         )}
       />
 
-      {loading ? <SkeletonLoader variant="card" count={3} /> : null}
+      {loading && !initialized.current ? <SkeletonLoader variant="card" count={3} /> : null}
 
       {error ? (
         <div className="card">
@@ -96,8 +127,8 @@ function TeacherFeesPage() {
         </div>
       ) : null}
 
-      {!loading && !error ? (
-        <>
+      {(initialized.current || !loading) && !error ? (
+        <> 
           <div className="dash-kpi-grid">
             <MetricCard label="Pending Fee Students" value={summary.pendingFeeStudents} icon="💳" accent="#b45309" />
             <MetricCard label="Overdue Students" value={summary.overdueStudents} icon="⚠️" accent="#dc2626" />
@@ -133,8 +164,19 @@ function TeacherFeesPage() {
               <span className="section-header__text">Assigned Student Fee Table</span>
             </div>
 
-            {Array.isArray(payload.items) && payload.items.length ? (
-              <div style={{ overflowX: "auto" }}>
+            <div style={{ marginBottom: 4 }}>
+              <input
+                className="input"
+                type="search"
+                placeholder="Search by name or admission no…"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                style={{ maxWidth: 320 }}
+              />
+            </div>
+
+            {Array.isArray(filteredItems) && filteredItems.length ? (
+              <div style={{ overflowX: "auto", opacity: loading ? 0.5 : 1, transition: "opacity 0.2s" }}>
                 <table className="table">
                   <thead>
                     <tr>
@@ -148,17 +190,30 @@ function TeacherFeesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {payload.items.map((row) => (
+                    {filteredItems.map((row) => (
                       <tr key={row.studentId}>
                         <td>
-                          <div style={{ fontWeight: 600 }}>{row.studentName}</div>
+                          <Link
+                            to={`/teacher/students/${row.studentId}`}
+                            style={{ fontWeight: 600, color: "inherit", textDecoration: "none" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.textDecoration = "underline")}
+                            onMouseLeave={(e) => (e.currentTarget.style.textDecoration = "none")}
+                          >
+                            {row.studentName}
+                          </Link>
                           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{row.admissionNo || "-"}</div>
                         </td>
-                        <td>{row.totals?.status || "-"}</td>
+                        <td>
+                          {row.totals?.status ? (
+                            <span style={{ borderRadius: 999, fontSize: 11, fontWeight: 700, padding: "3px 9px", ...statusStyle(row.totals.status) }}>
+                              {row.totals.status}
+                            </span>
+                          ) : "-"}
+                        </td>
                         <td style={{ textAlign: "right" }}>{toCurrency(row.totals?.totalPending)}</td>
                         <td style={{ textAlign: "right" }}>{toCurrency(row.totals?.totalOverdue)}</td>
                         <td>{row.nextDue?.monthLabel || "-"}</td>
-                        <td>{row.latestPayment?.paidAt ? new Date(row.latestPayment.paidAt).toLocaleDateString() : "-"}</td>
+                        <td>{fmtDate(row.latestPayment?.paidAt)}</td>
                         <td>
                           <span
                             style={{
@@ -180,7 +235,7 @@ function TeacherFeesPage() {
               </div>
             ) : (
               <p style={{ color: "var(--color-text-muted)", margin: 0 }}>
-                No assigned students found for the current teacher scope.
+                {q.trim() ? `No students match "${q.trim()}".` : "No assigned students found for the current teacher scope."}
               </p>
             )}
 

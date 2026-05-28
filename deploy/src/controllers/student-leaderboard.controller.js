@@ -22,8 +22,8 @@ const getStudentLeaderboard = asyncHandler(async (req, res) => {
       ROUND(AVG(ws.score), 1)     AS avgScore,
       COUNT(ws.id)                AS totalSubmissions,
       MAX(ws.finalSubmittedAt)    AS lastSubmittedAt
-    FROM Student s
-    INNER JOIN WorksheetSubmission ws
+    FROM student s
+    INNER JOIN worksheetsubmission ws
       ON ws.studentId = s.id
       AND ws.tenantId = s.tenantId
       AND ws.finalSubmittedAt IS NOT NULL

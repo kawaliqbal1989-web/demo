@@ -324,7 +324,7 @@ async function getCompetitionStats({ authTenantId, queryTenantId, from, to }) {
       const whereSql = Prisma.sql`${Prisma.join(conditions, Prisma.sql` AND `)}`;
 
       return prisma.$queryRaw(
-        Prisma.sql`SELECT AVG(TIMESTAMPDIFF(SECOND, createdAt, updatedAt)) / 3600 AS avgHours FROM Competition WHERE ${whereSql}`
+        Prisma.sql`SELECT AVG(TIMESTAMPDIFF(SECOND, createdAt, updatedAt)) / 3600 AS avgHours FROM competition WHERE ${whereSql}`
       );
     })()
   ]);

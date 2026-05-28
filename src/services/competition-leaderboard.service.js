@@ -41,14 +41,14 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
   }
 
   const baseLeaderboardQuery = Prisma.sql`
-    FROM CompetitionEnrollment ce
-    INNER JOIN Student s
+    FROM competitionenrollment ce
+    INNER JOIN student s
       ON s.id = ce.studentId
       AND s.tenantId = ce.tenantId
-    INNER JOIN CompetitionWorksheet cw
+    INNER JOIN competitionworksheet cw
       ON cw.competitionId = ce.competitionId
       AND cw.tenantId = ce.tenantId
-    INNER JOIN WorksheetSubmission ws
+    INNER JOIN worksheetsubmission ws
       ON ws.worksheetId = cw.worksheetId
       AND ws.studentId = ce.studentId
       AND ws.tenantId = ce.tenantId

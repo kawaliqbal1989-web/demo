@@ -108,7 +108,7 @@ const updateLevelFeeDefaults = asyncHandler(async (req, res) => {
   });
 
   await prisma.$executeRaw`
-    UPDATE Student
+    UPDATE student
     SET totalFeeAmount = CASE
       WHEN ${updated.defaultTotalFeeAmount} IS NULL THEN NULL
       ELSE GREATEST(0, ${updated.defaultTotalFeeAmount} - COALESCE(feeConcessionAmount, 0))

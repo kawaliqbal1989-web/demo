@@ -236,32 +236,7 @@ async function listStudentWise({ tenantId, centerId, range, limit, offset, filte
   const toExclusive = range.toExclusive;
   const { batchId, levelId, search } = filters;
 
-  // Build additional WHERE conditions using Prisma's Sql helper
-  const studentFilterConditions = [];
-  
-  if (batchId) {
-    studentFilterConditions.push(prisma.$queryRaw`EXISTS (
-      SELECT 1 FROM batchenrollment be 
-      WHERE be.studentId = s.id 
-      AND be.batchId = ${batchId}
-      AND be.status = 'ACTIVE'
-    )`);
-  }
-  
-  if (levelId) {
-    studentFilterConditions.push(prisma.$queryRaw`s.currentLevelId = ${levelId}`);
-  }
-  
-  if (search) {
-    const searchPattern = `%${search}%`;
-    studentFilterConditions.push(prisma.$queryRaw`(
-      s.firstName LIKE ${searchPattern} OR 
-      s.lastName LIKE ${searchPattern} OR 
-      s.admissionNo LIKE ${searchPattern}
-    )`);
-  }
-
-  // For now, use a simpler approach - build complete WHERE as string
+  // Build complete WHERE clause from validated filter inputs.
   let additionalWhere = "";
   if (batchId) {
     additionalWhere += ` AND EXISTS (

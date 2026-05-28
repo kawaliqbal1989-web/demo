@@ -142,6 +142,9 @@ app.get("/ready", async (_req, res) => {
 
 app.use("/api", apiRouter);
 
+// Silence the browser's automatic favicon request so it doesn't pollute logs.
+app.get("/favicon.ico", (_req, res) => res.sendStatus(204));
+
 // ---------------------------------------------------------------------------
 // In production, serve the built React frontend from frontend/dist.
 // All non-API routes fall through to index.html for client-side routing.

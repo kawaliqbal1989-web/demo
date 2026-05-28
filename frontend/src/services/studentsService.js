@@ -32,7 +32,8 @@ async function listStudents({
   teacherUserId = "",
   levelId = "",
   courseCode = "",
-  batchId = ""
+  batchId = "",
+  notEnrolledOnly = false
 } = {}) {
   const response = await apiClient.get("/students", {
     params: {
@@ -43,7 +44,8 @@ async function listStudents({
       teacherUserId: teacherUserId || undefined,
       levelId: levelId || undefined,
       courseCode: courseCode || undefined,
-      batchId: batchId || undefined
+      batchId: batchId || undefined,
+      notEnrolledOnly: notEnrolledOnly ? "1" : undefined
     }
   });
   return response.data;

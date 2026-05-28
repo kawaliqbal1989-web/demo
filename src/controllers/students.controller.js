@@ -1032,6 +1032,7 @@ const listStudents = asyncHandler(async (req, res) => {
   const where = {
     tenantId: req.auth.tenantId
   };
+  const enrollmentFilters = [];
 
   if (req.auth.role !== "SUPERADMIN" && req.auth.hierarchyNodeId) {
     where.hierarchyNodeId = req.auth.hierarchyNodeId;
@@ -1057,12 +1058,25 @@ const listStudents = asyncHandler(async (req, res) => {
 
   const teacherUserId = req.query.teacherUserId ? String(req.query.teacherUserId) : "";
   if (teacherUserId) {
-    where.batchEnrollments = {
-      some: {
-        status: "ACTIVE",
-        assignedTeacherUserId: teacherUserId
+    enrollmentFilters.push({
+      batchEnrollments: {
+        some: {
+          status: "ACTIVE",
+          assignedTeacherUserId: teacherUserId
+        }
       }
-    };
+    });
+  }
+
+  const notEnrolledOnly = normalizeBooleanFlag(req.query.notEnrolledOnly, false);
+  if (notEnrolledOnly) {
+    enrollmentFilters.push({
+      batchEnrollments: {
+        none: {
+          status: "ACTIVE"
+        }
+      }
+    });
   }
 
   const courseCode = req.query.courseCode ? String(req.query.courseCode).trim() : "";
@@ -1072,6 +1086,10 @@ const listStudents = asyncHandler(async (req, res) => {
         name: { contains: courseCode }
       }
     };
+  }
+
+  if (enrollmentFilters.length) {
+    where.AND = [...(Array.isArray(where.AND) ? where.AND : []), ...enrollmentFilters];
   }
 
   const total = await prisma.student.count({ where });

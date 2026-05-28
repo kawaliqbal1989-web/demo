@@ -1,242 +1,205 @@
 import { useEffect, useMemo, useState } from "react";
-import toast from "react-hot-toast";
-import { DataTable } from "../../components/DataTable";
+import { SearchableDropdown } from "../../components/SearchableDropdown";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
-import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { listBatches } from "../../services/batchesService";
-import { listCatalogCourseLevels } from "../../services/catalogService";
 import { listCenterAvailableCourses } from "../../services/centerService";
-import { createEnrollment, exportEnrollmentsCsvUrl, listEnrollments, updateEnrollment } from "../../services/enrollmentsService";
-import { listStudents, assignStudentCourse } from "../../services/studentsService";
+import { exportEnrollmentsCsvUrl, updateEnrollment } from "../../services/enrollmentsService";
+import { listLevels } from "../../services/levelsService";
 import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { CenterEnrollmentsBulkActions } from "./CenterEnrollmentsBulkActions";
+import { CenterEnrollmentsDialogs } from "./CenterEnrollmentsDialogs";
+import { CenterEnrollmentsFilters } from "./CenterEnrollmentsFilters";
+import { CenterEnrollmentsPagination } from "./CenterEnrollmentsPagination";
+import { CenterEnrollmentsRosterTable } from "./CenterEnrollmentsRosterTable";
+import { CenterEnrollmentsSummaryStrip } from "./CenterEnrollmentsSummaryStrip";
+import { useCenterEnrollmentBulkActions } from "./useCenterEnrollmentBulkActions";
+import { useCenterEnrollmentsRoster } from "./useCenterEnrollmentsRoster";
+import { useCenterEnrollmentForm } from "./useCenterEnrollmentForm";
 
 function CenterEnrollmentsPage() {
   const [batches, setBatches] = useState([]);
   const [teachers, setTeachers] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [studentQuery, setStudentQuery] = useState("");
-  const [studentsLoading, setStudentsLoading] = useState(false);
-  const [studentsError, setStudentsError] = useState("");
+  const [levels, setLevels] = useState([]);
+  const [pageError, setPageError] = useState("");
+  const [bootstrapping, setBootstrapping] = useState(true);
 
-  const [batchId, setBatchId] = useState("");
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [rosterPage, setRosterPage] = useState(0);
-  const [rosterTotal, setRosterTotal] = useState(0);
-  const ROSTER_PAGE_SIZE = 100;
+  const {
+    batchId,
+    setBatchId,
+    rows,
+    loading: rosterLoading,
+    error: rosterError,
+    setError: setRosterError,
+    rosterPage,
+    rosterTotal,
+    rosterQuery,
+    setRosterQuery,
+    rosterTeacherUserId,
+    setRosterTeacherUserId,
+    rosterLevelId,
+    setRosterLevelId,
+    rosterStatus,
+    setRosterStatus,
+    rosterStudentActive,
+    setRosterStudentActive,
+    rosterFrom,
+    setRosterFrom,
+    rosterTo,
+    setRosterTo,
+    rosterFeeStatus,
+    setRosterFeeStatus,
+    rosterPendingInstallments,
+    setRosterPendingInstallments,
+    rosterFilters,
+    rosterSummary,
+    loadEnrollments,
+    clearRosterFilters,
+    pageSize: ROSTER_PAGE_SIZE
+  } = useCenterEnrollmentsRoster({ pageSize: 100 });
 
-  const [studentId, setStudentId] = useState("");
-  const [assignedTeacherUserId, setAssignedTeacherUserId] = useState("");
-  const [courseId, setCourseId] = useState("");
   const [courses, setCourses] = useState([]);
-  const [courseLevelId, setCourseLevelId] = useState("");
-  const [courseLevels, setCourseLevels] = useState([]);
-  const [courseLevelsLoading, setCourseLevelsLoading] = useState(false);
-  const [creating, setCreating] = useState(false);
-
-  const PAGE_SIZE = 100;
-  const [studentPage, setStudentPage] = useState(0);
-  const [studentTotal, setStudentTotal] = useState(0);
 
   const teacherOptions = useMemo(() => teachers.filter((t) => t?.role === "TEACHER"), [teachers]);
+  const {
+    PAGE_SIZE,
+    students,
+    studentQuery,
+    setStudentQuery,
+    studentsLoading,
+    studentsError,
+    studentId,
+    setStudentId,
+    assignedTeacherUserId,
+    setAssignedTeacherUserId,
+    courseId,
+    setCourseId,
+    courseLevelId,
+    setCourseLevelId,
+    courseLevels,
+    courseLevelsLoading,
+    creating,
+    studentPage,
+    studentTotal,
+    teacherDropdownOptions,
+    studentDropdownOptions,
+    loadStudentOptions,
+    clearStudentSearch,
+    resetEnrollmentForm,
+    submitEnrollment
+  } = useCenterEnrollmentForm({
+    batchId,
+    teacherOptions,
+    batches,
+    rosterPage,
+    loadEnrollments,
+    onError: setPageError
+  });
 
-  const [enrolledIds, setEnrolledIds] = useState(new Set());
-
-  const loadEnrolledIds = async (forBatchId) => {
-    if (!forBatchId) { setEnrolledIds(new Set()); return; }
-    const ids = new Set();
-    let off = 0;
-    const chunk = 200;
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const res = await listEnrollments({ limit: chunk, offset: off, batchId: forBatchId, status: "ACTIVE" });
-      const items = res.data?.items || [];
-      for (const e of items) ids.add(e?.student?.id || e?.studentId);
-      if (items.length < chunk) break;
-      off += chunk;
-    }
-    setEnrolledIds(ids);
-  };
-
-  const availableStudents = useMemo(() => students.filter((s) => !enrolledIds.has(s.id)), [students, enrolledIds]);
-
-  const loadStudentOptions = async (query = "", page = 0) => {
-    setStudentsLoading(true);
-    setStudentsError("");
-    try {
-      const s = await listStudents({
-        limit: PAGE_SIZE,
-        offset: page * PAGE_SIZE,
-        q: query,
-        status: "ACTIVE"
-      });
-      const result = s.data || {};
-      setStudents(result.items || result || []);
-      setStudentTotal(result.total ?? 0);
-      setStudentPage(page);
-    } catch (err) {
-      setStudentsError(getFriendlyErrorMessage(err) || "Failed to load students.");
-    } finally {
-      setStudentsLoading(false);
-    }
-  };
+  const {
+    selectedEnrollmentIds,
+    setSelectedEnrollmentIds,
+    selectedEnrollmentCount,
+    selectedActiveEnrollmentCount,
+    selectedRowsWithTeacherCount,
+    bulkTeacherDropdownOptions,
+    bulkTeacherUserId,
+    setBulkTeacherUserId,
+    bulkStatus,
+    setBulkStatus,
+    bulkUpdateTargets,
+    bulkActionMode,
+    bulkUpdating,
+    bulkUnenrollTargets,
+    bulkUnenrolling,
+    unenrollTarget,
+    selectedBulkTeacherLabel,
+    onRequestUnenroll,
+    onCancelUnenroll,
+    onConfirmUnenroll,
+    onRequestBulkUnenroll,
+    onCancelBulkUnenroll,
+    onConfirmBulkUnenroll,
+    onRequestBulkApplyUpdates,
+    onRequestBulkClearTeacher,
+    onCancelBulkUpdate,
+    onConfirmBulkUpdate
+  } = useCenterEnrollmentBulkActions({
+    rows,
+    teacherOptions,
+    batchId,
+    rosterPage,
+    loadEnrollments
+  });
 
   const bootstrap = async () => {
-    setLoading(true);
-    setError("");
+    setBootstrapping(true);
+    setPageError("");
+    setRosterError("");
     try {
-      const [b, t, c] = await Promise.all([
+      const [b, t, c, levelsResponse] = await Promise.all([
         listBatches({ limit: 200, offset: 0 }),
         listTeachers({ limit: 200, offset: 0 }),
-        listCenterAvailableCourses()
+        listCenterAvailableCourses(),
+        listLevels()
       ]);
       setBatches(b.data?.items || []);
       setTeachers(t.data || []);
       setCourses(Array.isArray(c?.data) ? c.data : c?.data?.items || []);
+      setLevels(Array.isArray(levelsResponse?.data) ? levelsResponse.data : levelsResponse?.data?.items || []);
       await loadStudentOptions("", 0);
+      if (batchId) {
+        await loadEnrollments(batchId, rosterPage, rosterFilters);
+      }
     } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to load setup data.");
+      setPageError(getFriendlyErrorMessage(err) || "Failed to load setup data.");
     } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadEnrollments = async (nextBatchId, page = 0) => {
-    const id = nextBatchId || batchId;
-    if (!id) {
-      setRows([]);
-      setRosterTotal(0);
-      setRosterPage(0);
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    try {
-      const data = await listEnrollments({ limit: ROSTER_PAGE_SIZE, offset: page * ROSTER_PAGE_SIZE, batchId: id, status: "ACTIVE" });
-      setRows(data.data?.items || []);
-      setRosterTotal(data.data?.total ?? 0);
-      setRosterPage(page);
-      await loadEnrolledIds(id);
-    } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to load enrollments.");
-    } finally {
-      setLoading(false);
+      setBootstrapping(false);
     }
   };
 
   useEffect(() => {
     void bootstrap();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadCourseLevels = async () => {
-      if (!courseId) {
-        setCourseLevels([]);
-        setCourseLevelId("");
-        return;
-      }
-
-      setCourseLevelsLoading(true);
-      try {
-        const resp = await listCatalogCourseLevels({ courseId, limit: 200, offset: 0, status: "ACTIVE" });
-        if (cancelled) return;
-
-        const items = Array.isArray(resp?.data?.items) ? resp.data.items : [];
-        setCourseLevels(items);
-        setCourseLevelId((prev) => (items.some((item) => item?.level?.id === prev) ? prev : ""));
-      } catch (_err) {
-        if (cancelled) return;
-        setCourseLevels([]);
-        setCourseLevelId("");
-        toast.error("Failed to load course levels.");
-      } finally {
-        if (!cancelled) {
-          setCourseLevelsLoading(false);
-        }
-      }
-    };
-
-    void loadCourseLevels();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [courseId]);
 
   const onSelectBatch = async (id) => {
     setBatchId(id);
-    setStudentId("");
-    setAssignedTeacherUserId("");
-    setCourseId("");
-    setCourseLevelId("");
+    resetEnrollmentForm();
+    const batch = batches.find((b) => b.id === id);
+    if (batch?.primaryTeacherUserId) {
+      setAssignedTeacherUserId(batch.primaryTeacherUserId);
+    }
     await loadEnrollments(id, 0);
   };
 
-  const onSearchStudents = async () => {
-    setStudentId("");
-    await loadStudentOptions(studentQuery.trim(), 0);
+  const onApplyRosterFilters = async () => {
+    await loadEnrollments(batchId, 0);
   };
 
-  const onCreate = async (e) => {
-    e.preventDefault();
-    if (!batchId || !studentId) {
-      setError("batchId and studentId are required");
-      return;
-    }
-
-    setCreating(true);
-    setError("");
-    try {
-      await createEnrollment({
-        batchId,
-        studentId,
-        assignedTeacherUserId: assignedTeacherUserId || undefined,
-        levelId: courseLevelId || undefined
-      });
-      if (courseId) {
-        try {
-          await assignStudentCourse(studentId, courseId);
-        } catch (_courseErr) {
-          toast.error("Enrolled successfully but failed to assign course.");
-        }
-      }
-      setStudentId("");
-      setAssignedTeacherUserId("");
-      setCourseId("");
-      setCourseLevelId("");
-      await loadEnrollments(batchId, rosterPage);
-      await loadEnrolledIds(batchId);
-    } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to enroll.");
-    } finally {
-      setCreating(false);
-    }
+  const onClearRosterFilters = async () => {
+    await clearRosterFilters();
   };
 
-  const [unenrollTarget, setUnenrollTarget] = useState(null);
-
-  const onUnenroll = async () => {
-    const row = unenrollTarget;
-    setUnenrollTarget(null);
-    if (!row) return;
-
-    try {
-      await updateEnrollment(row.id, { status: "INACTIVE" });
-      await loadEnrollments(batchId, rosterPage);
-    } catch (err) {
-      toast.error(getFriendlyErrorMessage(err) || "Failed to unenroll");
-    }
+  const handleAssignTeacher = async (enrollmentId, teacherUserId) => {
+    await updateEnrollment(enrollmentId, { assignedTeacherUserId: teacherUserId });
+    await loadEnrollments(batchId, rosterPage);
   };
 
-  if (loading && !batches.length) {
+  const handleQuickFilter = (patch) => {
+    if (patch.teacherUserId !== undefined) setRosterTeacherUserId(patch.teacherUserId);
+    if (patch.feeStatus !== undefined) setRosterFeeStatus(patch.feeStatus);
+    if (patch.pendingInstallments !== undefined) setRosterPendingInstallments(patch.pendingInstallments);
+    if (patch.studentActive !== undefined) setRosterStudentActive(patch.studentActive);
+    void loadEnrollments(batchId, 0, patch);
+  };
+
+  if ((bootstrapping || rosterLoading) && !batches.length) {
     return <SkeletonLoader variant="table" rows={6} />;
   }
+
+  const error = pageError || rosterError;
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
@@ -263,7 +226,23 @@ function CenterEnrollmentsPage() {
 
         {batchId ? (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <a className="button secondary" href={exportEnrollmentsCsvUrl({ batchId })} target="_blank" rel="noreferrer">
+            <a
+              className="button secondary"
+              href={exportEnrollmentsCsvUrl({
+                batchId,
+                status: rosterStatus,
+                q: rosterQuery.trim(),
+                teacherUserId: rosterTeacherUserId,
+                levelId: rosterLevelId,
+                studentActive: rosterStudentActive,
+                from: rosterFrom,
+                to: rosterTo,
+                feeStatus: rosterFeeStatus,
+                pendingInstallments: rosterPendingInstallments
+              })}
+              target="_blank"
+              rel="noreferrer"
+            >
               Export CSV
             </a>
             <button className="button secondary" style={{ width: "auto" }} onClick={() => void loadEnrollments(batchId, rosterPage)}>
@@ -274,7 +253,7 @@ function CenterEnrollmentsPage() {
       </div>
 
       {batchId ? (
-        <form className="card" onSubmit={onCreate} style={{ display: "grid", gap: 10 }}>
+        <form className="card" onSubmit={(e) => void submitEnrollment(e)} style={{ display: "grid", gap: 10 }}>
           <h3 style={{ marginTop: 0 }}>Enroll Student</h3>
           <div style={{ display: "flex", gap: 8, alignItems: "end", flexWrap: "wrap" }}>
             <label style={{ minWidth: 260, flex: "1 1 320px" }}>
@@ -286,18 +265,11 @@ function CenterEnrollmentsPage() {
                 onChange={(e) => setStudentQuery(e.target.value)}
               />
             </label>
-            <button className="button secondary" type="button" style={{ width: "auto" }} disabled={studentsLoading} onClick={() => void onSearchStudents()}>
-              {studentsLoading ? "Searching..." : "Search"}
-            </button>
             <button
               className="button secondary"
               type="button"
               style={{ width: "auto" }}
-              onClick={() => {
-                setStudentQuery("");
-                setStudentId("");
-                void loadStudentOptions("", 0);
-              }}
+              onClick={clearStudentSearch}
               disabled={studentsLoading}
             >
               Clear
@@ -305,6 +277,8 @@ function CenterEnrollmentsPage() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--color-text-muted)" }}>
             <span>Showing {students.length} of {studentTotal} students{studentQuery.trim() ? ` matching "${studentQuery.trim()}"` : ""}</span>
+            <span>Only students without an active enrollment are available here.</span>
+            <span>{studentsLoading ? "Updating matches..." : "Search updates automatically."}</span>
             <button
               className="button secondary"
               type="button"
@@ -329,26 +303,23 @@ function CenterEnrollmentsPage() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
             <label>
               Student
-              <select className="select" value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-                <option value="">Select</option>
-                {availableStudents.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.admissionNo} - {s.firstName} {s.lastName}
-                  </option>
-                ))}
-              </select>
+              <SearchableDropdown
+                options={studentDropdownOptions}
+                value={studentId}
+                onChange={setStudentId}
+                placeholder={studentsLoading ? "Loading students..." : "Select eligible student"}
+                disabled={studentsLoading}
+              />
             </label>
 
             <label>
               Assigned teacher (optional)
-              <select className="select" value={assignedTeacherUserId} onChange={(e) => setAssignedTeacherUserId(e.target.value)}>
-                <option value="">None</option>
-                {teacherOptions.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t?.teacherProfile?.fullName || t.username}
-                  </option>
-                ))}
-              </select>
+              <SearchableDropdown
+                options={teacherDropdownOptions}
+                value={assignedTeacherUserId}
+                onChange={setAssignedTeacherUserId}
+                placeholder="Assign teacher"
+              />
             </label>
 
             <label>
@@ -388,7 +359,12 @@ function CenterEnrollmentsPage() {
             </label>
           </div>
 
-          <button className="button" disabled={creating} style={{ width: "auto" }}>
+          {!studentId && (
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+              Select a student to enable enrollment.
+            </div>
+          )}
+          <button className="button" disabled={creating || !studentId} style={{ width: "auto" }}>
             {creating ? "Enrolling..." : "Enroll"}
           </button>
         </form>
@@ -400,58 +376,86 @@ function CenterEnrollmentsPage() {
 
       {batchId ? (
         <>
-          <DataTable
-            columns={[
-              { key: "admissionNo", header: "Admission No", render: (r) => r?.student?.admissionNo || "" },
-              { key: "name", header: "Student", render: (r) => `${r?.student?.firstName || ""} ${r?.student?.lastName || ""}`.trim() },
-              { key: "level", header: "Level", render: (r) => r?.level?.name || "" },
-              { key: "teacher", header: "Assigned Teacher", render: (r) => r?.assignedTeacher?.username || "" },
-              { key: "status", header: "Status", render: (r) => r?.status || "" },
-              {
-                key: "actions",
-                header: "Actions",
-                render: (r) => (
-                  <button className="button secondary" style={{ width: "auto" }} onClick={() => setUnenrollTarget(r)}>
-                    Unenroll
-                  </button>
-                )
-              }
-            ]}
-            rows={rows}
-            keyField="id"
+          <CenterEnrollmentsFilters
+            rosterQuery={rosterQuery}
+            onRosterQueryChange={setRosterQuery}
+            rosterTeacherUserId={rosterTeacherUserId}
+            onRosterTeacherUserIdChange={setRosterTeacherUserId}
+            teacherOptions={teacherOptions}
+            rosterLevelId={rosterLevelId}
+            onRosterLevelIdChange={setRosterLevelId}
+            levels={levels}
+            rosterStatus={rosterStatus}
+            onRosterStatusChange={setRosterStatus}
+            rosterStudentActive={rosterStudentActive}
+            onRosterStudentActiveChange={setRosterStudentActive}
+            rosterFrom={rosterFrom}
+            onRosterFromChange={setRosterFrom}
+            rosterTo={rosterTo}
+            onRosterToChange={setRosterTo}
+            rosterFeeStatus={rosterFeeStatus}
+            onRosterFeeStatusChange={setRosterFeeStatus}
+            rosterPendingInstallments={rosterPendingInstallments}
+            onRosterPendingInstallmentsChange={setRosterPendingInstallments}
+            onApplyRosterFilters={() => void onApplyRosterFilters()}
+            onClearRosterFilters={() => void onClearRosterFilters()}
+            onQuickFilter={handleQuickFilter}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", fontSize: 13, color: "var(--color-text-muted)", marginTop: 6 }}>
-            <span>Showing {rows.length} of {rosterTotal} enrolled students</span>
-            <button
-              className="button secondary"
-              type="button"
-              style={{ width: "auto", padding: "2px 10px", fontSize: 12 }}
-              disabled={loading || rosterPage === 0}
-              onClick={() => void loadEnrollments(batchId, rosterPage - 1)}
-            >
-              ← Prev
-            </button>
-            <span>Page {rosterPage + 1} of {Math.max(1, Math.ceil(rosterTotal / ROSTER_PAGE_SIZE))}</span>
-            <button
-              className="button secondary"
-              type="button"
-              style={{ width: "auto", padding: "2px 10px", fontSize: 12 }}
-              disabled={loading || (rosterPage + 1) * ROSTER_PAGE_SIZE >= rosterTotal}
-              onClick={() => void loadEnrollments(batchId, rosterPage + 1)}
-            >
-              Next →
-            </button>
-          </div>
+
+          <CenterEnrollmentsSummaryStrip rosterSummary={rosterSummary} rosterTotal={rosterTotal} />
+
+          <CenterEnrollmentsBulkActions
+            selectedEnrollmentCount={selectedEnrollmentCount}
+            selectedRowsWithTeacherCount={selectedRowsWithTeacherCount}
+            bulkTeacherDropdownOptions={bulkTeacherDropdownOptions}
+            bulkTeacherUserId={bulkTeacherUserId}
+            onBulkTeacherUserIdChange={setBulkTeacherUserId}
+            bulkStatus={bulkStatus}
+            onBulkStatusChange={setBulkStatus}
+            bulkUpdating={bulkUpdating}
+            bulkActionMode={bulkActionMode}
+            onRequestBulkApplyUpdates={onRequestBulkApplyUpdates}
+            onRequestBulkClearTeacher={onRequestBulkClearTeacher}
+          />
+
+          <CenterEnrollmentsRosterTable
+            rows={rows}
+            selectedEnrollmentIds={selectedEnrollmentIds}
+            onSelectionChange={setSelectedEnrollmentIds}
+            bulkUnenrolling={bulkUnenrolling}
+            selectedActiveEnrollmentCount={selectedActiveEnrollmentCount}
+            onRequestBulkUnenroll={onRequestBulkUnenroll}
+            onRequestUnenroll={onRequestUnenroll}
+            teacherOptions={teacherOptions}
+            onAssignTeacher={handleAssignTeacher}
+          />
+          <CenterEnrollmentsPagination
+            rowsCount={rows.length}
+            rosterTotal={rosterTotal}
+            rosterLoading={rosterLoading}
+            rosterPage={rosterPage}
+            pageSize={ROSTER_PAGE_SIZE}
+            onPrevPage={() => void loadEnrollments(batchId, rosterPage - 1)}
+            onNextPage={() => void loadEnrollments(batchId, rosterPage + 1)}
+          />
         </>
       ) : null}
 
-      <ConfirmDialog
-        open={!!unenrollTarget}
-        title="Unenroll Student"
-        message={`Unenroll ${unenrollTarget?.student?.admissionNo || "student"} from this batch?`}
-        confirmLabel="Unenroll"
-        onConfirm={onUnenroll}
-        onCancel={() => setUnenrollTarget(null)}
+      <CenterEnrollmentsDialogs
+        unenrollTarget={unenrollTarget}
+        onCancelUnenroll={onCancelUnenroll}
+        onConfirmUnenroll={onConfirmUnenroll}
+        bulkUnenrollTargets={bulkUnenrollTargets}
+        bulkUnenrolling={bulkUnenrolling}
+        onCancelBulkUnenroll={onCancelBulkUnenroll}
+        onConfirmBulkUnenroll={onConfirmBulkUnenroll}
+        bulkUpdateTargets={bulkUpdateTargets}
+        bulkActionMode={bulkActionMode}
+        bulkUpdating={bulkUpdating}
+        bulkStatus={bulkStatus}
+        selectedBulkTeacherLabel={selectedBulkTeacherLabel}
+        onCancelBulkUpdate={onCancelBulkUpdate}
+        onConfirmBulkUpdate={onConfirmBulkUpdate}
       />
     </section>
   );

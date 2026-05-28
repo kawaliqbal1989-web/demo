@@ -5,6 +5,7 @@ import {
   listEnrollments,
   createEnrollment,
   updateEnrollment,
+  bulkUpdateEnrollments,
   exportEnrollmentsCsv
 } from "../controllers/enrollments.controller.js";
 
@@ -18,6 +19,13 @@ enrollmentsRouter.post(
   requireRole("CENTER", "SUPERADMIN"),
   auditAction("CREATE_ENROLLMENT", "ENROLLMENT"),
   createEnrollment
+);
+
+enrollmentsRouter.post(
+  "/bulk-update",
+  requireRole("CENTER", "SUPERADMIN"),
+  auditAction("BULK_UPDATE_ENROLLMENT", "ENROLLMENT"),
+  bulkUpdateEnrollments
 );
 
 enrollmentsRouter.put(

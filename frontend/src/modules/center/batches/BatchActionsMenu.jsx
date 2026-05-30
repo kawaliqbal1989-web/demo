@@ -25,8 +25,10 @@ function BatchActionsMenu({ actions = [] }) {
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
+        aria-label="Open batch actions"
+        title="Open actions"
       >
-        Actions
+        ...
       </button>
 
       {open ? (

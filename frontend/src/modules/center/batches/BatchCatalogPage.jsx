@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { PaginationBar } from "../../../components/DataTable";
 import { ErrorState } from "../../../components/ErrorState";
 import { PageHeader } from "../../../components/PageHeader";
@@ -52,12 +52,6 @@ function BatchCatalogPage() {
   const pageCount = Math.max(1, Math.ceil(Math.max(total, 1) / query.pageSize));
   const combinedError = actionError || error;
   const hasBlockingLoad = loading && lookupsLoading && !items.length;
-
-  const titleActions = useMemo(() => (
-    <button className="button" type="button" onClick={() => setDrawerState({ open: true, mode: "create", batch: null })}>
-      New Batch
-    </button>
-  ), []);
 
   async function handleDrawerSubmit(formState) {
     setSaving(true);
@@ -158,8 +152,8 @@ function BatchCatalogPage() {
       <div className="batch-catalog-page__top">
         <PageHeader
           title="Batch Management"
-          subtitle="Operational catalog for staffing, capacity, and center batch flow."
-          actions={titleActions}
+          subtitle="Search-first catalog for staffing, scheduling, and capacity control."
+          actions={null}
         />
 
         {combinedError ? (
@@ -177,7 +171,25 @@ function BatchCatalogPage() {
         <BatchSummaryCards items={items} total={total} refreshing={refreshing} />
       </div>
 
-      <div className="batch-catalog-layout">
+      <div className="batch-catalog-main">
+        <BatchCatalogToolbar
+          searchInput={searchInput}
+          onSearchChange={setSearchInput}
+          page={query.page}
+          pageSize={query.pageSize}
+          total={total}
+          count={items.length}
+          compact={query.compact}
+          activeFilterCount={activeFilterCount}
+          filtersOpen={filtersOpen}
+          refreshing={refreshing}
+          onPageSizeChange={setPageSize}
+          onToggleCompact={() => updateQuery({ compact: query.compact ? "0" : "1" }, { resetPage: false })}
+          onOpenFilters={() => setFiltersOpen((current) => !current)}
+          onRefresh={refresh}
+          onCreate={() => setDrawerState({ open: true, mode: "create", batch: null })}
+        />
+
         <BatchFilterSidebar
           open={filtersOpen}
           teachers={teachers}
@@ -193,54 +205,35 @@ function BatchCatalogPage() {
           }}
         />
 
-        <div className="batch-catalog-main">
-          <BatchCatalogToolbar
-            searchInput={searchInput}
-            onSearchChange={setSearchInput}
-            page={query.page}
-            pageSize={query.pageSize}
-            total={total}
-            count={items.length}
-            compact={query.compact}
-            activeFilterCount={activeFilterCount}
-            refreshing={refreshing}
-            onPageSizeChange={setPageSize}
-            onToggleCompact={() => updateQuery({ compact: query.compact ? null : "1" }, { resetPage: false })}
-            onOpenFilters={() => setFiltersOpen(true)}
-            onRefresh={refresh}
-            onCreate={() => setDrawerState({ open: true, mode: "create", batch: null })}
-          />
+        <BatchCatalogTable
+          items={items}
+          loading={loading}
+          compact={query.compact}
+          sortBy={query.sortBy}
+          sortDir={query.sortDir}
+          onSort={setSort}
+          onOpenBatch={(batch, mode = "view") => setDrawerState({ open: true, mode, batch })}
+          onAction={handleQuickAction}
+        />
 
-          <BatchCatalogTable
-            items={items}
-            loading={loading}
-            compact={query.compact}
-            sortBy={query.sortBy}
-            sortDir={query.sortDir}
-            onSort={setSort}
-            onOpenBatch={(batch, mode = "view") => setDrawerState({ open: true, mode, batch })}
-            onAction={handleQuickAction}
-          />
-
-          <div className="batch-pagination card">
-            <div className="batch-pagination__meta">
-              <strong>Page {currentPage}</strong>
-              <span>{total} total results across {pageCount} pages</span>
-            </div>
-            <PaginationBar
-              limit={query.pageSize}
-              offset={(query.page - 1) * query.pageSize}
-              count={items.length}
-              total={total}
-              onChange={({ limit, offset }) => {
-                if (limit !== query.pageSize) {
-                  setPageSize(limit);
-                  return;
-                }
-                setPage(Math.floor(offset / query.pageSize) + 1);
-              }}
-            />
+        <div className="batch-pagination card">
+          <div className="batch-pagination__meta">
+            <strong>Page {currentPage}</strong>
+            <span>{total} total results across {pageCount} pages</span>
           </div>
+          <PaginationBar
+            limit={query.pageSize}
+            offset={(query.page - 1) * query.pageSize}
+            count={items.length}
+            total={total}
+            onChange={({ limit, offset }) => {
+              if (limit !== query.pageSize) {
+                setPageSize(limit);
+                return;
+              }
+              setPage(Math.floor(offset / query.pageSize) + 1);
+            }}
+          />
         </div>
       </div>
 

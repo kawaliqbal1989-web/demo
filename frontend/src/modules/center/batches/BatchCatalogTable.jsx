@@ -1,10 +1,8 @@
 import { EmptyState } from "../../../components/EmptyState";
 import { SkeletonLine } from "../../../components/SkeletonLoader";
 import { BatchActionsMenu } from "./BatchActionsMenu";
-import { BatchCapacityBadge } from "./BatchCapacityBadge";
-import { BatchScheduleCell } from "./BatchScheduleCell";
 import { BatchStatusBadge } from "./BatchStatusBadge";
-import { getBatchHealthMeta, getTeacherNames } from "./batchCatalog.helpers";
+import { getTeacherNames } from "./batchCatalog.helpers";
 
 function SortableHeader({ label, sortKey, activeSortBy, activeSortDir, onSort }) {
   const isActive = activeSortBy === sortKey;
@@ -20,7 +18,7 @@ function SortableHeader({ label, sortKey, activeSortBy, activeSortDir, onSort })
 function LoadingRows({ compact = false }) {
   return Array.from({ length: compact ? 8 : 6 }, (_, index) => (
     <tr key={index}>
-      {Array.from({ length: 10 }, (_, cellIndex) => (
+      {Array.from({ length: 6 }, (_, cellIndex) => (
         <td key={cellIndex}><SkeletonLine width={cellIndex === 0 ? "82%" : "60%"} height={12} /></td>
       ))}
     </tr>
@@ -48,12 +46,8 @@ function BatchCatalogTable({ items = [], loading = false, compact = false, sortB
             <th><SortableHeader label="Batch" sortKey="name" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
             <th><SortableHeader label="Teacher" sortKey="teacherName" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
             <th><SortableHeader label="Level" sortKey="levelRank" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
-            <th>Schedule</th>
             <th><SortableHeader label="Students" sortKey="studentCount" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
-            <th><SortableHeader label="Mode" sortKey="modality" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
-            <th><SortableHeader label="Capacity" sortKey="occupancyPercentage" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
             <th><SortableHeader label="Status" sortKey="status" activeSortBy={sortBy} activeSortDir={sortDir} onSort={onSort} /></th>
-            <th>Health</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -62,7 +56,7 @@ function BatchCatalogTable({ items = [], loading = false, compact = false, sortB
 
           {!loading ? items.map((batch) => {
             const teacherNames = getTeacherNames(batch);
-            const health = getBatchHealthMeta(batch.health);
+            const statusMeta = [batch.modality, batch.health].filter(Boolean).join(" • ");
 
             return (
               <tr key={batch.id}>
@@ -70,7 +64,7 @@ function BatchCatalogTable({ items = [], loading = false, compact = false, sortB
                   <button type="button" className="batch-table__primary" onClick={() => onOpenBatch(batch, "view")}>
                     {batch.name}
                   </button>
-                  <div className="batch-table__secondary">{batch.id}</div>
+                  <div className="batch-table__secondary">{batch.scheduleSummary || "Schedule pending"}</div>
                 </td>
                 <td>
                   <div className="batch-table__stack">
@@ -84,7 +78,6 @@ function BatchCatalogTable({ items = [], loading = false, compact = false, sortB
                     <span>{batch.level?.rank ? `Rank ${batch.level.rank}` : "No level rank"}</span>
                   </div>
                 </td>
-                <td><BatchScheduleCell batch={batch} /></td>
                 <td>
                   <div className="batch-table__stack">
                     <strong>{batch.currentStudents || 0}</strong>
@@ -92,14 +85,10 @@ function BatchCatalogTable({ items = [], loading = false, compact = false, sortB
                   </div>
                 </td>
                 <td>
-                  <span className={`batch-mode-pill${batch.modality ? ` batch-mode-pill--${String(batch.modality).toLowerCase()}` : " batch-mode-pill--unknown"}`}>
-                    {batch.modality || "Unspecified"}
-                  </span>
-                </td>
-                <td><BatchCapacityBadge currentStudents={batch.currentStudents} maxStudents={batch.maxStudents} occupancyPercentage={batch.occupancyPercentage} /></td>
-                <td><BatchStatusBadge status={batch.status} /></td>
-                <td>
-                  <span className={`batch-health batch-health--${health.tone}`}>{health.label}</span>
+                  <div className="batch-table__stack">
+                    <BatchStatusBadge status={batch.status} />
+                    <span>{statusMeta || "Mode pending"}</span>
+                  </div>
                 </td>
                 <td>
                   <BatchActionsMenu

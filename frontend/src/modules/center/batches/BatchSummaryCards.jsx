@@ -8,10 +8,10 @@ function BatchSummaryCards({ items = [], total = 0, refreshing = false }) {
     const archived = items.filter((item) => item.status === "ARCHIVED").length;
 
     return [
-      { label: "Matching batches", value: total, tone: "neutral", hint: "Server-side result count" },
-      { label: "Operational on page", value: operational, tone: "success", hint: "Active, upcoming, or trial" },
-      { label: "Full capacity", value: full, tone: full ? "warning" : "neutral", hint: "Visible rows only" },
-      { label: "Needs staffing", value: unassigned || archived, tone: unassigned ? "danger" : "neutral", hint: unassigned ? "No teacher assigned" : "No staffing issues visible" }
+      { label: "Total", value: total, tone: "neutral", hint: "Server-side matches" },
+      { label: "Operational", value: operational, tone: "success", hint: "Active, upcoming, trial" },
+      { label: "At capacity", value: full, tone: full ? "warning" : "neutral", hint: "Visible rows" },
+      { label: "Needs teacher", value: unassigned || archived, tone: unassigned ? "danger" : "neutral", hint: unassigned ? "Unassigned on page" : "No staffing gaps" }
     ];
   }, [items, total]);
 

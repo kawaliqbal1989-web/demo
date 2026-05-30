@@ -12,6 +12,14 @@ function readBooleanParam(searchParams, key) {
   return searchParams.get(key) === "1";
 }
 
+function readCompactParam(searchParams) {
+  const compact = searchParams.get("compact");
+  if (compact === null) {
+    return true;
+  }
+  return compact === "1";
+}
+
 function readStringArray(searchParams, key) {
   return String(searchParams.get(key) || "")
     .split(",")
@@ -58,8 +66,8 @@ function useBatchCatalog() {
   const debouncedSearch = useDebouncedValue(searchInput, 350);
 
   const query = useMemo(() => {
-    const rawPageSize = Number(searchParams.get("pageSize") || 20);
-    const pageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize) ? rawPageSize : 20;
+    const rawPageSize = Number(searchParams.get("pageSize") || 25);
+    const pageSize = PAGE_SIZE_OPTIONS.includes(rawPageSize) ? rawPageSize : 25;
     const page = Math.max(1, Number(searchParams.get("page") || 1));
 
     return {
@@ -73,7 +81,7 @@ function useBatchCatalog() {
       dayType: searchParams.get("dayType") || "",
       includeArchived: readBooleanParam(searchParams, "archived"),
       fullOnly: readBooleanParam(searchParams, "fullOnly"),
-      compact: readBooleanParam(searchParams, "compact"),
+      compact: readCompactParam(searchParams),
       sortBy: searchParams.get("sortBy") || "createdAt",
       sortDir: searchParams.get("sortDir") || "desc"
     };

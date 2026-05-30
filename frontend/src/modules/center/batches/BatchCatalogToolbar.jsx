@@ -10,6 +10,7 @@ function BatchCatalogToolbar({
   count,
   compact,
   activeFilterCount,
+  filtersOpen,
   refreshing,
   onPageSizeChange,
   onToggleCompact,
@@ -19,16 +20,26 @@ function BatchCatalogToolbar({
 }) {
   return (
     <div className="batch-toolbar card">
-      <div className="batch-toolbar__row">
+      <div className="batch-toolbar__primary">
         <label className="batch-toolbar__search">
-          <span className="batch-toolbar__label">Search</span>
+          <span className="batch-toolbar__label">Search batches</span>
           <input
             className="input"
             value={searchInput}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Batch, teacher, or level"
+            placeholder="Search by batch, teacher, level, or schedule"
           />
         </label>
+
+        <button className="button batch-toolbar__create" type="button" onClick={onCreate}>
+          New Batch
+        </button>
+      </div>
+
+      <div className="batch-toolbar__row">
+        <button className="button secondary batch-toolbar__filters-toggle" type="button" onClick={onOpenFilters}>
+          {filtersOpen ? "Hide Filters" : "Filters"}{activeFilterCount ? ` (${activeFilterCount})` : ""}
+        </button>
 
         <label className="batch-toolbar__page-size">
           <span className="batch-toolbar__label">Rows</span>
@@ -39,10 +50,6 @@ function BatchCatalogToolbar({
           </select>
         </label>
 
-        <button className="button secondary batch-toolbar__filters-toggle" type="button" onClick={onOpenFilters}>
-          Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
-        </button>
-
         <button className="button secondary" type="button" onClick={onToggleCompact}>
           {compact ? "Comfortable" : "Compact"}
         </button>
@@ -50,14 +57,11 @@ function BatchCatalogToolbar({
         <button className="button secondary" type="button" onClick={onRefresh} disabled={refreshing}>
           {refreshing ? "Refreshing..." : "Refresh"}
         </button>
-
-        <button className="button" type="button" onClick={onCreate}>
-          New Batch
-        </button>
       </div>
 
       <div className="batch-toolbar__meta">
         <span>{formatResultRange(page, pageSize, total, count)}</span>
+        <span>{activeFilterCount ? `${activeFilterCount} active filters` : "No active filters"}</span>
         <span>{refreshing ? "Updating live results..." : "Server-side pagination and sorting"}</span>
       </div>
     </div>

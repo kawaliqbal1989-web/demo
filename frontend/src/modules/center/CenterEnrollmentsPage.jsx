@@ -18,12 +18,27 @@ import { useCenterEnrollmentBulkActions } from "./useCenterEnrollmentBulkActions
 import { useCenterEnrollmentsRoster } from "./useCenterEnrollmentsRoster";
 import { useCenterEnrollmentForm } from "./useCenterEnrollmentForm";
 
+function matchesTeacherBatch(batch, teacherUserId) {
+  if (!teacherUserId || !batch) return false;
+  if (String(batch.primaryTeacherUserId || "") === String(teacherUserId)) {
+    return true;
+  }
+  return (batch.teacherAssignments || []).some((assignment) => String(assignment?.teacher?.id || "") === String(teacherUserId));
+}
+
 function CenterEnrollmentsPage() {
   const [batches, setBatches] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [levels, setLevels] = useState([]);
+  const [selectedTeacherUserId, setSelectedTeacherUserId] = useState("");
   const [pageError, setPageError] = useState("");
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState("");
+  const [editEnrollmentId, setEditEnrollmentId] = useState("");
+  const [editTeacherUserId, setEditTeacherUserId] = useState("");
+  const [editBatchId, setEditBatchId] = useState("");
 
   const {
     batchId,
@@ -61,7 +76,31 @@ function CenterEnrollmentsPage() {
 
   const [courses, setCourses] = useState([]);
 
-  const teacherOptions = useMemo(() => teachers.filter((t) => t?.role === "TEACHER"), [teachers]);
+  const teacherOptions = useMemo(
+    () => teachers.filter((t) => t?.role === "TEACHER" && t?.isActive !== false),
+    [teachers]
+  );
+  const teacherDropdownOptions = useMemo(
+    () => teacherOptions.map((teacher) => ({
+      value: teacher.id,
+      label: teacher?.teacherProfile?.fullName || teacher.username || teacher.email || "Teacher"
+    })),
+    [teacherOptions]
+  );
+  const teacherFilteredBatches = useMemo(
+    () => batches.filter((batch) => matchesTeacherBatch(batch, selectedTeacherUserId)),
+    [batches, selectedTeacherUserId]
+  );
+  const batchDropdownOptions = useMemo(
+    () => teacherFilteredBatches.map((batch) => ({ value: batch.id, label: batch.name })),
+    [teacherFilteredBatches]
+  );
+  const editBatchDropdownOptions = useMemo(
+    () => batches
+      .filter((batch) => matchesTeacherBatch(batch, editTeacherUserId))
+      .map((batch) => ({ value: batch.id, label: batch.name })),
+    [batches, editTeacherUserId]
+  );
   const {
     PAGE_SIZE,
     students,
@@ -139,8 +178,8 @@ function CenterEnrollmentsPage() {
     setRosterError("");
     try {
       const [b, t, c, levelsResponse] = await Promise.all([
-        listBatches({ limit: 200, offset: 0 }),
-        listTeachers({ limit: 200, offset: 0 }),
+        listBatches({ limit: 500, offset: 0, includeArchived: false }),
+        listTeachers({ limit: 500, offset: 0, status: "ACTIVE" }),
         listCenterAvailableCourses(),
         listLevels()
       ]);
@@ -164,14 +203,85 @@ function CenterEnrollmentsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const onSelectTeacher = (teacherUserId) => {
+    setSelectedTeacherUserId(teacherUserId || "");
+    setBatchId("");
+    setSelectedEnrollmentIds([]);
+    resetEnrollmentForm();
+  };
+
   const onSelectBatch = async (id) => {
+    if (!selectedTeacherUserId) return;
     setBatchId(id);
+    setSelectedEnrollmentIds([]);
     resetEnrollmentForm();
     const batch = batches.find((b) => b.id === id);
     if (batch?.primaryTeacherUserId) {
       setAssignedTeacherUserId(batch.primaryTeacherUserId);
+    } else if (selectedTeacherUserId) {
+      setAssignedTeacherUserId(selectedTeacherUserId);
     }
     await loadEnrollments(id, 0);
+  };
+
+  const onRequestEditEnrollment = (row) => {
+    const rowBatch = batches.find((batch) => batch.id === row?.batch?.id || batch.id === row?.batchId);
+    const autoTeacherId = row?.assignedTeacher?.id
+      || rowBatch?.primaryTeacherUserId
+      || rowBatch?.teacherAssignments?.[0]?.teacher?.id
+      || "";
+    const autoBatchId = row?.batch?.id || row?.batchId || "";
+
+    setEditEnrollmentId(row?.id || "");
+    setEditTeacherUserId(autoTeacherId);
+    setEditBatchId(autoBatchId);
+    setEditError("");
+    setEditOpen(true);
+  };
+
+  const onCloseEditModal = () => {
+    if (editSaving) return;
+    setEditOpen(false);
+    setEditError("");
+    setEditEnrollmentId("");
+    setEditTeacherUserId("");
+    setEditBatchId("");
+  };
+
+  const onEditTeacherChange = (teacherUserId) => {
+    setEditTeacherUserId(teacherUserId || "");
+    if (!teacherUserId) {
+      setEditBatchId("");
+      return;
+    }
+
+    const nextBatches = batches.filter((batch) => matchesTeacherBatch(batch, teacherUserId));
+    if (!nextBatches.some((batch) => batch.id === editBatchId)) {
+      setEditBatchId(nextBatches[0]?.id || "");
+    }
+  };
+
+  const onSaveEditModal = async () => {
+    if (!editEnrollmentId) return;
+    if (!editTeacherUserId || !editBatchId) {
+      setEditError("Teacher and batch are required.");
+      return;
+    }
+
+    setEditSaving(true);
+    setEditError("");
+    try {
+      await updateEnrollment(editEnrollmentId, {
+        assignedTeacherUserId: editTeacherUserId,
+        batchId: editBatchId
+      });
+      await loadEnrollments(batchId, rosterPage);
+      onCloseEditModal();
+    } catch (error) {
+      setEditError(getFriendlyErrorMessage(error) || "Failed to update enrollment.");
+    } finally {
+      setEditSaving(false);
+    }
   };
 
   const onApplyRosterFilters = async () => {
@@ -212,17 +322,34 @@ function CenterEnrollmentsPage() {
       ) : null}
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
-        <label>
-          Batch
-          <select className="select" value={batchId} onChange={(e) => void onSelectBatch(e.target.value)}>
-            <option value="">Select</option>
-            {batches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
+          <label>
+            Teacher
+            <SearchableDropdown
+              options={teacherDropdownOptions}
+              value={selectedTeacherUserId}
+              onChange={onSelectTeacher}
+              placeholder="Select teacher"
+            />
+          </label>
+
+          <label>
+            Batch
+            <SearchableDropdown
+              options={batchDropdownOptions}
+              value={batchId}
+              onChange={(value) => void onSelectBatch(value)}
+              placeholder={selectedTeacherUserId ? "Select batch" : "Select teacher first"}
+              disabled={!selectedTeacherUserId}
+            />
+          </label>
+        </div>
+
+        {!selectedTeacherUserId ? (
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Select a teacher to load only their assigned batches.
+          </div>
+        ) : null}
 
         {batchId ? (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -370,7 +497,7 @@ function CenterEnrollmentsPage() {
         </form>
       ) : (
         <div className="card" style={{ color: "var(--color-text-muted)" }}>
-          Select a batch to view the roster.
+          Select teacher and batch to view the roster.
         </div>
       )}
 
@@ -428,6 +555,7 @@ function CenterEnrollmentsPage() {
             onRequestUnenroll={onRequestUnenroll}
             teacherOptions={teacherOptions}
             onAssignTeacher={handleAssignTeacher}
+            onRequestEditEnrollment={onRequestEditEnrollment}
           />
           <CenterEnrollmentsPagination
             rowsCount={rows.length}
@@ -439,6 +567,51 @@ function CenterEnrollmentsPage() {
             onNextPage={() => void loadEnrollments(batchId, rosterPage + 1)}
           />
         </>
+      ) : null}
+
+      {editOpen ? (
+        <div className="modal-overlay" role="dialog" aria-modal="true" style={{ display: "grid", placeItems: "center" }}>
+          <div className="card" style={{ width: "min(560px, 92vw)", display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+              <h3 style={{ margin: 0 }}>Edit Enrollment</h3>
+              <button className="button secondary" type="button" style={{ width: "auto" }} onClick={onCloseEditModal} disabled={editSaving}>
+                Close
+              </button>
+            </div>
+
+            {editError ? <div className="error">{editError}</div> : null}
+
+            <label>
+              Teacher
+              <SearchableDropdown
+                options={teacherDropdownOptions}
+                value={editTeacherUserId}
+                onChange={onEditTeacherChange}
+                placeholder="Select teacher"
+              />
+            </label>
+
+            <label>
+              Batch
+              <SearchableDropdown
+                options={editBatchDropdownOptions}
+                value={editBatchId}
+                onChange={setEditBatchId}
+                placeholder={editTeacherUserId ? "Select batch" : "Select teacher first"}
+                disabled={!editTeacherUserId}
+              />
+            </label>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="button secondary" type="button" style={{ width: "auto" }} onClick={onCloseEditModal} disabled={editSaving}>
+                Cancel
+              </button>
+              <button className="button" type="button" style={{ width: "auto" }} onClick={() => void onSaveEditModal()} disabled={editSaving || !editTeacherUserId || !editBatchId}>
+                {editSaving ? "Saving..." : "Save Changes"}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       <CenterEnrollmentsDialogs

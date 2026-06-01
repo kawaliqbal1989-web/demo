@@ -53,6 +53,19 @@ function toFiniteNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
+function collectBatchTeacherIds(batch) {
+  const ids = new Set();
+  if (batch?.primaryTeacherUserId) {
+    ids.add(String(batch.primaryTeacherUserId));
+  }
+  for (const assignment of batch?.teacherAssignments || []) {
+    if (assignment?.teacherUserId) {
+      ids.add(String(assignment.teacherUserId));
+    }
+  }
+  return ids;
+}
+
 function deriveFeeStatus(summary) {
   if ((summary?.overdueInstallmentsCount || 0) > 0) {
     return "OVERDUE";
@@ -369,7 +382,16 @@ const createEnrollment = asyncHandler(async (req, res) => {
 
   const batch = await prisma.batch.findFirst({
     where: { id: String(batchId), tenantId: req.auth.tenantId },
-    select: { id: true, hierarchyNodeId: true }
+    select: {
+      id: true,
+      hierarchyNodeId: true,
+      primaryTeacherUserId: true,
+      teacherAssignments: {
+        select: {
+          teacherUserId: true
+        }
+      }
+    }
   });
 
   if (!batch) {
@@ -407,6 +429,11 @@ const createEnrollment = asyncHandler(async (req, res) => {
 
     if (!teacher) {
       return res.apiError(400, "Invalid assignedTeacherUserId", "INVALID_TEACHER");
+    }
+
+    const batchTeacherIds = collectBatchTeacherIds(batch);
+    if (batchTeacherIds.size > 0 && !batchTeacherIds.has(String(assignedTeacherUserId))) {
+      return res.apiError(400, "Teacher is not assigned to the selected batch", "INVALID_TEACHER_FOR_BATCH");
     }
   }
 
@@ -454,11 +481,13 @@ const createEnrollment = asyncHandler(async (req, res) => {
 
 const updateEnrollment = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { assignedTeacherUserId, status } = req.body;
+  const { assignedTeacherUserId, status, batchId } = req.body;
+  const hasAssignedTeacherField = Object.prototype.hasOwnProperty.call(req.body || {}, "assignedTeacherUserId");
+  const hasBatchField = Object.prototype.hasOwnProperty.call(req.body || {}, "batchId");
 
   const enrollment = await prisma.enrollment.findFirst({
     where: { id, tenantId: req.auth.tenantId },
-    select: { id: true, hierarchyNodeId: true, batchId: true }
+    select: { id: true, hierarchyNodeId: true, batchId: true, assignedTeacherUserId: true }
   });
 
   if (!enrollment) {
@@ -471,10 +500,69 @@ const updateEnrollment = asyncHandler(async (req, res) => {
 
   const normalizedStatus = status ? normalizeEnrollmentStatus(status) : null;
 
-  if (assignedTeacherUserId) {
+  let targetBatch = null;
+  const targetBatchId = hasBatchField ? String(batchId || "").trim() : enrollment.batchId;
+
+  if (hasBatchField) {
+    if (!targetBatchId) {
+      return res.apiError(400, "batchId cannot be empty", "VALIDATION_ERROR");
+    }
+
+    targetBatch = await prisma.batch.findFirst({
+      where: {
+        id: targetBatchId,
+        tenantId: req.auth.tenantId
+      },
+      select: {
+        id: true,
+        hierarchyNodeId: true,
+        primaryTeacherUserId: true,
+        teacherAssignments: {
+          select: {
+            teacherUserId: true
+          }
+        }
+      }
+    });
+
+    if (!targetBatch) {
+      return res.apiError(404, "Batch not found", "BATCH_NOT_FOUND");
+    }
+
+    if (targetBatch.hierarchyNodeId !== enrollment.hierarchyNodeId) {
+      return res.apiError(400, "Batch belongs to a different center", "BATCH_CENTER_MISMATCH");
+    }
+  } else {
+    targetBatch = await prisma.batch.findFirst({
+      where: {
+        id: enrollment.batchId,
+        tenantId: req.auth.tenantId
+      },
+      select: {
+        id: true,
+        hierarchyNodeId: true,
+        primaryTeacherUserId: true,
+        teacherAssignments: {
+          select: {
+            teacherUserId: true
+          }
+        }
+      }
+    });
+
+    if (!targetBatch) {
+      return res.apiError(404, "Batch not found", "BATCH_NOT_FOUND");
+    }
+  }
+
+  const effectiveTeacherUserId = hasAssignedTeacherField
+    ? (assignedTeacherUserId ? String(assignedTeacherUserId) : null)
+    : (enrollment.assignedTeacherUserId ? String(enrollment.assignedTeacherUserId) : null);
+
+  if (effectiveTeacherUserId) {
     const teacher = await prisma.authUser.findFirst({
       where: {
-        id: String(assignedTeacherUserId),
+        id: effectiveTeacherUserId,
         tenantId: req.auth.tenantId,
         role: "TEACHER",
         hierarchyNodeId: enrollment.hierarchyNodeId,
@@ -486,14 +574,20 @@ const updateEnrollment = asyncHandler(async (req, res) => {
     if (!teacher) {
       return res.apiError(400, "Invalid assignedTeacherUserId", "INVALID_TEACHER");
     }
+
+    const batchTeacherIds = collectBatchTeacherIds(targetBatch);
+    if (batchTeacherIds.size > 0 && !batchTeacherIds.has(effectiveTeacherUserId)) {
+      return res.apiError(400, "Teacher is not assigned to the selected batch", "INVALID_TEACHER_FOR_BATCH");
+    }
   }
 
   const updated = await prisma.enrollment.update({
     where: { id },
     data: {
-      ...(assignedTeacherUserId !== undefined
-        ? { assignedTeacherUserId: assignedTeacherUserId ? String(assignedTeacherUserId) : null }
+      ...(hasAssignedTeacherField
+        ? { assignedTeacherUserId: effectiveTeacherUserId }
         : {}),
+      ...(hasBatchField ? { batchId: targetBatchId } : {}),
       ...(normalizedStatus ? { status: normalizedStatus } : {})
     }
   });

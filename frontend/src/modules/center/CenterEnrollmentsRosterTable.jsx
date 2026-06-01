@@ -11,7 +11,8 @@ function CenterEnrollmentsRosterTable({
   onRequestBulkUnenroll,
   onRequestUnenroll,
   teacherOptions = [],
-  onAssignTeacher
+  onAssignTeacher,
+  onRequestEditEnrollment
 }) {
   const [assigningRowId, setAssigningRowId] = useState(null);
   const [assigningTeacherId, setAssigningTeacherId] = useState("");
@@ -58,6 +59,7 @@ function CenterEnrollmentsRosterTable({
       columns={[
         { key: "admissionNo", header: "Admission No", render: (row) => row?.student?.admissionNo || "" },
         { key: "name", header: "Student", render: (row) => `${row?.student?.firstName || ""} ${row?.student?.lastName || ""}`.trim() },
+        { key: "batch", header: "Batch", render: (row) => row?.batch?.name || "" },
         { key: "level", header: "Level", render: (row) => row?.level?.name || "" },
         { key: "teacher", header: "Assigned Teacher", render: (row) => {
           if (assigningRowId === row.id) {
@@ -124,6 +126,14 @@ function CenterEnrollmentsRosterTable({
                 disabled={assigningRowId !== null}
               >
                 {row?.assignedTeacher ? "Change teacher" : "Assign teacher"}
+              </button>
+              <button
+                className="button secondary"
+                style={{ width: "auto" }}
+                onClick={() => onRequestEditEnrollment?.(row)}
+                disabled={assigningRowId !== null}
+              >
+                Edit
               </button>
               <button className="button secondary" style={{ width: "auto" }} onClick={() => onRequestUnenroll(row)}>
                 Unenroll

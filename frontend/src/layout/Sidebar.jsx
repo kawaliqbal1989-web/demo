@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 import { getMenuForRole } from "../utils/roleMenu";
@@ -21,11 +22,13 @@ const ROLE_ACCENT_MAP = {
   PARENT: "var(--role-parent)",
 };
 
-function Sidebar({ open, onClose }) {
+function Sidebar({ open, onClose, collapsed = false }) {
   const { role, branding } = useAuth();
-  const menu = getMenuForRole(role);
+  const menu = useMemo(() => getMenuForRole(role), [role]);
   const showRoleLogo = [ROLES.BP, ROLES.FRANCHISE, ROLES.CENTER, ROLES.TEACHER, ROLES.STUDENT].includes(role);
   const accentColor = ROLE_ACCENT_MAP[role] || "var(--color-primary)";
+  const roleBadgeText = collapsed ? role.slice(0, 1) : role;
+  const sidebarClassName = `sidebar ${open ? "sidebar--open" : ""} ${collapsed ? "sidebar--collapsed" : ""}`;
 
   return (
     <>
@@ -35,7 +38,7 @@ function Sidebar({ open, onClose }) {
         onClick={onClose}
         aria-hidden="true"
       />
-      <aside className={`sidebar ${open ? "sidebar--open" : ""}`}>
+      <aside className={sidebarClassName}>
         {/* Role accent indicator bar */}
         <div className="sidebar-role-indicator" style={{ background: accentColor }} />
 
@@ -76,6 +79,9 @@ function Sidebar({ open, onClose }) {
                 end
                 className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
                 onClick={onClose}
+                aria-label={text}
+                data-tooltip={collapsed ? text : undefined}
+                title={collapsed ? text : undefined}
               >
                 {emoji ? <span className="nav-item__icon">{emoji}</span> : null}
                 <span className="nav-item__text">{text}</span>
@@ -87,7 +93,7 @@ function Sidebar({ open, onClose }) {
         {/* Bottom role badge */}
         <div style={{ marginTop: "auto", padding: "12px 16px" }}>
           <div className="badge-v2" style={{ background: accentColor, color: "#fff", justifyContent: "center" }}>
-            {role}
+            <span className="sidebar-role-text">{roleBadgeText}</span>
           </div>
         </div>
       </aside>
@@ -95,4 +101,6 @@ function Sidebar({ open, onClose }) {
   );
 }
 
-export { Sidebar };
+const MemoSidebar = memo(Sidebar);
+
+export { MemoSidebar as Sidebar };

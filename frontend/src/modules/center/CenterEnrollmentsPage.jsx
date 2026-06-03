@@ -121,7 +121,6 @@ function CenterEnrollmentsPage() {
     creating,
     studentPage,
     studentTotal,
-    teacherDropdownOptions,
     studentDropdownOptions,
     loadStudentOptions,
     clearStudentSearch,

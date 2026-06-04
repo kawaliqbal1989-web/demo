@@ -279,6 +279,8 @@ const listAttendanceSessions = asyncHandler(async (req, res) => {
     where.batchId = String(req.query.batchId);
   }
 
+  const requestedTeacherUserId = req.query.teacherUserId ? String(req.query.teacherUserId) : "";
+
   const status = normalizeSessionStatus(req.query.status);
   if (status) {
     where.status = status;
@@ -315,6 +317,24 @@ const listAttendanceSessions = asyncHandler(async (req, res) => {
         return res.apiSuccess("Attendance sessions fetched", { items: [], total: 0, limit, offset });
       }
 
+      where.batchId = { in: assignedBatchIds };
+    }
+  } else if (requestedTeacherUserId) {
+    const assignedBatchIds = await listTeacherAssignedBatchIds({
+      tenantId: req.auth.tenantId,
+      teacherUserId: requestedTeacherUserId,
+      centerHierarchyNodeId: centerId
+    });
+
+    if (!assignedBatchIds.length) {
+      return res.apiSuccess("Attendance sessions fetched", { items: [], total: 0, limit, offset });
+    }
+
+    if (typeof where.batchId === "string") {
+      if (!assignedBatchIds.includes(where.batchId)) {
+        return res.apiSuccess("Attendance sessions fetched", { items: [], total: 0, limit, offset });
+      }
+    } else {
       where.batchId = { in: assignedBatchIds };
     }
   }

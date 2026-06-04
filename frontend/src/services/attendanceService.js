@@ -1,11 +1,12 @@
 import { apiClient } from "./apiClient";
 
-async function listAttendanceSessions({ limit = 50, offset = 0, batchId = "", status = "", from = "", to = "" } = {}) {
+async function listAttendanceSessions({ limit = 50, offset = 0, batchId = "", teacherUserId = "", status = "", from = "", to = "" } = {}) {
   const response = await apiClient.get("/attendance/sessions", {
     params: {
       limit,
       offset,
       batchId: batchId || undefined,
+      teacherUserId: teacherUserId || undefined,
       status: status || undefined,
       from: from || undefined,
       to: to || undefined

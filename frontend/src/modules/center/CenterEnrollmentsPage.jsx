@@ -4,10 +4,11 @@ import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { PageHeader } from "../../components/PageHeader";
 import { listBatches } from "../../services/batchesService";
 import { listCenterAvailableCourses } from "../../services/centerService";
-import { exportEnrollmentsCsvUrl, updateEnrollment } from "../../services/enrollmentsService";
+import { exportEnrollmentsCsv, updateEnrollment } from "../../services/enrollmentsService";
 import { listLevels } from "../../services/levelsService";
 import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { downloadBlob } from "../../utils/downloadBlob";
 import { CenterEnrollmentsBulkActions } from "./CenterEnrollmentsBulkActions";
 import { CenterEnrollmentsDialogs } from "./CenterEnrollmentsDialogs";
 import { CenterEnrollmentsFilters } from "./CenterEnrollmentsFilters";
@@ -17,6 +18,19 @@ import { CenterEnrollmentsSummaryStrip } from "./CenterEnrollmentsSummaryStrip";
 import { useCenterEnrollmentBulkActions } from "./useCenterEnrollmentBulkActions";
 import { useCenterEnrollmentsRoster } from "./useCenterEnrollmentsRoster";
 import { useCenterEnrollmentForm } from "./useCenterEnrollmentForm";
+
+function getDownloadFilename(contentDisposition, fallback) {
+  const header = String(contentDisposition || "");
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1]);
+  }
+  const plainMatch = header.match(/filename="?([^";]+)"?/i);
+  if (plainMatch?.[1]) {
+    return plainMatch[1];
+  }
+  return fallback;
+}
 
 function matchesTeacherBatch(batch, teacherUserId) {
   if (!teacherUserId || !batch) return false;
@@ -304,6 +318,29 @@ function CenterEnrollmentsPage() {
     void loadEnrollments(batchId, 0, patch);
   };
 
+  const onExportCsv = async () => {
+    if (!batchId) return;
+
+    try {
+      const response = await exportEnrollmentsCsv({
+        batchId,
+        status: rosterStatus,
+        q: rosterQuery.trim(),
+        teacherUserId: rosterTeacherUserId,
+        levelId: rosterLevelId,
+        studentActive: rosterStudentActive,
+        from: rosterFrom,
+        to: rosterTo,
+        feeStatus: rosterFeeStatus,
+        pendingInstallments: rosterPendingInstallments
+      });
+      const filename = getDownloadFilename(response.headers?.["content-disposition"], `enrollments_${Date.now()}.csv`);
+      downloadBlob(response.data, filename);
+    } catch (error) {
+      setPageError(getFriendlyErrorMessage(error) || "Failed to export CSV.");
+    }
+  };
+
   if ((bootstrapping || rosterLoading) && !batches.length) {
     return <SkeletonLoader variant="table" rows={6} />;
   }
@@ -352,25 +389,13 @@ function CenterEnrollmentsPage() {
 
         {batchId ? (
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <a
+            <button
               className="button secondary"
-              href={exportEnrollmentsCsvUrl({
-                batchId,
-                status: rosterStatus,
-                q: rosterQuery.trim(),
-                teacherUserId: rosterTeacherUserId,
-                levelId: rosterLevelId,
-                studentActive: rosterStudentActive,
-                from: rosterFrom,
-                to: rosterTo,
-                feeStatus: rosterFeeStatus,
-                pendingInstallments: rosterPendingInstallments
-              })}
-              target="_blank"
-              rel="noreferrer"
+              type="button"
+              onClick={() => void onExportCsv()}
             >
               Export CSV
-            </a>
+            </button>
             <button className="button secondary" style={{ width: "auto" }} onClick={() => void loadEnrollments(batchId, rosterPage)}>
               Refresh
             </button>

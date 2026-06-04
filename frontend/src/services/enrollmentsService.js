@@ -1,4 +1,4 @@
-import { apiClient, baseURL } from "./apiClient";
+import { apiClient } from "./apiClient";
 
 async function listEnrollments({
   limit = 50,
@@ -50,19 +50,11 @@ async function bulkUpdateEnrollments(payload) {
   return response.data;
 }
 
-function exportEnrollmentsCsvUrl({ batchId = "", status = "", q = "", teacherUserId = "", levelId = "", studentActive = "", from = "", to = "", feeStatus = "", pendingInstallments = "" } = {}) {
-  const params = new URLSearchParams();
-  if (batchId) params.set("batchId", batchId);
-  if (status) params.set("status", status);
-  if (q) params.set("q", q);
-  if (teacherUserId) params.set("teacherUserId", teacherUserId);
-  if (levelId) params.set("levelId", levelId);
-  if (studentActive) params.set("studentActive", studentActive);
-  if (from) params.set("from", from);
-  if (to) params.set("to", to);
-  if (feeStatus) params.set("feeStatus", feeStatus);
-  if (pendingInstallments) params.set("pendingInstallments", pendingInstallments);
-  return `${baseURL}/enrollments/export.csv?${params.toString()}`;
+async function exportEnrollmentsCsv(params = {}) {
+  return apiClient.get("/enrollments/export.csv", {
+    params,
+    responseType: "blob"
+  });
 }
 
-export { listEnrollments, createEnrollment, updateEnrollment, bulkUpdateEnrollments, exportEnrollmentsCsvUrl };
+export { listEnrollments, createEnrollment, updateEnrollment, bulkUpdateEnrollments, exportEnrollmentsCsv };

@@ -400,6 +400,13 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         const bankQuestions = bankQuestionsByKey.get(bankKey) || [];
         const configuredCount = Number(levelConfig.questionCount || 0);
 
+        if (bankQuestions.some((question) => question.levelId !== entry.enrolledLevelId)) {
+          throw createHttpError(409, "Question bank selection includes invalid level questions", "EXAM_QUESTION_BANK_LEVEL_MISMATCH");
+        }
+        if (templateIdForBank && bankQuestions.some((question) => question.templateId !== templateIdForBank)) {
+          throw createHttpError(409, "Question bank selection includes invalid template questions", "EXAM_QUESTION_BANK_TEMPLATE_MISMATCH");
+        }
+
         if (!Number.isInteger(configuredCount) || configuredCount <= 0) {
           throw createHttpError(409, "Configured question count is invalid", "EXAM_QUESTION_COUNT_INVALID");
         }
@@ -463,7 +470,7 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
           tenantId,
           worksheetId: worksheet.id,
           questionNumber: idx + 1,
-          questionBankId: q.questionBankId,
+          questionBankId: q.questionBankId || (levelConfig.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK ? q.id : null),
           operands: q.operands,
           operation: q.operation,
           correctAnswer: q.correctAnswer

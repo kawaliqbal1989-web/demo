@@ -555,6 +555,93 @@ function deriveAttemptStatus({ finalSubmittedAt, endsAt, now }) {
   return "IN_PROGRESS";
 }
 
+async function autoSubmitExpiredExamAttempt({ attempt, worksheet, tenantId, studentId, now = new Date() }) {
+  if (!attempt || !worksheet || worksheet.generationMode !== "EXAM" || attempt.finalSubmittedAt) {
+    return { attempt, autoSubmitted: false };
+  }
+
+  const timing = getAttemptTiming({
+    startedAt: attempt.submittedAt || now,
+    timeLimitSeconds: worksheet.timeLimitSeconds
+  });
+  const status = deriveAttemptStatus({
+    finalSubmittedAt: attempt.finalSubmittedAt,
+    endsAt: timing.endsAt,
+    now
+  });
+
+  if (status !== "TIMED_OUT") {
+    return { attempt, autoSubmitted: false };
+  }
+
+  let worksheetQuestions = Array.isArray(worksheet.questions) ? worksheet.questions : [];
+  if (!worksheetQuestions.length) {
+    worksheetQuestions = await prisma.worksheetQuestion.findMany({
+      where: {
+        tenantId,
+        worksheetId: worksheet.id
+      },
+      orderBy: { questionNumber: "asc" },
+      select: {
+        id: true,
+        questionNumber: true
+      }
+    });
+  }
+
+  const draft = getAttemptDraftFromSubmission(attempt, worksheetQuestions);
+  const answers = mapDraftAnswersToSubmissionAnswers({
+    answersByQuestionId: draft.answersByQuestionId,
+    questions: worksheetQuestions
+  });
+
+  try {
+    if (!answers.length) {
+      const updated = await prisma.worksheetSubmission.update({
+        where: { id: attempt.id },
+        data: {
+          finalSubmittedAt: now,
+          remarks: "Timed out"
+        }
+      });
+      return { attempt: updated, autoSubmitted: true };
+    }
+
+    await submitWorksheet({
+      worksheetId: worksheet.id,
+      studentId,
+      tenantId,
+      answers,
+      allowExpired: true,
+      remarksOverride: "Timed out"
+    });
+
+    const updated = await prisma.worksheetSubmission.findUnique({
+      where: { id: attempt.id }
+    });
+    return { attempt: updated || attempt, autoSubmitted: true };
+  } catch (error) {
+    logger.warn("auto_submit_expired_exam_attempt_failed", {
+      tenantId,
+      studentId,
+      worksheetId: worksheet.id,
+      attemptId: attempt.id,
+      code: error?.code || null,
+      detail: String(error?.message || "").slice(0, 300)
+    });
+
+    const updated = await prisma.worksheetSubmission.update({
+      where: { id: attempt.id },
+      data: {
+        finalSubmittedAt: now,
+        remarks: "Timed out"
+      }
+    }).catch(() => null);
+
+    return { attempt: updated || attempt, autoSubmitted: true };
+  }
+}
+
 function normalizeAnswersMap(raw) {
   if (!raw || typeof raw !== "object") return {};
   const out = {};
@@ -791,6 +878,15 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     // Enforce device/session lock for EXAM attempts.
     attempt = await enforceExamAttemptDeviceLock({ req, attempt, worksheet });
 
+    const expiry = await autoSubmitExpiredExamAttempt({
+      attempt,
+      worksheet,
+      tenantId: req.auth.tenantId,
+      studentId: req.student.id,
+      now
+    });
+    attempt = expiry.attempt;
+
     const startedAt = attempt.submittedAt || now;
     const timing = getAttemptTiming({ startedAt, timeLimitSeconds: worksheet.timeLimitSeconds });
     const status = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
@@ -859,7 +955,7 @@ const saveStudentAttemptAnswers = asyncHandler(async (req, res) => {
     return res.apiError(400, "answersByQuestionId or answersDelta must be provided", "VALIDATION_ERROR");
   }
 
-  const attempt = await prisma.worksheetSubmission.findFirst({
+  let attempt = await prisma.worksheetSubmission.findFirst({
     where: {
       id: attemptId,
       tenantId: req.auth.tenantId,
@@ -887,6 +983,15 @@ const saveStudentAttemptAnswers = asyncHandler(async (req, res) => {
   } catch (e) {
     return res.apiError(e.statusCode || 409, e.message || "Exam attempt locked", e.errorCode || "EXAM_DEVICE_LOCKED");
   }
+
+  const expiry = await autoSubmitExpiredExamAttempt({
+    attempt,
+    worksheet,
+    tenantId: req.auth.tenantId,
+    studentId: req.student.id,
+    now
+  });
+  attempt = expiry.attempt;
 
   const timing = getAttemptTiming({ startedAt: attempt.submittedAt || now, timeLimitSeconds: worksheet.timeLimitSeconds });
   const derivedStatus = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
@@ -1247,6 +1352,7 @@ const getStudentWorksheet = asyncHandler(async (req, res) => {
       id: true,
       title: true,
       description: true,
+      generationMode: true,
       timeLimitSeconds: true,
       createdAt: true,
       questions: {
@@ -1264,6 +1370,26 @@ const getStudentWorksheet = asyncHandler(async (req, res) => {
 
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  if (worksheet.generationMode === "EXAM") {
+    const attempt = await prisma.worksheetSubmission.findUnique({
+      where: {
+        worksheetId_studentId: {
+          worksheetId,
+          studentId: req.student.id
+        }
+      }
+    });
+
+    if (attempt && !attempt.finalSubmittedAt) {
+      await autoSubmitExpiredExamAttempt({
+        attempt,
+        worksheet,
+        tenantId: req.auth.tenantId,
+        studentId: req.student.id
+      });
+    }
   }
 
   return res.apiSuccess("Worksheet fetched", worksheet);
@@ -1293,7 +1419,9 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
     select: {
       id: true,
       submittedAt: true,
-      finalSubmittedAt: true
+      finalSubmittedAt: true,
+      submittedAnswers: true,
+      remarks: true
     }
   });
 
@@ -1316,7 +1444,9 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
         select: {
           id: true,
           submittedAt: true,
-          finalSubmittedAt: true
+          finalSubmittedAt: true,
+          submittedAnswers: true,
+          remarks: true
         }
       });
     } catch (err) {
@@ -1331,7 +1461,9 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
           select: {
             id: true,
             submittedAt: true,
-            finalSubmittedAt: true
+            finalSubmittedAt: true,
+            submittedAnswers: true,
+            remarks: true
           }
         });
       }
@@ -1341,8 +1473,24 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
     }
   }
 
+  if (worksheet.generationMode === "EXAM" && attempt && !attempt.finalSubmittedAt) {
+    const expiry = await autoSubmitExpiredExamAttempt({
+      attempt,
+      worksheet,
+      tenantId: req.auth.tenantId,
+      studentId: req.student.id,
+      now
+    });
+    attempt = expiry.attempt;
+  }
+
+  if (attempt?.finalSubmittedAt) {
+    return res.apiError(409, "Worksheet already submitted", "SUBMISSION_ALREADY_FINALIZED");
+  }
+
+  const startedAt = attempt?.submittedAt || now;
   const expiresAt = worksheet.timeLimitSeconds
-    ? new Date(now.getTime() + worksheet.timeLimitSeconds * 1000)
+    ? new Date(new Date(startedAt).getTime() + worksheet.timeLimitSeconds * 1000)
     : null;
 
   return res.apiSuccess(
@@ -1350,7 +1498,7 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
     {
       attemptId: attempt.id,
       worksheetId,
-      startedAt: attempt.submittedAt || now,
+      startedAt,
       expiresAt,
       mode: attemptMode
     },
@@ -3218,13 +3366,34 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
         select: {
           worksheetId: true,
           id: true,
-          finalSubmittedAt: true
+          submittedAt: true,
+          finalSubmittedAt: true,
+          submittedAnswers: true,
+          remarks: true
         }
       })
     : [];
 
+  const worksheetById = new Map(assignedWorksheets.map((worksheet) => [worksheet.id, worksheet]));
+  const normalizedSubmissions = [];
+  for (const submission of submissions) {
+    const worksheet = worksheetById.get(submission.worksheetId);
+    if (!worksheet || submission.finalSubmittedAt || worksheet.generationMode !== "EXAM") {
+      normalizedSubmissions.push(submission);
+      continue;
+    }
+
+    const expiry = await autoSubmitExpiredExamAttempt({
+      attempt: submission,
+      worksheet,
+      tenantId,
+      studentId
+    });
+    normalizedSubmissions.push(expiry.attempt || submission);
+  }
+
   const latestByWorksheetId = new Map();
-  for (const s of submissions) {
+  for (const s of normalizedSubmissions) {
     if (!latestByWorksheetId.has(s.worksheetId)) {
       latestByWorksheetId.set(s.worksheetId, s);
     }

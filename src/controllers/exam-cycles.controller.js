@@ -8,6 +8,15 @@ import { resolveActorExamScope } from "../services/exam-scope.service.js";
 import { forwardEnrollmentList, rejectEnrollmentList, approveEnrollmentList } from "../services/exam-workflow.service.js";
 import { recordAudit } from "../utils/audit.js";
 import { assignSelectedExamWorksheets } from "../services/exam-worksheets.service.js";
+import {
+  generateQuestionSet,
+  getConfig,
+  getExamCycleLevels,
+  getLevelQuestionBanks,
+  getLevelWorksheets,
+  saveConfig,
+  validateConfig
+} from "../services/assessmentConfig.service.js";
 import { hashPassword } from "../utils/password.js";
 import { generateUsername } from "../utils/username-generator.js";
 
@@ -1206,6 +1215,29 @@ const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
   return res.apiSuccess("Pending lists", lists.map((l) => ({ ...l, entriesCount: l._count?.items ?? 0, _count: undefined })));
 });
 
+async function getRequiredLevelIdsForList({ tenantId, examCycleId, listId }) {
+  const items = await prisma.examEnrollmentListItem.findMany({
+    where: {
+      tenantId,
+      listId,
+      included: true,
+      list: {
+        is: {
+          id: listId,
+          examCycleId,
+          tenantId,
+          type: "CENTER_COMBINED"
+        }
+      }
+    },
+    select: {
+      entry: { select: { enrolledLevelId: true } }
+    }
+  });
+
+  return Array.from(new Set(items.map((item) => item.entry?.enrolledLevelId).filter(Boolean)));
+}
+
 const getEnrollmentListLevelBreakdown = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   const listId = String(req.params.listId);
@@ -1220,50 +1252,91 @@ const getEnrollmentListLevelBreakdown = asyncHandler(async (req, res) => {
     return res.apiError(404, "List not found", "EXAM_LIST_NOT_FOUND");
   }
 
-  const items = await prisma.examEnrollmentListItem.findMany({
-    where: {
-      tenantId,
-      listId,
-      included: true
-    },
-    select: {
-      entry: {
-        select: {
-          enrolledLevel: {
-            select: { id: true, name: true, rank: true }
-          }
-        }
-      }
-    }
-  });
-
-  const byLevelId = new Map();
-  for (const item of items) {
-    const level = item?.entry?.enrolledLevel;
-    if (!level?.id) {
-      continue;
-    }
-    const existing = byLevelId.get(level.id);
-    if (existing) {
-      existing.studentCount += 1;
-    } else {
-      byLevelId.set(level.id, {
-        levelId: level.id,
-        levelName: level.name,
-        levelRank: level.rank,
-        studentCount: 1
-      });
-    }
-  }
-
-  const breakdown = Array.from(byLevelId.values()).sort((a, b) => {
-    const ar = typeof a.levelRank === "number" ? a.levelRank : 0;
-    const br = typeof b.levelRank === "number" ? b.levelRank : 0;
-    if (ar !== br) return ar - br;
-    return String(a.levelName || "").localeCompare(String(b.levelName || ""));
-  });
+  const breakdown = await getExamCycleLevels({ tenantId, examCycleId, listId });
 
   return res.apiSuccess("Level breakdown", breakdown);
+});
+
+const getExamCycleLevelsForAssessment = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const listId = req.query?.listId ? String(req.query.listId) : null;
+
+  const levels = await getExamCycleLevels({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    listId
+  });
+
+  return res.apiSuccess("Exam cycle levels", levels);
+});
+
+const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const listId = req.query?.listId ? String(req.query.listId) : null;
+
+  const levels = await getExamCycleLevels({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    listId
+  });
+  const levelIds = levels.map((level) => level.levelId);
+
+  const [configs, worksheetsByLevelId, questionBanksByLevelId] = await Promise.all([
+    getConfig({ tenantId: req.auth.tenantId, examCycleId, levelIds }),
+    getLevelWorksheets({ tenantId: req.auth.tenantId, levelIds }),
+    getLevelQuestionBanks({ tenantId: req.auth.tenantId, levelIds })
+  ]);
+
+  const configuredLevels = new Set(configs.map((config) => config.levelId));
+  const isComplete = levelIds.length > 0 && levelIds.every((levelId) => configuredLevels.has(levelId));
+
+  return res.apiSuccess("Assessment config fetched", {
+    levels,
+    configs,
+    worksheetsByLevelId,
+    questionBanksByLevelId,
+    isComplete
+  });
+});
+
+const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const listId = req.body?.listId ? String(req.body.listId) : req.query?.listId ? String(req.query.listId) : null;
+
+  const levels = await getExamCycleLevels({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    listId
+  });
+
+  const saved = await saveConfig({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    actorUserId: req.auth.userId,
+    configs: Array.isArray(req.body?.configs) ? req.body.configs : [],
+    allowedLevelIds: levels.map((level) => level.levelId)
+  });
+
+  return res.apiSuccess("Assessment config saved", saved);
+});
+
+const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const studentId = String(req.body?.studentId || "").trim();
+  const levelId = String(req.body?.levelId || "").trim();
+
+  if (!studentId || !levelId) {
+    return res.apiError(400, "studentId and levelId are required", "VALIDATION_ERROR");
+  }
+
+  const result = await generateQuestionSet({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    studentId,
+    levelId
+  });
+
+  return res.apiSuccess("Question set generated", result);
 });
 
 const forwardPendingEnrollmentList = asyncHandler(async (req, res) => {
@@ -1354,96 +1427,23 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   const listId = String(req.params.listId);
 
-  const rawSelections = Array.isArray(req.body?.selections) ? req.body.selections : null;
-  if (!rawSelections || rawSelections.length === 0) {
-    return res.apiError(400, "Exam worksheet selections are required", "EXAM_WORKSHEET_SELECTION_REQUIRED");
-  }
-
-  const selections = rawSelections
-    .map((s) => ({
-      levelId: s?.levelId ? String(s.levelId).trim() : "",
-      worksheetId: s?.worksheetId ? String(s.worksheetId).trim() : ""
-    }))
-    .filter((s) => s.levelId && s.worksheetId);
-
-  if (!selections.length) {
-    return res.apiError(400, "Invalid selections", "VALIDATION_ERROR");
-  }
-
-  // Compute required levels for this request.
-  const requiredItems = await prisma.examEnrollmentListItem.findMany({
-    where: {
-      tenantId: req.auth.tenantId,
-      listId,
-      included: true,
-      list: {
-        is: {
-          id: listId,
-          examCycleId,
-          tenantId: req.auth.tenantId,
-          type: "CENTER_COMBINED"
-        }
-      }
-    },
-    select: {
-      entry: { select: { enrolledLevelId: true } }
-    }
+  const requiredLevelIds = await getRequiredLevelIdsForList({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    listId
   });
-
-  const requiredLevelIds = Array.from(new Set(requiredItems.map((i) => i.entry?.enrolledLevelId).filter(Boolean)));
   if (!requiredLevelIds.length) {
     return res.apiError(409, "No enrolled students in list", "EXAM_LIST_EMPTY");
   }
 
-  const selectedLevelIds = new Set(selections.map((s) => s.levelId));
-  for (const levelId of requiredLevelIds) {
-    if (!selectedLevelIds.has(levelId)) {
-      return res.apiError(409, "Missing exam worksheet selection for one or more levels", "EXAM_WORKSHEET_SELECTION_INCOMPLETE");
-    }
-  }
-
-  // Reject extra / mismatched levels explicitly to avoid accidental wrong mappings.
-  const requiredLevelSet = new Set(requiredLevelIds);
-  for (const s of selections) {
-    if (!requiredLevelSet.has(s.levelId)) {
-      return res.apiError(409, "Selection contains invalid level", "EXAM_WORKSHEET_SELECTION_LEVEL_INVALID");
-    }
-  }
-
-  // Validate the selected worksheets.
-  const worksheetIds = Array.from(new Set(selections.map((s) => s.worksheetId)));
-  const worksheets = await prisma.worksheet.findMany({
-    where: {
+  try {
+    await validateConfig({
       tenantId: req.auth.tenantId,
-      id: { in: worksheetIds }
-    },
-    select: {
-      id: true,
-      levelId: true,
-      isPublished: true,
-      examCycleId: true,
-      _count: { select: { questions: true } }
-    }
-  });
-  const wsById = new Map(worksheets.map((w) => [w.id, w]));
-
-  for (const s of selections) {
-    const ws = wsById.get(s.worksheetId);
-    if (!ws) {
-      return res.apiError(409, "Selected exam worksheet not found", "EXAM_WORKSHEET_NOT_FOUND");
-    }
-    if (ws.levelId !== s.levelId) {
-      return res.apiError(409, "Selected exam worksheet level mismatch", "EXAM_WORKSHEET_LEVEL_MISMATCH");
-    }
-    if (ws.examCycleId) {
-      return res.apiError(409, "Selected exam worksheet must be a base worksheet (not an exam cycle worksheet)", "EXAM_WORKSHEET_SOURCE_INVALID");
-    }
-    if (!ws.isPublished) {
-      return res.apiError(409, "Selected exam worksheet must be published", "EXAM_WORKSHEET_NOT_PUBLISHED");
-    }
-    if ((ws._count?.questions ?? 0) <= 0) {
-      return res.apiError(409, "Selected exam worksheet has no questions", "EXAM_WORKSHEET_QUESTIONS_MISSING");
-    }
+      examCycleId,
+      requiredLevelIds
+    });
+  } catch (error) {
+    return res.apiError(error?.statusCode || 409, error?.message || "Assessment configuration is incomplete", error?.errorCode || "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
   }
 
   const approved = await approveEnrollmentList({
@@ -1460,37 +1460,11 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     action: "EXAM_LIST_APPROVE",
     entityType: "EXAM_ENROLLMENT_LIST",
     entityId: listId,
-    metadata: { examCycleId, selectionsCount: selections.length }
+    metadata: { examCycleId, configuredLevels: requiredLevelIds.length }
   });
 
-  // Persist selections (idempotent upsert).
-  await prisma.$transaction(
-    selections.map((s) =>
-      prisma.examEnrollmentLevelWorksheetSelection.upsert({
-        where: {
-          tenantId_listId_levelId: {
-            tenantId: req.auth.tenantId,
-            listId,
-            levelId: s.levelId
-          }
-        },
-        create: {
-          tenantId: req.auth.tenantId,
-          listId,
-          levelId: s.levelId,
-          baseWorksheetId: s.worksheetId,
-          createdByUserId: req.auth.userId
-        },
-        update: {
-          baseWorksheetId: s.worksheetId,
-          createdByUserId: req.auth.userId
-        }
-      })
-    )
-  );
-
   // Keep the configured practice schedule intact; approval only finalizes the list
-  // and assigns the selected exam worksheets for this cycle.
+  // and assigns exam worksheets/questions for this cycle based on level config.
   const generation = await assignSelectedExamWorksheets({
     tenantId: req.auth.tenantId,
     examCycleId,
@@ -1498,7 +1472,7 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     actorUserId: req.auth.userId
   });
 
-  return res.apiSuccess("List approved; worksheets assigned", { list: approved.list, worksheets: generation });
+  return res.apiSuccess("List approved; assessments assigned", { list: approved.list, worksheets: generation });
 });
 
 const centerCreateTemporaryStudents = asyncHandler(async (req, res) => {
@@ -1831,6 +1805,10 @@ export {
   centerRejectTeacherList,
   exportEnrollmentListCsv,
   getEnrollmentListLevelBreakdown,
+  getExamCycleLevelsForAssessment,
+  getExamCycleAssessmentConfig,
+  saveExamCycleAssessmentConfig,
+  generateExamCycleQuestionSet,
   listPendingEnrollmentLists,
   forwardPendingEnrollmentList,
   rejectPendingEnrollmentList,

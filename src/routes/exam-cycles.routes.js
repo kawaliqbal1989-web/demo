@@ -13,6 +13,10 @@ import {
   centerRejectTeacherList,
   exportEnrollmentListCsv,
   getEnrollmentListLevelBreakdown,
+  getExamCycleLevelsForAssessment,
+  getExamCycleAssessmentConfig,
+  saveExamCycleAssessmentConfig,
+  generateExamCycleQuestionSet,
   listPendingEnrollmentLists,
   forwardPendingEnrollmentList,
   rejectPendingEnrollmentList,
@@ -107,6 +111,41 @@ examCyclesRouter.get(
   requireSuperadmin(),
   auditAction("EXAM_LIST_LEVEL_BREAKDOWN", "EXAM_ENROLLMENT_LIST", (req) => req.params.listId),
   getEnrollmentListLevelBreakdown
+);
+
+examCyclesRouter.get(
+  "/:id/levels",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_LEVELS", "EXAM_CYCLE", (req) => req.params.id),
+  getExamCycleLevelsForAssessment
+);
+
+examCyclesRouter.get(
+  "/:id/assessment-config",
+  requireSuperadmin(),
+  auditAction("EXAM_ASSESSMENT_CONFIG_VIEW", "EXAM_CYCLE", (req) => req.params.id),
+  getExamCycleAssessmentConfig
+);
+
+examCyclesRouter.post(
+  "/:id/assessment-config",
+  requireSuperadmin(),
+  auditAction("EXAM_ASSESSMENT_CONFIG_SAVE", "EXAM_CYCLE", (req) => req.params.id),
+  saveExamCycleAssessmentConfig
+);
+
+examCyclesRouter.put(
+  "/:id/assessment-config",
+  requireSuperadmin(),
+  auditAction("EXAM_ASSESSMENT_CONFIG_UPDATE", "EXAM_CYCLE", (req) => req.params.id),
+  saveExamCycleAssessmentConfig
+);
+
+examCyclesRouter.post(
+  "/:id/generate-question-set",
+  requireSuperadmin(),
+  auditAction("EXAM_GENERATE_QUESTION_SET", "EXAM_CYCLE", (req) => req.params.id),
+  generateExamCycleQuestionSet
 );
 
 // Pending lists for approvers

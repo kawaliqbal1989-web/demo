@@ -687,6 +687,11 @@ enum AssessmentMigrationLogStatus {
   SKIPPED
 }
 
+enum ExamLevelAssessmentType {
+  WORKSHEET
+  QUESTION_BANK
+}
+
 model Tenant {
   id                               String                           @id @default(cuid())
   name                             String
@@ -780,6 +785,8 @@ model Tenant {
   examEnrollmentEntries                  ExamEnrollmentEntry[]
   examEnrollmentListItems                ExamEnrollmentListItem[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
+  examLevelAssessmentConfigs             ExamLevelAssessmentConfig[]
+  examGeneratedQuestionSets              ExamGeneratedQuestionSet[]
   aiPlaygroundLogs                       AiPlaygroundLog[]
   aiCustomTools                          AiCustomTool[]
   worksheetReassignmentRequests          WorksheetReassignmentRequest[]
@@ -912,6 +919,7 @@ model AuthUser {
   createdExamTextbookData  ExamTextbookData[] @relation("ExamTextbookDataCreatedBy")
 
   examEnrollmentLevelWorksheetSelectionsCreated ExamEnrollmentLevelWorksheetSelection[] @relation("ExamEnrollmentLevelWorksheetSelectionCreatedBy")
+  examLevelAssessmentConfigsCreated             ExamLevelAssessmentConfig[]             @relation("ExamLevelAssessmentConfigCreatedBy")
 
   worksheetReassignmentRequestsCreated  WorksheetReassignmentRequest[] @relation("WorksheetReassignRequestedBy")
   worksheetReassignmentRequestsReviewed WorksheetReassignmentRequest[] @relation("WorksheetReassignReviewedBy")
@@ -1433,6 +1441,8 @@ model Level {
   examPracticePlans                      ExamPracticePlan[]
   examTextbookData                       ExamTextbookData[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
+  examLevelAssessmentConfigs             ExamLevelAssessmentConfig[]
+  examGeneratedQuestionSets              ExamGeneratedQuestionSet[]
   assessments                            Assessment[]
   assessmentPapers                       AssessmentPaper[]
   assessmentParticipants                 AssessmentParticipant[]
@@ -1537,6 +1547,7 @@ model Student {
   currentTeacher AuthUser? @relation("StudentCurrentTeacher", fields: [currentTeacherUserId], references: [id], onDelete: SetNull)
 
   examEnrollmentEntries         ExamEnrollmentEntry[]
+  examGeneratedQuestionSets     ExamGeneratedQuestionSet[]
   aiPlaygroundLogs              AiPlaygroundLog[]
   aiCustomTools                 AiCustomTool[]
   worksheetReassignmentRequests WorksheetReassignmentRequest[]
@@ -1930,6 +1941,7 @@ model Worksheet {
   mockTests                              MockTest[]
   questions                              WorksheetQuestion[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
+  examLevelAssessmentConfigs             ExamLevelAssessmentConfig[]
   assessmentPapers                       AssessmentPaper[]                      @relation("AssessmentPaperWorksheet")
   assessmentPaperSourceLinks             AssessmentPaper[]                      @relation("AssessmentPaperSourceWorksheet")
   templateId                             String?
@@ -1975,6 +1987,8 @@ model ExamCycle {
   worksheets        Worksheet[]
   tempStudents      Student[]             @relation("TempExamStudents")
   practicePlans     ExamPracticePlan[]
+  levelAssessmentConfigs ExamLevelAssessmentConfig[]
+  generatedQuestionSets ExamGeneratedQuestionSet[]
 
   @@unique([tenantId, code])
   @@index([tenantId, createdAt])
@@ -2126,6 +2140,55 @@ model ExamEnrollmentLevelWorksheetSelection {
   @@index([tenantId, levelId])
   @@index([baseWorksheetId])
   @@map("examenrollmentlevelworksheetselection")
+}
+
+model ExamLevelAssessmentConfig {
+  id               String                  @id @default(cuid())
+  tenantId         String
+  examCycleId      String
+  levelId          String
+  assessmentType   ExamLevelAssessmentType
+  worksheetId      String?
+  questionBankId   String?
+  questionCount    Int?
+  timeLimitMinutes Int?
+  createdByUserId  String
+  createdAt        DateTime                @default(now())
+  updatedAt        DateTime                @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  examCycle ExamCycle @relation(fields: [examCycleId], references: [id], onDelete: Cascade)
+  level     Level     @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  worksheet Worksheet? @relation(fields: [worksheetId], references: [id], onDelete: SetNull)
+  createdBy AuthUser  @relation("ExamLevelAssessmentConfigCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, examCycleId, levelId])
+  @@index([tenantId, examCycleId])
+  @@index([tenantId, levelId])
+  @@index([worksheetId])
+  @@map("examlevelassessmentconfig")
+}
+
+model ExamGeneratedQuestionSet {
+  id                   String   @id @default(cuid())
+  tenantId             String
+  examCycleId          String
+  studentId            String
+  levelId              String
+  questionBankId       String
+  generatedQuestionIds Json
+  generatedAt          DateTime @default(now())
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  examCycle ExamCycle @relation(fields: [examCycleId], references: [id], onDelete: Cascade)
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  level     Level     @relation(fields: [levelId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, examCycleId, studentId, levelId])
+  @@index([tenantId, examCycleId])
+  @@index([tenantId, studentId])
+  @@index([tenantId, levelId])
+  @@map("examgeneratedquestionset")
 }
 
 model WorksheetAssignment {

@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { generateWorksheet } from "./abacus-question-generator.service.js";
+import { ASSESSMENT_TYPE, extractTemplateIdFromQuestionBankKey } from "./assessmentConfig.service.js";
 import crypto from "crypto";
 
 function createHttpError(statusCode, message, errorCode) {
@@ -236,38 +237,6 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
     throw createHttpError(409, "Enrollment list must be approved before worksheet assignment", "WORKFLOW_STAGE_CONFLICT");
   }
 
-  const selections = await prisma.examEnrollmentLevelWorksheetSelection.findMany({
-    where: { tenantId, listId: combinedListId },
-    select: { levelId: true, baseWorksheetId: true }
-  });
-
-  const selectionByLevelId = new Map(selections.map((s) => [s.levelId, s.baseWorksheetId]));
-  if (!selectionByLevelId.size) {
-    throw createHttpError(409, "No exam worksheet selection found for this request", "EXAM_WORKSHEET_SELECTION_MISSING");
-  }
-
-  const baseWorksheetIds = Array.from(new Set(selections.map((s) => s.baseWorksheetId)));
-  const baseWorksheets = await prisma.worksheet.findMany({
-    where: { tenantId, id: { in: baseWorksheetIds } },
-    select: {
-      id: true,
-      levelId: true,
-      templateId: true,
-      title: true,
-      questions: {
-        orderBy: { questionNumber: "asc" },
-        select: {
-          questionBankId: true,
-          operands: true,
-          operation: true,
-          correctAnswer: true
-        }
-      }
-    }
-  });
-
-  const baseById = new Map(baseWorksheets.map((w) => [w.id, w]));
-
   const items = await prisma.examEnrollmentListItem.findMany({
     where: {
       tenantId,
@@ -292,6 +261,85 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
     throw createHttpError(409, "No enrolled students in list", "EXAM_LIST_EMPTY");
   }
 
+  const requiredLevelIds = Array.from(new Set(entries.map((entry) => entry.enrolledLevelId).filter(Boolean)));
+  const configs = await prisma.examLevelAssessmentConfig.findMany({
+    where: {
+      tenantId,
+      examCycleId,
+      levelId: { in: requiredLevelIds }
+    },
+    select: {
+      levelId: true,
+      assessmentType: true,
+      worksheetId: true,
+      questionBankId: true,
+      questionCount: true,
+      timeLimitMinutes: true
+    }
+  });
+
+  const configByLevelId = new Map(configs.map((config) => [config.levelId, config]));
+
+  for (const levelId of requiredLevelIds) {
+    if (!configByLevelId.has(levelId)) {
+      throw createHttpError(409, "Missing assessment configuration for one or more levels", "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
+    }
+  }
+
+  const worksheetIds = Array.from(
+    new Set(configs.filter((config) => config.assessmentType === ASSESSMENT_TYPE.WORKSHEET).map((config) => config.worksheetId).filter(Boolean))
+  );
+  const baseWorksheets = worksheetIds.length
+    ? await prisma.worksheet.findMany({
+        where: { tenantId, id: { in: worksheetIds } },
+        select: {
+          id: true,
+          levelId: true,
+          templateId: true,
+          questions: {
+            orderBy: { questionNumber: "asc" },
+            select: {
+              questionBankId: true,
+              operands: true,
+              operation: true,
+              correctAnswer: true
+            }
+          }
+        }
+      })
+    : [];
+  const baseWorksheetById = new Map(baseWorksheets.map((worksheet) => [worksheet.id, worksheet]));
+
+  const questionBankLevelIds = Array.from(
+    new Set(configs.filter((config) => config.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK).map((config) => config.levelId).filter(Boolean))
+  );
+  const bankQuestionPool = questionBankLevelIds.length
+    ? await prisma.questionBank.findMany({
+        where: {
+          tenantId,
+          levelId: { in: questionBankLevelIds },
+          isActive: true
+        },
+        select: {
+          id: true,
+          levelId: true,
+          templateId: true,
+          operands: true,
+          operation: true,
+          correctAnswer: true
+        }
+      })
+    : [];
+
+  const bankQuestionsByKey = new Map();
+  for (const question of bankQuestionPool) {
+    const key = `${question.levelId}:${question.templateId || "DEFAULT"}`;
+    if (!bankQuestionsByKey.has(key)) {
+      bankQuestionsByKey.set(key, []);
+    }
+    bankQuestionsByKey.get(key).push(question);
+  }
+
   const examTimeLimitSeconds = Math.max(60, Math.floor(Number(examCycle.examDurationMinutes) * 60));
 
   const result = await prisma.$transaction(async (tx) => {
@@ -302,23 +350,9 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         continue;
       }
 
-      const baseWorksheetId = selectionByLevelId.get(entry.enrolledLevelId);
-      if (!baseWorksheetId) {
-        const error = createHttpError(409, "Missing selected exam worksheet for one or more levels", "EXAM_WORKSHEET_SELECTION_INCOMPLETE");
-        throw error;
-      }
-
-      const base = baseById.get(baseWorksheetId);
-      if (!base) {
-        throw createHttpError(409, "Selected exam worksheet not found", "EXAM_WORKSHEET_NOT_FOUND");
-      }
-
-      if (base.levelId !== entry.enrolledLevelId) {
-        throw createHttpError(409, "Selected exam worksheet level mismatch", "EXAM_WORKSHEET_LEVEL_MISMATCH");
-      }
-
-      if (!Array.isArray(base.questions) || base.questions.length <= 0) {
-        throw createHttpError(409, "Selected exam worksheet has no questions", "EXAM_WORKSHEET_QUESTIONS_MISSING");
+      const levelConfig = configByLevelId.get(entry.enrolledLevelId);
+      if (!levelConfig) {
+        throw createHttpError(409, "Missing assessment configuration for one or more levels", "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
       }
 
       const existingExamWorksheet = await tx.worksheetAssignment.findFirst({
@@ -342,8 +376,68 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
       }
 
       const studentName = `${entry.student.firstName} ${entry.student.lastName}`.trim();
-      const seed = `EXAM_SELECTED:${examCycleId}:${baseWorksheetId}:${entry.studentId}`;
-      const shuffled = shuffleDeterministic(base.questions, seed);
+      let selectedQuestions;
+      let seed;
+      let templateId = null;
+      let timeLimitSeconds = examTimeLimitSeconds;
+
+      if (levelConfig.assessmentType === ASSESSMENT_TYPE.WORKSHEET) {
+        const baseWorksheetId = levelConfig.worksheetId;
+        const baseWorksheet = baseWorksheetById.get(baseWorksheetId);
+        if (!baseWorksheet || baseWorksheet.levelId !== entry.enrolledLevelId) {
+          throw createHttpError(409, "Configured worksheet is invalid", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
+        }
+        if (!Array.isArray(baseWorksheet.questions) || baseWorksheet.questions.length <= 0) {
+          throw createHttpError(409, "Configured worksheet has no questions", "EXAM_WORKSHEET_QUESTIONS_MISSING");
+        }
+
+        templateId = baseWorksheet.templateId || null;
+        seed = `EXAM_SELECTED:${examCycleId}:${baseWorksheetId}:${entry.studentId}`;
+        selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed);
+      } else if (levelConfig.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK) {
+        const templateIdForBank = extractTemplateIdFromQuestionBankKey(levelConfig.questionBankId);
+        const bankKey = `${entry.enrolledLevelId}:${templateIdForBank || "DEFAULT"}`;
+        const bankQuestions = bankQuestionsByKey.get(bankKey) || [];
+        const configuredCount = Number(levelConfig.questionCount || 0);
+
+        if (!Number.isInteger(configuredCount) || configuredCount <= 0) {
+          throw createHttpError(409, "Configured question count is invalid", "EXAM_QUESTION_COUNT_INVALID");
+        }
+        if (bankQuestions.length < configuredCount) {
+          throw createHttpError(409, "Configured question count exceeds available bank questions", "EXAM_QUESTION_COUNT_EXCEEDS_BANK");
+        }
+
+        templateId = templateIdForBank;
+        seed = `EXAM_BANK:${examCycleId}:${levelConfig.questionBankId}:${entry.studentId}`;
+        selectedQuestions = shuffleDeterministic(bankQuestions, seed).slice(0, configuredCount);
+        timeLimitSeconds = Math.max(60, Math.floor(Number(levelConfig.timeLimitMinutes || 0) * 60));
+
+        await tx.examGeneratedQuestionSet.upsert({
+          where: {
+            tenantId_examCycleId_studentId_levelId: {
+              tenantId,
+              examCycleId,
+              studentId: entry.studentId,
+              levelId: entry.enrolledLevelId
+            }
+          },
+          create: {
+            tenantId,
+            examCycleId,
+            studentId: entry.studentId,
+            levelId: entry.enrolledLevelId,
+            questionBankId: levelConfig.questionBankId,
+            generatedQuestionIds: selectedQuestions.map((question) => question.id)
+          },
+          update: {
+            questionBankId: levelConfig.questionBankId,
+            generatedQuestionIds: selectedQuestions.map((question) => question.id),
+            generatedAt: new Date()
+          }
+        });
+      } else {
+        throw createHttpError(409, "Invalid assessment type configuration", "EXAM_ASSESSMENT_TYPE_INVALID");
+      }
 
       const worksheet = await tx.worksheet.create({
         data: {
@@ -354,18 +448,18 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
           levelId: entry.enrolledLevelId,
           createdByUserId: actorUserId,
           isPublished: false,
-          templateId: base.templateId,
+          templateId,
           generationMode: "EXAM",
           generationSeed: seed,
           generatedAt: new Date(),
-          timeLimitSeconds: examTimeLimitSeconds,
+          timeLimitSeconds,
           examCycleId
         },
         select: { id: true }
       });
 
       await tx.worksheetQuestion.createMany({
-        data: shuffled.map((q, idx) => ({
+        data: selectedQuestions.map((q, idx) => ({
           tenantId,
           worksheetId: worksheet.id,
           questionNumber: idx + 1,

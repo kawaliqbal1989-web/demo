@@ -75,6 +75,39 @@ async function getEnrollmentListLevelBreakdown(examCycleId, listId) {
   return response.data;
 }
 
+async function getExamCycleLevels(examCycleId, { listId } = {}) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/levels`, {
+    params: {
+      ...(listId ? { listId } : {})
+    }
+  });
+  return response.data;
+}
+
+async function getExamCycleAssessmentConfig(examCycleId, { listId } = {}) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/assessment-config`, {
+    params: {
+      ...(listId ? { listId } : {})
+    }
+  });
+  return response.data;
+}
+
+async function saveExamCycleAssessmentConfig(examCycleId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/assessment-config`, payload);
+  return response.data;
+}
+
+async function updateExamCycleAssessmentConfig(examCycleId, payload = {}) {
+  const response = await apiClient.put(`/exam-cycles/${examCycleId}/assessment-config`, payload);
+  return response.data;
+}
+
+async function generateExamCycleQuestionSet(examCycleId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/generate-question-set`, payload);
+  return response.data;
+}
+
 async function approveEnrollmentListAsSuperadmin(examCycleId, listId, payload = {}) {
   const response = await apiClient.post(`/exam-cycles/${examCycleId}/enrollment-lists/${listId}/approve`, payload);
   return response.data;
@@ -133,6 +166,11 @@ export {
   rejectPendingEnrollmentList,
   centerRejectTeacherList,
   getEnrollmentListLevelBreakdown,
+  getExamCycleLevels,
+  getExamCycleAssessmentConfig,
+  saveExamCycleAssessmentConfig,
+  updateExamCycleAssessmentConfig,
+  generateExamCycleQuestionSet,
   approveEnrollmentListAsSuperadmin,
   getExamResults,
   publishExamResults,

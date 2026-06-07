@@ -10,11 +10,11 @@ import { downloadBlob } from "../../utils/downloadBlob";
 import {
   approveEnrollmentListAsSuperadmin,
   exportEnrollmentListCsv,
-  getEnrollmentListLevelBreakdown,
+  getExamCycleAssessmentConfig,
   listPendingEnrollmentLists,
-  rejectPendingEnrollmentList
+  rejectPendingEnrollmentList,
+  saveExamCycleAssessmentConfig
 } from "../../services/examCyclesService";
-import { listWorksheets } from "../../services/worksheetsService";
 
 function formatDateTime(value) {
   if (!value) return "";
@@ -33,9 +33,9 @@ function SuperadminExamPendingListsPage() {
   const [actingId, setActingId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [loadingApprovalId, setLoadingApprovalId] = useState(null);
-  const [levelBreakdownByListId, setLevelBreakdownByListId] = useState({});
-  const [worksheetsByLevelId, setWorksheetsByLevelId] = useState({});
-  const [selectionByListId, setSelectionByListId] = useState({});
+  const [assessmentDataByListId, setAssessmentDataByListId] = useState({});
+  const [draftConfigByListId, setDraftConfigByListId] = useState({});
+  const [savingConfigListId, setSavingConfigListId] = useState(null);
 
   const [approveListId, setApproveListId] = useState(null);
   const [rejectListId, setRejectListId] = useState(null);
@@ -59,6 +59,95 @@ function SuperadminExamPendingListsPage() {
 
   const canAct = (listId) => actingId === null || actingId === listId;
 
+  const normalizeDraftConfig = useCallback((item = {}) => ({
+    levelId: String(item.levelId || ""),
+    assessmentType: String(item.assessmentType || "WORKSHEET"),
+    worksheetId: item.worksheetId ? String(item.worksheetId) : "",
+    questionBankId: item.questionBankId ? String(item.questionBankId) : "",
+    questionCount: item.questionCount ?? "",
+    timeLimitMinutes: item.timeLimitMinutes ?? ""
+  }), []);
+
+  const buildDraftFromAssessment = useCallback((assessmentPayload = {}) => {
+    const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+    const existingConfigs = Array.isArray(assessmentPayload?.configs) ? assessmentPayload.configs : [];
+    const configByLevelId = new Map(existingConfigs.map((config) => [config.levelId, config]));
+
+    return levels.map((level) => {
+      const existing = configByLevelId.get(level.levelId);
+      if (existing) {
+        return normalizeDraftConfig(existing);
+      }
+      return normalizeDraftConfig({
+        levelId: level.levelId,
+        assessmentType: "WORKSHEET"
+      });
+    });
+  }, [normalizeDraftConfig]);
+
+  const getDraftValidation = useCallback((assessmentPayload = {}, draftConfig = []) => {
+    const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+    const worksheetsByLevelId = assessmentPayload?.worksheetsByLevelId || {};
+    const questionBanksByLevelId = assessmentPayload?.questionBanksByLevelId || {};
+    const draftByLevelId = new Map((draftConfig || []).map((item) => [item.levelId, item]));
+
+    const errorsByLevelId = {};
+    let validCount = 0;
+
+    for (const level of levels) {
+      const current = draftByLevelId.get(level.levelId);
+      const errors = [];
+
+      if (!current) {
+        errors.push("Missing configuration");
+      } else if (current.assessmentType === "WORKSHEET") {
+        if (!current.worksheetId) {
+          errors.push("Select a worksheet");
+        }
+      } else if (current.assessmentType === "QUESTION_BANK") {
+        if (!current.questionBankId) {
+          errors.push("Select a question bank");
+        }
+
+        const count = Number(current.questionCount);
+        if (!Number.isInteger(count) || count <= 0) {
+          errors.push("Question count must be a positive integer");
+        }
+
+        const limit = Number(current.timeLimitMinutes);
+        if (!Number.isInteger(limit) || limit <= 0) {
+          errors.push("Time limit must be a positive integer");
+        }
+
+        const banks = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
+        const selectedBank = banks.find((bank) => bank.id === current.questionBankId);
+        if (selectedBank && Number.isInteger(count) && count > selectedBank.availableQuestionCount) {
+          errors.push(`Question count cannot exceed ${selectedBank.availableQuestionCount}`);
+        }
+      } else {
+        errors.push("Select assessment type");
+      }
+
+      if (current?.assessmentType === "WORKSHEET" && Array.isArray(worksheetsByLevelId[level.levelId]) && !worksheetsByLevelId[level.levelId].length) {
+        errors.push("No worksheet options available for this level");
+      }
+      if (current?.assessmentType === "QUESTION_BANK" && Array.isArray(questionBanksByLevelId[level.levelId]) && !questionBanksByLevelId[level.levelId].length) {
+        errors.push("No active question bank options available for this level");
+      }
+
+      if (!errors.length) {
+        validCount += 1;
+      }
+
+      errorsByLevelId[level.levelId] = errors;
+    }
+
+    return {
+      errorsByLevelId,
+      isComplete: levels.length > 0 && validCount === levels.length
+    };
+  }, []);
+
   const openApprovalForm = async (listId) => {
     if (!listId || !canAct(listId)) return;
     if (editingId === listId) {
@@ -69,93 +158,103 @@ function SuperadminExamPendingListsPage() {
     setEditingId(listId);
     setError("");
 
-    if (!levelBreakdownByListId[listId]) {
+    if (!assessmentDataByListId[listId]) {
       setLoadingApprovalId(listId);
       try {
-        const resp = await getEnrollmentListLevelBreakdown(examCycleId, listId);
-        const breakdown = resp?.data || [];
-        setLevelBreakdownByListId((prev) => ({ ...prev, [listId]: breakdown }));
-
-        // Ensure we have worksheet choices cached for each level.
-        const missingLevelIds = Array.from(new Set(breakdown.map((item) => item?.levelId).filter(Boolean))).filter(
-          (levelId) => !worksheetsByLevelId[levelId]
-        );
-
-        if (missingLevelIds.length) {
-          const worksheetResults = await Promise.all(
-            missingLevelIds.map(async (levelId) => {
-              const wsResp = await listWorksheets({ levelId, limit: 200, offset: 0, published: true });
-              const ws = Array.isArray(wsResp?.data) ? wsResp.data : [];
-              const eligible = ws
-                .filter((w) => !w?.examCycleId)
-                .filter((w) => (w?.questionCount ?? 0) > 0);
-              return [levelId, eligible];
-            })
-          );
-
-          setWorksheetsByLevelId((prev) => {
-            const next = { ...prev };
-            for (const [levelId, eligible] of worksheetResults) {
-              if (!next[levelId]) {
-                next[levelId] = eligible;
-              }
-            }
-            return next;
-          });
-        }
+        const resp = await getExamCycleAssessmentConfig(examCycleId, { listId });
+        const payload = resp?.data || {};
+        setAssessmentDataByListId((prev) => ({ ...prev, [listId]: payload }));
+        setDraftConfigByListId((prev) => ({
+          ...prev,
+          [listId]: buildDraftFromAssessment(payload)
+        }));
       } catch (err) {
-        setError(getFriendlyErrorMessage(err) || "Failed to load worksheet options.");
+        setError(getFriendlyErrorMessage(err) || "Failed to load assessment configuration options.");
       } finally {
         setLoadingApprovalId((prev) => (prev === listId ? null : prev));
       }
     }
   };
 
-  const setLevelSelection = (listId, levelId, worksheetId) => {
-    setSelectionByListId((prev) => ({
+  const setDraftLevelConfig = useCallback((listId, levelId, patch) => {
+    setDraftConfigByListId((prev) => {
+      const current = Array.isArray(prev[listId]) ? prev[listId] : [];
+      const next = current.map((item) => (item.levelId === levelId ? { ...item, ...patch } : item));
+      return {
+        ...prev,
+        [listId]: next
+      };
+    });
+  }, []);
+
+  const saveAssessmentConfig = useCallback(async (listId) => {
+    if (!listId) return;
+
+    const assessmentPayload = assessmentDataByListId[listId] || {};
+    const draft = draftConfigByListId[listId] || [];
+    const validation = getDraftValidation(assessmentPayload, draft);
+    if (!validation.isComplete) {
+      setError("Fix assessment configuration errors before saving.");
+      throw new Error("ASSESSMENT_CONFIG_INCOMPLETE");
+    }
+
+    setSavingConfigListId(listId);
+    setError("");
+    try {
+      await saveExamCycleAssessmentConfig(examCycleId, {
+        listId,
+        configs: draft.map((item) => ({
+          levelId: item.levelId,
+          assessmentType: item.assessmentType,
+          worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
+          questionBankId: item.assessmentType === "QUESTION_BANK" ? item.questionBankId : null,
+          questionCount: item.assessmentType === "QUESTION_BANK" ? Number(item.questionCount) : null,
+          timeLimitMinutes: item.assessmentType === "QUESTION_BANK" ? Number(item.timeLimitMinutes) : null
+        }))
+      });
+
+      const refreshed = await getExamCycleAssessmentConfig(examCycleId, { listId });
+      const payload = refreshed?.data || {};
+      setAssessmentDataByListId((prev) => ({
       ...prev,
-      [listId]: {
-        ...(prev[listId] || {}),
-        [levelId]: worksheetId
-      }
-    }));
-  };
+        [listId]: payload
+      }));
+      setDraftConfigByListId((prev) => ({
+        ...prev,
+        [listId]: buildDraftFromAssessment(payload)
+      }));
+      toast.success("Assessment configuration saved.");
+      return true;
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to save assessment configuration.");
+      throw err;
+    } finally {
+      setSavingConfigListId(null);
+    }
+  }, [assessmentDataByListId, buildDraftFromAssessment, draftConfigByListId, examCycleId, getDraftValidation]);
 
   const doConfirmApprove = async (listId) => {
     if (!listId || !canAct(listId)) return;
     if (loadingApprovalId === listId) return;
-    const breakdown = levelBreakdownByListId[listId] || [];
-    const sel = selectionByListId[listId] || {};
 
-    const selections = breakdown
-      .map((b) => ({
-        levelId: b.levelId,
-        worksheetId: sel[b.levelId] || ""
-      }))
-      .filter((x) => x.levelId);
-
-    for (const s of selections) {
-      if (!s.worksheetId) {
-        setError("Select an exam worksheet for every level before approving.");
-        return;
-      }
+    const assessmentPayload = assessmentDataByListId[listId] || {};
+    const draft = draftConfigByListId[listId] || [];
+    const validation = getDraftValidation(assessmentPayload, draft);
+    if (!validation.isComplete) {
+      setError("Save a complete assessment configuration for every level before approval.");
+      return;
     }
 
     setApproveListId(listId);
   };
 
   const executeApprove = async (listId) => {
-    const breakdown = levelBreakdownByListId[listId] || [];
-    const sel = selectionByListId[listId] || {};
-    const selections = breakdown
-      .map((b) => ({ levelId: b.levelId, worksheetId: sel[b.levelId] || "" }))
-      .filter((x) => x.levelId);
-
     setApproveListId(null);
     setActingId(listId);
     setError("");
     try {
-      await approveEnrollmentListAsSuperadmin(examCycleId, listId, { selections });
+      await saveAssessmentConfig(listId);
+      await approveEnrollmentListAsSuperadmin(examCycleId, listId, {});
       setEditingId(null);
       await load();
     } catch (err) {
@@ -268,62 +367,170 @@ function SuperadminExamPendingListsPage() {
                 {editingId === r.id ? (
                   <div className="card" style={{ padding: 12, display: "grid", gap: 10 }}>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                      Select one published exam worksheet per level in this request.
+                      Assessment Configuration: set Worksheet or Question Bank mode for every participating level before final approval.
                     </div>
 
-                    {loadingApprovalId === r.id && !(levelBreakdownByListId[r.id] || []).length ? (
-                      <LoadingState label="Loading worksheet options..." />
+                    {loadingApprovalId === r.id && !(assessmentDataByListId[r.id]?.levels || []).length ? (
+                      <LoadingState label="Loading assessment options..." />
                     ) : null}
 
-                    {!loadingApprovalId && !(levelBreakdownByListId[r.id] || []).length ? (
+                    {!loadingApprovalId && !(assessmentDataByListId[r.id]?.levels || []).length ? (
                       <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
                         No level breakdown is available for this request.
                       </p>
                     ) : null}
 
-                    {(levelBreakdownByListId[r.id] || []).map((b) => {
-                      const levelId = b.levelId;
-                      const wsOptions = worksheetsByLevelId[levelId] || [];
-                      const selected = (selectionByListId[r.id] || {})[levelId] || "";
+                    {(() => {
+                      const assessmentPayload = assessmentDataByListId[r.id] || {};
+                      const levels = assessmentPayload.levels || [];
+                      const draft = draftConfigByListId[r.id] || [];
+                      const validation = getDraftValidation(assessmentPayload, draft);
+                      const draftByLevelId = new Map(draft.map((item) => [item.levelId, item]));
 
-                      return (
-                        <div key={levelId} style={{ display: "grid", gap: 6 }}>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                            <strong>
-                              {b.levelName || levelId} (Students: {b.studentCount})
-                            </strong>
-                            <span style={{ fontSize: 12, color: "var(--muted)" }}>Rank: {String(b.levelRank ?? "")}</span>
+                      return levels.map((b) => {
+                        const levelId = b.levelId;
+                        const wsOptions = assessmentPayload?.worksheetsByLevelId?.[levelId] || [];
+                        const bankOptions = assessmentPayload?.questionBanksByLevelId?.[levelId] || [];
+                        const current = draftByLevelId.get(levelId) || {
+                          levelId,
+                          assessmentType: "WORKSHEET",
+                          worksheetId: "",
+                          questionBankId: "",
+                          questionCount: "",
+                          timeLimitMinutes: ""
+                        };
+                        const levelErrors = validation.errorsByLevelId[levelId] || [];
+
+                        return (
+                          <div key={levelId} style={{ display: "grid", gap: 6, border: "1px solid var(--color-border)", borderRadius: 10, padding: 10 }}>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <strong>
+                                {b.levelName || levelId} (Students: {b.studentCount})
+                              </strong>
+                              <span style={{ fontSize: 12, color: "var(--muted)" }}>Rank: {String(b.levelRank ?? "")}</span>
+                            </div>
+
+                            <label style={{ display: "grid", gap: 4 }}>
+                              <span style={{ fontSize: 12, color: "var(--muted)" }}>Assessment Type</span>
+                              <select
+                                value={current.assessmentType}
+                                onChange={(e) => {
+                                  const nextType = e.target.value;
+                                  setDraftLevelConfig(r.id, levelId, {
+                                    assessmentType: nextType,
+                                    worksheetId: "",
+                                    questionBankId: "",
+                                    questionCount: "",
+                                    timeLimitMinutes: ""
+                                  });
+                                }}
+                                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                              >
+                                <option value="WORKSHEET">Worksheet</option>
+                                <option value="QUESTION_BANK">Question Bank</option>
+                              </select>
+                            </label>
+
+                            {current.assessmentType === "WORKSHEET" ? (
+                              <label style={{ display: "grid", gap: 4 }}>
+                                <span style={{ fontSize: 12, color: "var(--muted)" }}>Select Worksheet</span>
+                                <select
+                                  value={current.worksheetId || ""}
+                                  onChange={(e) => setDraftLevelConfig(r.id, levelId, { worksheetId: e.target.value })}
+                                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                >
+                                  <option value="">-- Select worksheet --</option>
+                                  {wsOptions.map((w) => (
+                                    <option key={w.id} value={w.id}>
+                                      {w.title} (Q: {w.questionCount})
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+                            ) : null}
+
+                            {current.assessmentType === "QUESTION_BANK" ? (
+                              <div style={{ display: "grid", gap: 8 }}>
+                                <label style={{ display: "grid", gap: 4 }}>
+                                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Select Question Bank</span>
+                                  <select
+                                    value={current.questionBankId || ""}
+                                    onChange={(e) => setDraftLevelConfig(r.id, levelId, { questionBankId: e.target.value })}
+                                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                  >
+                                    <option value="">-- Select question bank --</option>
+                                    {bankOptions.map((bank) => (
+                                      <option key={bank.id} value={bank.id}>
+                                        {bank.name} (Questions: {bank.availableQuestionCount})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                                  <label style={{ display: "grid", gap: 4 }}>
+                                    <span style={{ fontSize: 12, color: "var(--muted)" }}>Number of Questions</span>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={current.questionCount}
+                                      onChange={(e) => setDraftLevelConfig(r.id, levelId, { questionCount: e.target.value })}
+                                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                    />
+                                  </label>
+                                  <label style={{ display: "grid", gap: 4 }}>
+                                    <span style={{ fontSize: 12, color: "var(--muted)" }}>Time Limit (Minutes)</span>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={current.timeLimitMinutes}
+                                      onChange={(e) => setDraftLevelConfig(r.id, levelId, { timeLimitMinutes: e.target.value })}
+                                      style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                    />
+                                  </label>
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {levelErrors.length ? (
+                              <div style={{ display: "grid", gap: 2 }}>
+                                {levelErrors.map((message) => (
+                                  <span key={message} className="error" style={{ margin: 0 }}>
+                                    {message}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Configuration valid</span>
+                            )}
                           </div>
-                          <select
-                            value={selected}
-                            onChange={(e) => setLevelSelection(r.id, levelId, e.target.value)}
-                            style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
-                          >
-                            <option value="">-- Select worksheet --</option>
-                            {wsOptions.map((w) => (
-                              <option key={w.id} value={w.id}>
-                                {w.title} (Q: {w.questionCount})
-                              </option>
-                            ))}
-                          </select>
-                          {!wsOptions.length ? (
-                            <p className="error" style={{ margin: 0 }}>
-                              No published worksheets found for this level.
-                            </p>
-                          ) : null}
-                        </div>
-                      );
-                    })}
+                        );
+                      });
+                    })()}
 
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => void saveAssessmentConfig(r.id)}
+                        disabled={savingConfigListId === r.id || actingId === r.id || loadingApprovalId === r.id}
+                        style={{ width: "auto" }}
+                      >
+                        {savingConfigListId === r.id ? "Saving..." : "Save Configuration"}
+                      </button>
                       <button
                         className="button"
                         type="button"
                         onClick={() => void doConfirmApprove(r.id)}
-                        disabled={actingId === r.id || loadingApprovalId === r.id || !(levelBreakdownByListId[r.id] || []).length}
+                        disabled={
+                          actingId === r.id ||
+                          loadingApprovalId === r.id ||
+                          savingConfigListId === r.id ||
+                          !(assessmentDataByListId[r.id]?.levels || []).length ||
+                          !getDraftValidation(assessmentDataByListId[r.id] || {}, draftConfigByListId[r.id] || []).isComplete
+                        }
                         style={{ width: "auto" }}
                       >
-                        {actingId === r.id ? "Working..." : "Confirm Approve"}
+                        {actingId === r.id ? "Working..." : "Final Approval"}
                       </button>
                     </div>
                   </div>
@@ -339,7 +546,7 @@ function SuperadminExamPendingListsPage() {
       <ConfirmDialog
         open={!!approveListId}
         title="Approve Enrollment List"
-        message="Approve this combined list and assign the selected exam worksheets to students?"
+        message="Approve this combined list with the saved level-wise assessment configuration?"
         confirmLabel="Approve"
         onCancel={() => setApproveListId(null)}
         onConfirm={() => void executeApprove(approveListId)}

@@ -29,7 +29,7 @@ import { createEnrollment, updateEnrollment } from "../../services/enrollmentsSe
 import { listBatches } from "../../services/batchesService";
 import { bulkTransfer } from "../../services/bulkOperationsService";
 import { listLevels } from "../../services/levelsService";
-import { listCatalogCourses } from "../../services/catalogService";
+import { listCatalogCourseLevels, listCatalogCourses } from "../../services/catalogService";
 import { listLedger } from "../../services/ledgerService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { resolveAssetUrl } from "../../utils/assetUrls";
@@ -213,9 +213,35 @@ function CenterStudentsPage() {
         listCatalogCourses({ limit: 200, offset: 0, status: "ACTIVE" }),
         listBatches({ limit: 200, offset: 0, status: "ACTIVE" })
       ]);
-      setTeachers(teachersRes?.data?.items || teachersRes?.data || []);
-      setLevels(levelsRes?.data?.items || levelsRes?.data || []);
-      setCourses(coursesRes?.data?.items || coursesRes?.data || []);
+      const teachersData = teachersRes?.data?.items || teachersRes?.data || [];
+      const levelsData = levelsRes?.data?.items || levelsRes?.data || [];
+      const coursesData = coursesRes?.data?.items || coursesRes?.data || [];
+
+      let scopedLevels = levelsData;
+      if (coursesData.length) {
+        const catalogLevelResponses = await Promise.all(
+          coursesData.map((course) =>
+            listCatalogCourseLevels({ courseId: course.id, limit: 200, offset: 0, status: "ACTIVE" }).catch(() => null)
+          )
+        );
+
+        const allowedRanks = new Set(
+          catalogLevelResponses.flatMap((response) => {
+            const items = response?.data?.items || response?.data || [];
+            return items
+              .map((item) => Number(item?.levelNumber))
+              .filter((rank) => Number.isFinite(rank));
+          })
+        );
+
+        if (allowedRanks.size) {
+          scopedLevels = levelsData.filter((level) => allowedRanks.has(Number(level?.rank)));
+        }
+      }
+
+      setTeachers(teachersData);
+      setLevels(scopedLevels);
+      setCourses(coursesData);
       setBatches(batchesRes?.data?.items || batchesRes?.data || []);
     } catch {
       // ignore

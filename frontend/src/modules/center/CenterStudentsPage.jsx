@@ -177,6 +177,7 @@ function CenterStudentsPage() {
   const [editTotalFeeAmount, setEditTotalFeeAmount] = useState("");
   const [editAdmissionFeeAmount, setEditAdmissionFeeAmount] = useState("");
   const [editLevelId, setEditLevelId] = useState("");
+  const [editOriginalLevelId, setEditOriginalLevelId] = useState("");
   const [editCurrentTeacherUserId, setEditCurrentTeacherUserId] = useState("");
   const [editStatus, setEditStatus] = useState("ACTIVE");
   const [editPhotoFile, setEditPhotoFile] = useState(null);
@@ -314,6 +315,7 @@ function CenterStudentsPage() {
     setEditTotalFeeAmount("");
     setEditAdmissionFeeAmount("");
     setEditLevelId("");
+    setEditOriginalLevelId("");
     setEditCurrentTeacherUserId("");
     setEditStatus("ACTIVE");
     setEditPhotoFile(null);
@@ -572,7 +574,9 @@ function CenterStudentsPage() {
     setEditTehsil(row?.tehsil || "");
     setEditTotalFeeAmount(row?.totalFeeAmount != null ? String(row.totalFeeAmount) : "");
     setEditAdmissionFeeAmount(row?.admissionFeeAmount != null ? String(row.admissionFeeAmount) : "");
-    setEditLevelId(row?.effectiveLevelId || row?.levelId || row?.effectiveLevel?.id || row?.level?.id || "");
+    const initialLevelId = row?.effectiveLevelId || row?.levelId || row?.effectiveLevel?.id || row?.level?.id || "";
+    setEditLevelId(initialLevelId);
+    setEditOriginalLevelId(initialLevelId);
     setEditCurrentTeacherUserId(row?.currentTeacherUserId || row?.currentTeacher?.id || "");
     setEditStatus(row?.isActive ? "ACTIVE" : "INACTIVE");
     setEditPhotoFile(null);
@@ -626,10 +630,13 @@ function CenterStudentsPage() {
         state: editState || null,
         district: editDistrict || null,
         tehsil: editTehsil || null,
-        levelId: editLevelId || undefined,
         currentTeacherUserId: editCurrentTeacherUserId || null,
         isActive: editStatus === "ACTIVE"
       });
+
+      if (editLevelId && editLevelId !== editOriginalLevelId) {
+        await assignStudentLevel(editingStudentId, { levelId: editLevelId });
+      }
 
       if (editPhotoFile) {
         try {

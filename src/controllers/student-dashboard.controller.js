@@ -164,6 +164,31 @@ function dashboardFallback(kind, threshold, lookback) {
     };
   }
 
+  if (kind === "financial-summary") {
+    return {
+      data: {
+        summary: {
+          totalPending: 0,
+          totalOverdue: 0,
+          totalPaid: 0,
+          waivedMonths: 0,
+          pausedMonths: 0,
+          status: null,
+          nextDue: null
+        },
+        reminders: [],
+        upcomingDues: [],
+        timeline: [],
+        latestPayment: null,
+        receipts: []
+      },
+      meta: {
+        source: { mode: "controller-fallback", degraded: true },
+        asOf: new Date().toISOString()
+      }
+    };
+  }
+
   return {
     data: {
       items: [],
@@ -376,10 +401,23 @@ const getStudentDashboardRemindersController = asyncHandler(async (req, res) => 
 });
 
 const getStudentFinancialOverviewController = asyncHandler(async (req, res) => {
-  const result = await getStudentFinancialVisibility({
-    tenantId: req.auth.tenantId,
-    studentId: req.student.id
-  });
+  let result;
+  try {
+    result = await getStudentFinancialVisibility({
+      tenantId: req.auth.tenantId,
+      studentId: req.student.id
+    });
+  } catch (error) {
+    logger.warn("student_dashboard_financial_summary_fallback", {
+      tenantId: req.auth?.tenantId,
+      studentId: req.student?.id,
+      path: req.originalUrl,
+      statusCode: Number(error?.statusCode || 0) || null,
+      code: error?.code || null,
+      detail: String(error?.message || "").slice(0, 300)
+    });
+    result = dashboardFallback("financial-summary");
+  }
 
   return sendSuccess(res, "Student financial overview fetched", result);
 });

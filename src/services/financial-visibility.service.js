@@ -669,7 +669,7 @@ async function getStudentFinancialVisibility({ tenantId, studentId, tx = prisma 
             amount: round2(receipts[0].totalAmount),
             status: receipts[0].status,
             paidAt: receipts[0].collectedAt || receipts[0].createdAt,
-            mode: receipts[0].mode || null
+            mode: receipts[0].paymentMode || null
           }
         : null,
       receipts: receipts.map((receipt) => ({
@@ -678,7 +678,7 @@ async function getStudentFinancialVisibility({ tenantId, studentId, tx = prisma 
         status: receipt.status,
         amount: round2(receipt.totalAmount),
         collectedAt: receipt.collectedAt || receipt.createdAt,
-        mode: receipt.mode || null
+        mode: receipt.paymentMode || null
       }))
     }
   };

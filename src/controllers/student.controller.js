@@ -114,7 +114,6 @@ const getStudentMe = asyncHandler(async (req, res) => {
         firstName: true,
         lastName: true,
         email: true,
-        gender: true,
         dateOfBirth: true,
         guardianName: true,
         guardianPhone: true,
@@ -170,7 +169,6 @@ const getStudentMe = asyncHandler(async (req, res) => {
         ...student,
         photoUrl: null,
         email: null,
-        gender: null,
         dateOfBirth: null,
         guardianName: null,
         guardianPhone: null,
@@ -268,7 +266,6 @@ const getStudentMe = asyncHandler(async (req, res) => {
     status: student.isActive ? "ACTIVE" : "INACTIVE",
     email: student.email || null,
     photoUrl: student.photoUrl || null,
-    gender: student.gender || null,
     guardianName: student.guardianName || null,
     guardianPhone: student.guardianPhone || null,
     guardianEmail: student.guardianEmail || null,
@@ -299,17 +296,6 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
     if (req.body[field] !== undefined) {
       const val = req.body[field] === null ? null : String(req.body[field]).trim();
       data[field] = val || null;
-    }
-  }
-
-  if (req.body.gender !== undefined) {
-    const rawGender = req.body.gender === null ? null : String(req.body.gender).trim().toUpperCase();
-    if (!rawGender) {
-      data.gender = null;
-    } else if (!["MALE", "FEMALE", "OTHER"].includes(rawGender)) {
-      return res.apiError(400, "Invalid gender", "INVALID_GENDER");
-    } else {
-      data.gender = rawGender;
     }
   }
 

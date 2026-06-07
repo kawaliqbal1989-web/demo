@@ -241,7 +241,6 @@ function buildStudentCreateData({
   admissionNo,
   firstName,
   lastName,
-  normalizedGender,
   email,
   dateOfBirth,
   hierarchyNodeId,
@@ -278,7 +277,6 @@ function buildStudentCreateData({
 
   return {
     ...data,
-    gender: normalizedGender || null,
     email,
     dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
     guardianName: guardianName ? String(guardianName) : null,
@@ -379,7 +377,6 @@ const importCsvExpectedHeaders = new Set([
   "admissionno",
   "firstname",
   "lastname",
-  "gender",
   "dateofbirth",
   "guardianname",
   "guardianphone",
@@ -1565,7 +1562,6 @@ const createStudent = asyncHandler(async (req, res) => {
     admissionNo,
     firstName,
     lastName,
-    gender,
     email,
     dateOfBirth,
     hierarchyNodeId: requestedHierarchyNodeId,
@@ -1620,11 +1616,6 @@ const createStudent = asyncHandler(async (req, res) => {
   }
 
   // Student email is optional; username/password login works without email.
-
-  const normalizedGender = gender ? String(gender).trim().toUpperCase() : null;
-  if (normalizedGender && !["MALE", "FEMALE", "OTHER"].includes(normalizedGender)) {
-    return res.apiError(400, "gender must be MALE, FEMALE, or OTHER", "VALIDATION_ERROR");
-  }
 
   const requestedAdmissionNo = normalizeAdmissionNo(admissionNo);
   const shouldAutoGenerateAdmissionNo = req.auth.role === "CENTER" && !requestedAdmissionNo;
@@ -1707,7 +1698,6 @@ const createStudent = asyncHandler(async (req, res) => {
                   admissionNo: finalAdmissionNo,
                   firstName,
                   lastName,
-                  normalizedGender,
                   email,
                   dateOfBirth,
                   hierarchyNodeId,
@@ -1766,7 +1756,6 @@ const createStudent = asyncHandler(async (req, res) => {
                   admissionNo: fallbackAdmissionNo,
                   firstName,
                   lastName,
-                  normalizedGender,
                   email,
                   dateOfBirth,
                   hierarchyNodeId,
@@ -1927,7 +1916,6 @@ const updateStudent = asyncHandler(async (req, res) => {
     guardianName,
     guardianPhone,
     guardianEmail,
-    gender,
     phonePrimary,
     phoneSecondary,
     address,
@@ -1975,14 +1963,6 @@ const updateStudent = asyncHandler(async (req, res) => {
 
   if (req.auth.role !== "SUPERADMIN" && req.auth.hierarchyNodeId && existing.hierarchyNodeId !== req.auth.hierarchyNodeId) {
     return res.apiError(403, "Hierarchy scope denied", "HIERARCHY_SCOPE_DENIED");
-  }
-
-  const normalizedGender = gender !== undefined && gender !== null && gender !== ""
-    ? String(gender).trim().toUpperCase()
-    : null;
-
-  if (normalizedGender && !["MALE", "FEMALE", "OTHER"].includes(normalizedGender)) {
-    return res.apiError(400, "gender must be MALE, FEMALE, or OTHER", "VALIDATION_ERROR");
   }
 
   if (currentTeacherUserId !== undefined) {
@@ -2052,7 +2032,6 @@ const updateStudent = asyncHandler(async (req, res) => {
     ...(guardianName !== undefined ? { guardianName: guardianName ? String(guardianName) : null } : {}),
     ...(guardianPhone !== undefined ? { guardianPhone: guardianPhone ? String(guardianPhone) : null } : {}),
     ...(guardianEmail !== undefined ? { guardianEmail: guardianEmail ? String(guardianEmail) : null } : {}),
-    ...(gender !== undefined ? { gender: normalizedGender } : {}),
     ...(phonePrimary !== undefined ? { phonePrimary: phonePrimary ? String(phonePrimary) : null } : {}),
     ...(phoneSecondary !== undefined ? { phoneSecondary: phoneSecondary ? String(phoneSecondary) : null } : {}),
     ...(address !== undefined ? { address: address ? String(address) : null } : {}),
@@ -3035,7 +3014,7 @@ const confirmPromotion = asyncHandler(async (req, res) => {
 
 /**
  * Bulk CSV import of students.
- * Expected CSV columns: firstName, lastName, gender, dateOfBirth, guardianName, guardianPhone, guardianEmail, email, address
+ * Expected CSV columns: firstName, lastName, dateOfBirth, guardianName, guardianPhone, guardianEmail, email, address
  * All rows share the request user's center (hierarchyNodeId) and lowest-rank level.
  */
 const bulkImportStudentsCsv = asyncHandler(async (req, res) => {
@@ -3089,12 +3068,6 @@ const bulkImportStudentsCsv = asyncHandler(async (req, res) => {
 
     if (!firstName) {
       results.errors.push({ row: rowIdx + 2, error: "firstName is required" });
-      continue;
-    }
-
-    const normalizedGender = getCsvField(row, ["gender"]) ? getCsvField(row, ["gender"]).toUpperCase() : null;
-    if (normalizedGender && !["MALE", "FEMALE", "OTHER"].includes(normalizedGender)) {
-      results.errors.push({ row: rowIdx + 2, error: `Invalid gender: ${getCsvField(row, ["gender"])}` });
       continue;
     }
 
@@ -3164,7 +3137,6 @@ const bulkImportStudentsCsv = asyncHandler(async (req, res) => {
             admissionNo,
             firstName,
             lastName: lastName || null,
-            normalizedGender,
             email: getCsvField(row, ["email", "studentEmail", "student_email"]) || null,
             dateOfBirth: parseOptionalCsvDate(getCsvField(row, ["dateOfBirth", "date_of_birth", "dob"]), "dateOfBirth"),
             hierarchyNodeId,

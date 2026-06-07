@@ -629,6 +629,64 @@ enum Gender {
   OTHER
 }
 
+enum AssessmentType {
+  EXAM
+  COMPETITION
+}
+
+enum AssessmentSourceSystem {
+  EXAM_CYCLE
+  COMPETITION
+}
+
+enum AssessmentStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum AssessmentVersionStatus {
+  DRAFT
+  CURRENT
+  SUPERSEDED
+}
+
+enum AssessmentPaperType {
+  COMMON
+  INDIVIDUAL
+}
+
+enum AssessmentPaperSourceMode {
+  EXAM_SELECTED_BASE
+  EXAM_GENERATED
+  COMPETITION_ASSIGNED
+  UNKNOWN
+}
+
+enum AssessmentParticipantType {
+  STUDENT
+}
+
+enum AssessmentParticipantStatus {
+  ACTIVE
+  EXCLUDED
+  REJECTED
+  LEGACY_ONLY
+}
+
+enum AssessmentMigrationLogType {
+  BACKFILL
+  PARITY
+}
+
+enum AssessmentMigrationLogStatus {
+  STARTED
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
 model Tenant {
   id                               String                           @id @default(cuid())
   name                             String
@@ -736,6 +794,11 @@ model Tenant {
   reportExportJobs                       ReportExportJob[]                  @relation("ReportExportJobsByTenant")
   reportExportArtifacts                  ReportExportArtifact[]             @relation("ReportExportArtifactsByTenant")
   reportExportSchedules                  ReportExportSchedule[]             @relation("ReportExportSchedulesByTenant")
+  assessments                            Assessment[]
+  assessmentVersions                     AssessmentVersion[]
+  assessmentPapers                       AssessmentPaper[]
+  assessmentParticipants                 AssessmentParticipant[]
+  assessmentMigrationLogs                AssessmentMigrationLog[]
 
   @@map("tenant")
 }
@@ -861,6 +924,10 @@ model AuthUser {
   insightsReceived Insight[] @relation("InsightTarget")
   reportExportJobs ReportExportJob[] @relation("ReportExportJobsByRequester")
   reportExportSchedulesCreated ReportExportSchedule[] @relation("ReportExportSchedulesCreatedBy")
+  assessmentsCreated Assessment[] @relation("AssessmentCreatedBy")
+  assessmentVersionsCreated AssessmentVersion[] @relation("AssessmentVersionCreatedBy")
+  assessmentParticipantsAsTeacher AssessmentParticipant[] @relation("AssessmentParticipantTeacher")
+  assessmentMigrationLogs AssessmentMigrationLog[] @relation("AssessmentMigrationActor")
 
   @@unique([tenantId, email])
   @@unique([tenantId, username])
@@ -1090,6 +1157,8 @@ model HierarchyNode {
 
   examEnrollmentLists       ExamEnrollmentList[]       @relation("ExamEnrollmentListCenterNode")
   centerPracticeAllocations CenterPracticeAllocation[] @relation("CenterPracticeAllocationNode")
+  assessments               Assessment[]
+  assessmentParticipants    AssessmentParticipant[]
 
   @@unique([tenantId, code])
   @@index([tenantId, type])
@@ -1364,6 +1433,9 @@ model Level {
   examPracticePlans                      ExamPracticePlan[]
   examTextbookData                       ExamTextbookData[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
+  assessments                            Assessment[]
+  assessmentPapers                       AssessmentPaper[]
+  assessmentParticipants                 AssessmentParticipant[]
 
   financialTransactionsAsFeeLevel FinancialTransaction[]
 
@@ -1472,6 +1544,8 @@ model Student {
   milestones                    StudentMilestone[]
   parentLinks                   ParentStudentLink[]                @relation("ParentStudentLinkStudent")
   engagementSnapshots           StudentEngagementSnapshot[]
+  assessmentParticipants        AssessmentParticipant[]
+  assessmentPaperSourceLinks    AssessmentPaper[]                  @relation("AssessmentPaperSourceStudent")
 
   @@unique([tenantId, admissionNo])
   // Student email is unique per tenant (AuthUser email is also unique). Multiple NULLs are allowed.
@@ -1639,6 +1713,197 @@ model StudentLevelProgressionHistory {
   @@map("studentlevelprogressionhistory")
 }
 
+model Assessment {
+  id                String              @id @default(cuid())
+  tenantId          String
+  assessmentType    AssessmentType
+  sourceSystem      AssessmentSourceSystem
+  sourceEntityId    String
+  title             String
+  description       String?             @db.Text
+  levelId           String?
+  hierarchyNodeId   String?
+  businessPartnerId String?
+  courseId          String?
+  status            AssessmentStatus    @default(DRAFT)
+  activeVersionId   String?
+  createdByUserId   String
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  level           Level?               @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  hierarchyNode   HierarchyNode?       @relation(fields: [hierarchyNodeId], references: [id], onDelete: SetNull)
+  businessPartner BusinessPartner?     @relation(fields: [businessPartnerId], references: [id], onDelete: SetNull)
+  course          Course?              @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  createdBy       AuthUser             @relation("AssessmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  versions        AssessmentVersion[]  @relation("AssessmentVersions")
+  activeVersion   AssessmentVersion?   @relation("AssessmentActiveVersion", fields: [activeVersionId], references: [id], onDelete: SetNull)
+  migrationLogs   AssessmentMigrationLog[]
+
+  @@unique([tenantId, sourceSystem, sourceEntityId], map: "ass_t_src_uq")
+  @@index([tenantId, assessmentType, createdAt], map: "ass_t_type_ct_i")
+  @@index([tenantId, levelId], map: "ass_t_lvl_i")
+  @@index([tenantId, hierarchyNodeId], map: "ass_t_hn_i")
+  @@index([tenantId, businessPartnerId], map: "ass_t_bp_i")
+  @@index([tenantId, activeVersionId], map: "ass_t_av_i")
+  @@index([tenantId, createdAt, id], map: "ass_t_ct_id_i")
+  @@map("assessment")
+}
+
+model AssessmentVersion {
+  id                    String                  @id @default(cuid())
+  tenantId              String
+  assessmentId          String
+  versionNumber         Int
+  parentVersionId       String?
+  sourceEntityId        String
+  sourceRevisionHash    String
+  versionStatus         AssessmentVersionStatus @default(DRAFT)
+  enrollmentStartAt     DateTime?
+  enrollmentEndAt       DateTime?
+  practiceStartAt       DateTime?
+  startsAt              DateTime?
+  endsAt                DateTime?
+  durationMinutes       Int?
+  attemptLimit          Int?
+  slotCode              String?
+  slotStartAt           DateTime?
+  slotEndAt             DateTime?
+  resultStatusMirror    String?
+  resultPublishedAtMirror DateTime?
+  legacyWorkflowStage   String?
+  createdByUserId       String
+  createdAt             DateTime                @default(now())
+  updatedAt             DateTime                @updatedAt
+
+  tenant               Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  assessment           Assessment           @relation("AssessmentVersions", fields: [assessmentId], references: [id], onDelete: Cascade)
+  parentVersion        AssessmentVersion?   @relation("AssessmentVersionParent", fields: [parentVersionId], references: [id], onDelete: SetNull)
+  childVersions        AssessmentVersion[]  @relation("AssessmentVersionParent")
+  createdBy            AuthUser             @relation("AssessmentVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  papers               AssessmentPaper[]
+  participants         AssessmentParticipant[]
+  migrationLogs        AssessmentMigrationLog[]
+  activeForAssessments Assessment[]         @relation("AssessmentActiveVersion")
+
+  @@unique([tenantId, assessmentId, versionNumber], map: "asv_t_ass_ver_uq")
+  @@index([tenantId, sourceEntityId], map: "asv_t_src_i")
+  @@index([tenantId, versionStatus], map: "asv_t_vst_i")
+  @@index([tenantId, startsAt], map: "asv_t_sta_i")
+  @@index([tenantId, endsAt], map: "asv_t_end_i")
+  @@index([tenantId, resultStatusMirror], map: "asv_t_rsm_i")
+  @@index([tenantId, assessmentId, versionStatus], map: "asv_t_ass_vst_i")
+  @@index([tenantId, slotCode, slotStartAt], map: "asv_t_slot_i")
+  @@map("assessmentversion")
+}
+
+model AssessmentPaper {
+  id                   String                    @id @default(cuid())
+  tenantId             String
+  assessmentVersionId  String
+  worksheetId          String
+  paperType            AssessmentPaperType       @default(COMMON)
+  sourceMode           AssessmentPaperSourceMode @default(UNKNOWN)
+  levelId              String?
+  sourceListId         String?
+  sourceLevelId        String?
+  sourceStudentId      String?
+  sourceWorksheetId    String?
+  generationSeedMirror String?
+  isPrimaryPaper       Boolean                   @default(false)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  assessmentVersion AssessmentVersion @relation(fields: [assessmentVersionId], references: [id], onDelete: Cascade)
+  worksheet         Worksheet         @relation("AssessmentPaperWorksheet", fields: [worksheetId], references: [id], onDelete: Restrict)
+  sourceWorksheet   Worksheet?        @relation("AssessmentPaperSourceWorksheet", fields: [sourceWorksheetId], references: [id], onDelete: SetNull)
+  level             Level?            @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  sourceStudent     Student?          @relation("AssessmentPaperSourceStudent", fields: [sourceStudentId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, assessmentVersionId, worksheetId], map: "asp_t_ver_ws_uq")
+  @@index([tenantId, assessmentVersionId], map: "asp_t_ver_i")
+  @@index([tenantId, worksheetId], map: "asp_t_ws_i")
+  @@index([tenantId, sourceListId], map: "asp_t_list_i")
+  @@index([tenantId, sourceStudentId], map: "asp_t_std_i")
+  @@index([tenantId, levelId], map: "asp_t_lvl_i")
+  @@index([tenantId, isPrimaryPaper], map: "asp_t_prim_i")
+  @@index([tenantId, sourceWorksheetId], map: "asp_t_sws_i")
+  @@map("assessmentpaper")
+}
+
+model AssessmentParticipant {
+  id                   String                      @id @default(cuid())
+  tenantId             String
+  assessmentVersionId  String
+  studentId            String
+  participantType      AssessmentParticipantType   @default(STUDENT)
+  sourceEntityType     String
+  sourceEntityId       String
+  sourceContainerType  String?
+  sourceContainerId    String?
+  levelId              String?
+  hierarchyNodeId      String?
+  teacherUserId        String?
+  includedInAssessment Boolean                     @default(true)
+  participantStatus    AssessmentParticipantStatus @default(ACTIVE)
+  legacyStatusMirror   String?
+  enrolledAt           DateTime?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  assessmentVersion AssessmentVersion @relation(fields: [assessmentVersionId], references: [id], onDelete: Cascade)
+  student           Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  level             Level?            @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  hierarchyNode     HierarchyNode?    @relation(fields: [hierarchyNodeId], references: [id], onDelete: SetNull)
+  teacherUser       AuthUser?         @relation("AssessmentParticipantTeacher", fields: [teacherUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, assessmentVersionId, studentId, sourceEntityType], map: "aspt_t_ver_std_src_uq")
+  @@index([tenantId, assessmentVersionId, studentId], map: "aspt_t_ver_std_i")
+  @@index([tenantId, studentId], map: "aspt_t_std_i")
+  @@index([tenantId, sourceEntityType, sourceEntityId], map: "aspt_t_src_i")
+  @@index([tenantId, sourceContainerType, sourceContainerId], map: "aspt_t_cont_i")
+  @@index([tenantId, includedInAssessment, participantStatus], map: "aspt_t_inc_st_i")
+  @@index([tenantId, hierarchyNodeId], map: "aspt_t_hn_i")
+  @@index([tenantId, levelId], map: "aspt_t_lvl_i")
+  @@index([tenantId, teacherUserId], map: "aspt_t_tu_i")
+  @@map("assessmentparticipant")
+}
+
+model AssessmentMigrationLog {
+  id                  String                     @id @default(cuid())
+  tenantId            String
+  logType             AssessmentMigrationLogType
+  status              AssessmentMigrationLogStatus @default(STARTED)
+  sourceSystem        AssessmentSourceSystem
+  sourceEntityId      String
+  assessmentId        String?
+  assessmentVersionId String?
+  actorUserId         String?
+  jobKey              String?
+  message             String?
+  details             Json?
+  startedAt           DateTime                   @default(now())
+  completedAt         DateTime?
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  assessment        Assessment?        @relation(fields: [assessmentId], references: [id], onDelete: SetNull)
+  assessmentVersion AssessmentVersion? @relation(fields: [assessmentVersionId], references: [id], onDelete: SetNull)
+  actorUser         AuthUser?          @relation("AssessmentMigrationActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, logType, status, startedAt], map: "asml_t_lt_st_sta_i")
+  @@index([tenantId, sourceSystem, sourceEntityId], map: "asml_t_src_i")
+  @@index([tenantId, assessmentId], map: "asml_t_ass_i")
+  @@index([tenantId, assessmentVersionId], map: "asml_t_asv_i")
+  @@index([tenantId, actorUserId, startedAt], map: "asml_t_act_sta_i")
+  @@index([tenantId, jobKey], map: "asml_t_job_i")
+  @@map("assessmentmigrationlog")
+}
+
 model Worksheet {
   id                                     String                                  @id @default(cuid())
   tenantId                               String
@@ -1665,6 +1930,8 @@ model Worksheet {
   mockTests                              MockTest[]
   questions                              WorksheetQuestion[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
+  assessmentPapers                       AssessmentPaper[]                      @relation("AssessmentPaperWorksheet")
+  assessmentPaperSourceLinks             AssessmentPaper[]                      @relation("AssessmentPaperSourceWorksheet")
   templateId                             String?
   template                               WorksheetTemplate?                      @relation(fields: [templateId], references: [id], onDelete: SetNull)
   reassignmentRequests                   WorksheetReassignmentRequest[]          @relation("WorksheetReassignCurrentWorksheet")
@@ -2383,6 +2650,7 @@ model BusinessPartner {
   competitionMappings   CompetitionBusinessPartner[]
   practiceEntitlements  BusinessPartnerPracticeEntitlement[]
   certificateTemplate   CertificateTemplate?
+  assessments           Assessment[]
 
   @@unique([tenantId, code])
   @@index([tenantId])
@@ -2794,6 +3062,7 @@ model Course {
   levels           CourseLevel[]
   students         Student[]
   assignedStudents StudentAssignedCourse[]
+  assessments      Assessment[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])

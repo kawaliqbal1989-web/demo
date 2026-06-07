@@ -49,6 +49,7 @@ import { insightsRouter } from "./insights.routes.js";
 import { bpRouter } from "./bp.routes.js";
 import { uploadsRouter } from "./uploads.routes.js";
 import bulkRouter from "./bulk-operations.routes.js";
+import { assessmentMigrationInternalRouter } from "./assessment-migration-internal.routes.js";
 
 const apiRouter = Router();
 
@@ -105,5 +106,6 @@ apiRouter.use("/uploads", uploadsRouter);
 apiRouter.use("/practice-allocations", practiceAllocationRouter);
 apiRouter.use("/insights", insightsRouter);
 apiRouter.use("/bulk", bulkRouter);
+apiRouter.use("/internal/assessment-migrations", assessmentMigrationInternalRouter);
 
 export { apiRouter };

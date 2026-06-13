@@ -12,6 +12,26 @@ async function createExamCycle(payload) {
   return response.data;
 }
 
+async function getExamCycleDeleteImpact(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/delete-impact`);
+  return response.data;
+}
+
+async function getExamCycleAuditCheck(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/audit-check`);
+  return response.data;
+}
+
+async function deleteExamCycle(examCycleId, { password, confirmCode } = {}) {
+  const response = await apiClient.delete(`/exam-cycles/${examCycleId}`, {
+    data: {
+      password: String(password || ""),
+      confirmCode: String(confirmCode || "")
+    }
+  });
+  return response.data;
+}
+
 async function getTeacherExamEnrollmentList(examCycleId) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/teacher-list`);
   return response.data;
@@ -154,6 +174,9 @@ async function centerRejectTeacherList(examCycleId, listId, { remark } = {}) {
 export {
   listExamCycles,
   createExamCycle,
+  getExamCycleDeleteImpact,
+  getExamCycleAuditCheck,
+  deleteExamCycle,
   getTeacherExamEnrollmentList,
   enrollTeacherStudents,
   submitTeacherExamEnrollmentList,

@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import toast from "react-hot-toast";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
-import { listExamCycles } from "../../services/examCyclesService";
+import {
+  listExamCycles,
+  getExamCycleDeleteImpact,
+  getExamCycleAuditCheck,
+  deleteExamCycle
+} from "../../services/examCyclesService";
 
 function formatDateTime(value) {
   if (!value) return "—";
@@ -27,6 +33,16 @@ function SuperadminExamCyclesPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteImpact, setDeleteImpact] = useState(null);
+  const [deleteImpactLoading, setDeleteImpactLoading] = useState(false);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteConfirmCode, setDeleteConfirmCode] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
+  const [auditCycleId, setAuditCycleId] = useState("");
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditData, setAuditData] = useState(null);
 
   const load = useCallback(async ({ limit: nextLimit = 20, offset: nextOffset = 0 } = {}) => {
     setLoading(true);
@@ -48,9 +64,93 @@ function SuperadminExamCyclesPage() {
     void load({ limit: 20, offset: 0 });
   }, [load]);
 
+  const openDeleteDialog = useCallback(async (cycle) => {
+    setDeleteTarget(cycle || null);
+    setDeleteImpact(null);
+    setDeleteConfirmCode("");
+    setDeletePassword("");
+    setDeleteImpactLoading(true);
+    setDeleteDialogOpen(true);
+    try {
+      const response = await getExamCycleDeleteImpact(cycle.id);
+      setDeleteImpact(response?.data || null);
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to load delete impact.");
+      toast.error(getFriendlyErrorMessage(err) || "Failed to load delete impact.");
+    } finally {
+      setDeleteImpactLoading(false);
+    }
+  }, []);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!deleteTarget) return;
+    setDeleteBusy(true);
+    try {
+      await deleteExamCycle(deleteTarget.id, {
+        password: deletePassword,
+        confirmCode: deleteConfirmCode
+      });
+      toast.success(`Deleted exam cycle ${deleteTarget.code || deleteTarget.name}`);
+      setDeleteDialogOpen(false);
+      setDeleteTarget(null);
+      setDeleteImpact(null);
+      setDeleteConfirmCode("");
+      setDeletePassword("");
+      if (auditCycleId === deleteTarget.id) {
+        setAuditCycleId("");
+        setAuditData(null);
+      }
+      await load({ limit, offset });
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || "Delete failed.");
+    } finally {
+      setDeleteBusy(false);
+    }
+  }, [deleteTarget, load, limit, offset, auditCycleId, deletePassword, deleteConfirmCode]);
+
+  const handleAuditCheck = useCallback(async (cycleId) => {
+    setAuditCycleId(cycleId);
+    setAuditLoading(true);
+    try {
+      const response = await getExamCycleAuditCheck(cycleId);
+      setAuditData(response?.data || null);
+    } catch (err) {
+      setAuditData(null);
+      toast.error(getFriendlyErrorMessage(err) || "Failed to load audit check.");
+    } finally {
+      setAuditLoading(false);
+    }
+  }, []);
+
   if (loading && !rows.length) {
     return <LoadingState label="Loading exam cycles..." />;
   }
+
+  const impactSummary = deleteImpact?.summary;
+  const impactFlags = deleteImpact?.flags;
+  const impactBlockers = deleteImpact?.blockers || [];
+  const impactWarnings = deleteImpact?.warnings || [];
+
+  const deleteMessage = deleteImpactLoading
+    ? "Loading impact check..."
+    : [
+        impactSummary
+          ? `Impact: lists ${impactSummary.listCount}, approved lists ${impactSummary.approvedListCount}, entries ${impactSummary.entryCount}, worksheets ${impactSummary.worksheetCount}, submissions ${impactSummary.submissionCount}.`
+          : "Impact details unavailable.",
+        impactBlockers.length ? `Blockers: ${impactBlockers.join(" ")}` : "",
+        impactWarnings.length ? `Warnings: ${impactWarnings.join(" ")}` : "",
+        "Enter your superadmin password to confirm hard delete."
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+  const deleteCodeTarget = String(deleteTarget?.code || "");
+  const isDeleteFormValid =
+    Boolean(deletePassword.trim())
+    && Boolean(deleteConfirmCode.trim())
+    && deleteConfirmCode.trim().toUpperCase() === deleteCodeTarget.toUpperCase()
+    && Boolean(impactFlags?.canDelete)
+    && !deleteImpactLoading;
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
@@ -82,6 +182,16 @@ function SuperadminExamCyclesPage() {
         </button>
       </div>
 
+      <div className="card" style={{ display: "grid", gap: 8 }}>
+        <strong>Feature Plan</strong>
+        <div style={{ color: "var(--muted)" }}>Planned next features for exam-cycle governance:</div>
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          <li>Lifecycle dashboard for each cycle with enrollment, practice, exam, and result checkpoints.</li>
+          <li>Automated health checks to flag inconsistent states (for example published with no approved list).</li>
+          <li>Expanded audit timeline showing approval and publish actors with timestamps.</li>
+        </ul>
+      </div>
+
       {error ? (
         <div className="card">
           <p className="error">{error}</p>
@@ -110,6 +220,24 @@ function SuperadminExamCyclesPage() {
                 <Link className="button secondary" style={{ width: "auto" }} to={`/superadmin/exam-cycles/${r.id}/results`}>
                   Results
                 </Link>
+                <button
+                  className="button secondary"
+                  style={{ width: "auto" }}
+                  type="button"
+                  onClick={() => void handleAuditCheck(r.id)}
+                  disabled={auditLoading && auditCycleId === r.id}
+                >
+                  {auditLoading && auditCycleId === r.id ? "Checking..." : "Audit"}
+                </button>
+                <button
+                  className="button secondary"
+                  style={{ width: "auto", color: "#dc2626" }}
+                  type="button"
+                  onClick={() => void openDeleteDialog(r)}
+                  disabled={deleteBusy}
+                >
+                  Delete
+                </button>
               </div>
             )
           }
@@ -129,6 +257,129 @@ function SuperadminExamCyclesPage() {
           void load(next);
         }}
       />
+
+      {auditData ? (
+        <div className="card" style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h3 style={{ margin: 0 }}>
+              Audit Check: {auditData?.examCycle?.name} ({auditData?.examCycle?.code})
+            </h3>
+            <button
+              type="button"
+              className="button secondary"
+              style={{ width: "auto" }}
+              onClick={() => {
+                setAuditData(null);
+                setAuditCycleId("");
+              }}
+            >
+              Close
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gap: 4 }}>
+            <div style={{ fontWeight: 600 }}>Health Checks</div>
+            {Object.entries(auditData?.healthChecks || {}).map(([key, value]) => (
+              <div key={key} style={{ color: value ? "#dc2626" : "#16a34a" }}>
+                {key}: {value ? "Issue" : "OK"}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontWeight: 600 }}>Timeline</div>
+            {(auditData?.timeline || []).length ? (
+              (auditData.timeline || []).map((event) => (
+                <div key={event.id} style={{ borderTop: "1px solid var(--border, #e5e7eb)", paddingTop: 6 }}>
+                  <strong>{event.action}</strong>
+                  <div style={{ color: "var(--muted)" }}>
+                    {formatDateTime(event.createdAt)} by {event?.user?.username || event?.user?.email || "system"}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={{ color: "var(--muted)" }}>No timeline events found.</div>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {deleteDialogOpen ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.35)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            zIndex: 50
+          }}
+        >
+          <div className="card" style={{ width: "100%", maxWidth: 520, display: "grid", gap: 12 }}>
+            <h3 style={{ margin: 0 }}>Delete {deleteTarget?.name || "exam cycle"}</h3>
+            <p style={{ margin: 0, color: "var(--color-text-muted)" }}>{deleteMessage}</p>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Type exam cycle code to confirm</label>
+              <input
+                className="input"
+                placeholder={deleteCodeTarget ? `Type ${deleteCodeTarget}` : "Type cycle code"}
+                value={deleteConfirmCode}
+                onChange={(event) => setDeleteConfirmCode(event.target.value)}
+                autoFocus
+              />
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Expected: {deleteCodeTarget || "N/A"}</div>
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>Superadmin password</label>
+              <input
+                className="input"
+                type="password"
+                placeholder="Enter your current password"
+                value={deletePassword}
+                onChange={(event) => setDeletePassword(event.target.value)}
+              />
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                className="button secondary"
+                type="button"
+                style={{ width: "auto" }}
+                onClick={() => {
+                  if (deleteBusy) return;
+                  setDeleteDialogOpen(false);
+                  setDeleteTarget(null);
+                  setDeleteImpact(null);
+                  setDeleteConfirmCode("");
+                  setDeletePassword("");
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="button"
+                type="button"
+                style={{ width: "auto" }}
+                disabled={!isDeleteFormValid || deleteBusy}
+                onClick={() => {
+                  if (!impactFlags?.canDelete) {
+                    toast.error(impactBlockers[0] || "Delete is blocked for this exam cycle.");
+                    return;
+                  }
+                  void handleDeleteConfirm();
+                }}
+              >
+                {deleteBusy ? "Deleting..." : "Delete Permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

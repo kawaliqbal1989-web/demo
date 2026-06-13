@@ -295,6 +295,10 @@ function TeacherWorksheetsPage() {
             ) : (
               students.map((s) => {
                 const sid = s.studentId || s.id;
+                const displayName = String(
+                  s.fullName || `${s.firstName || ""} ${s.lastName || ""}`
+                ).trim();
+                const identifier = s.admissionNo || s.enrollmentId || sid;
                 return (
                   <label key={sid} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", cursor: "pointer" }}>
                     <input
@@ -310,7 +314,7 @@ function TeacherWorksheetsPage() {
                       }}
                     />
                     <span style={{ fontSize: 13 }}>
-                      {s.firstName || ""} {s.lastName || ""}{s.enrollmentId ? ` (${s.enrollmentId})` : ""}
+                      {displayName || identifier}{identifier ? ` (${identifier})` : ""}
                     </span>
                   </label>
                 );

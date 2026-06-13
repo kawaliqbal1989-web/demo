@@ -1002,6 +1002,8 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
         enrollmentId: e.id,
         studentId: e.student.id,
         admissionNo: e.student.admissionNo,
+        firstName: e.student.firstName,
+        lastName: e.student.lastName,
         fullName: `${e.student.firstName} ${e.student.lastName}`.trim(),
         batchId: e.batchId,
         level: effectiveLevel ? { id: effectiveLevel.id, name: effectiveLevel.name, rank: effectiveLevel.rank } : null,

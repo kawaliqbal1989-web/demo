@@ -22,6 +22,9 @@ import {
   rejectPendingEnrollmentList,
   superadminApproveEnrollmentList,
   centerCreateTemporaryStudents,
+  getExamCycleDeleteImpact,
+  getExamCycleAuditCheck,
+  deleteExamCycle,
   getExamResults,
   exportExamResultsCsv,
   publishExamResults,
@@ -95,6 +98,27 @@ examCyclesRouter.post(
   requireRole("CENTER"),
   auditAction("EXAM_CENTER_CREATE_TEMP_STUDENTS", "STUDENT"),
   centerCreateTemporaryStudents
+);
+
+examCyclesRouter.get(
+  "/:id/delete-impact",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_DELETE_IMPACT", "EXAM_CYCLE", (req) => req.params.id),
+  getExamCycleDeleteImpact
+);
+
+examCyclesRouter.get(
+  "/:id/audit-check",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_AUDIT_CHECK", "EXAM_CYCLE", (req) => req.params.id),
+  getExamCycleAuditCheck
+);
+
+examCyclesRouter.delete(
+  "/:id",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_DELETE", "EXAM_CYCLE", (req) => req.params.id),
+  deleteExamCycle
 );
 
 // Exports

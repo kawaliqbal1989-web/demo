@@ -17,7 +17,7 @@ import {
   saveConfig,
   validateConfig
 } from "../services/assessmentConfig.service.js";
-import { hashPassword } from "../utils/password.js";
+import { hashPassword, verifyPassword } from "../utils/password.js";
 import { generateUsername } from "../utils/username-generator.js";
 
 function csvEscape(value) {
@@ -240,6 +240,108 @@ const createExamCycle = asyncHandler(async (req, res) => {
 
 function withinEnrollmentWindow(examCycle, now = new Date()) {
   return now.getTime() >= new Date(examCycle.enrollmentStartAt).getTime() && now.getTime() <= new Date(examCycle.enrollmentEndAt).getTime();
+}
+
+async function loadExamCycleDeleteImpact({ tenantId, examCycleId }) {
+  const examCycle = await prisma.examCycle.findFirst({
+    where: { id: examCycleId, tenantId },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      resultStatus: true,
+      enrollmentStartAt: true,
+      enrollmentEndAt: true,
+      examStartsAt: true,
+      examEndsAt: true,
+      resultPublishedAt: true
+    }
+  });
+
+  if (!examCycle) {
+    const error = new Error("Exam cycle not found");
+    error.statusCode = 404;
+    error.errorCode = "EXAM_CYCLE_NOT_FOUND";
+    throw error;
+  }
+
+  const [listCount, approvedListCount, entryCount, worksheetCount, submissionCount, questionSetCount, tempStudentCount] = await Promise.all([
+    prisma.examEnrollmentList.count({
+      where: { tenantId, examCycleId }
+    }),
+    prisma.examEnrollmentList.count({
+      where: { tenantId, examCycleId, status: "APPROVED" }
+    }),
+    prisma.examEnrollmentEntry.count({
+      where: { tenantId, examCycleId }
+    }),
+    prisma.worksheet.count({
+      where: { tenantId, examCycleId }
+    }),
+    prisma.worksheetSubmission.count({
+      where: {
+        tenantId,
+        worksheet: {
+          is: { examCycleId }
+        }
+      }
+    }),
+    prisma.examGeneratedQuestionSet.count({
+      where: { tenantId, examCycleId }
+    }),
+    prisma.student.count({
+      where: {
+        tenantId,
+        temporaryExamCycleId: examCycleId,
+        isTemporaryExam: true
+      }
+    })
+  ]);
+
+  const now = new Date();
+  const hasStarted = new Date(examCycle.examStartsAt).getTime() <= now.getTime();
+  const hasApprovedLists = approvedListCount > 0;
+  const isPublished = examCycle.resultStatus === "PUBLISHED";
+  const hasSubmissions = submissionCount > 0;
+
+  const blockers = [];
+  if (hasApprovedLists) {
+    blockers.push("Approved enrollment lists exist. Delete is blocked.");
+  }
+
+  const warnings = [];
+  if (hasStarted) {
+    warnings.push("Exam has started or ended. Delete will remove scheduling context.");
+  }
+  if (isPublished) {
+    warnings.push("Results are published. Delete remains allowed but fully destructive.");
+  }
+  if (hasSubmissions) {
+    warnings.push("Worksheet submissions exist and will lose exam-cycle linkage.");
+  }
+
+  return {
+    examCycle,
+    summary: {
+      listCount,
+      approvedListCount,
+      entryCount,
+      worksheetCount,
+      submissionCount,
+      questionSetCount,
+      tempStudentCount
+    },
+    flags: {
+      hasApprovedLists,
+      hasStarted,
+      isPublished,
+      hasSubmissions,
+      canDelete: !hasApprovedLists,
+      requiresPasswordConfirmation: true
+    },
+    blockers,
+    warnings
+  };
 }
 
 async function resolveTeacherCenterNodeId({ tenantId, teacherUserId, requestedNodeId }) {
@@ -1598,6 +1700,198 @@ const centerCreateTemporaryStudents = asyncHandler(async (req, res) => {
   return res.apiSuccess("Temporary students created", created, 201);
 });
 
+const getExamCycleDeleteImpact = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const impact = await loadExamCycleDeleteImpact({
+    tenantId: req.auth.tenantId,
+    examCycleId
+  });
+
+  res.locals.auditMetadata = {
+    examCycleCode: impact.examCycle.code,
+    canDelete: impact.flags.canDelete,
+    approvedListCount: impact.summary.approvedListCount,
+    submissionCount: impact.summary.submissionCount
+  };
+
+  return res.apiSuccess("Delete impact", impact);
+});
+
+const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+
+  const examCycle = await prisma.examCycle.findFirst({
+    where: { id: examCycleId, tenantId: req.auth.tenantId },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      resultStatus: true,
+      enrollmentStartAt: true,
+      enrollmentEndAt: true,
+      practiceStartAt: true,
+      examStartsAt: true,
+      examEndsAt: true,
+      resultPublishAt: true,
+      resultPublishedAt: true,
+      createdAt: true,
+      updatedAt: true
+    }
+  });
+
+  if (!examCycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  const [lists, approvedListCount, rawAudit] = await Promise.all([
+    prisma.examEnrollmentList.findMany({
+      where: { tenantId: req.auth.tenantId, examCycleId },
+      select: {
+        id: true,
+        status: true,
+        locked: true,
+        submittedAt: true,
+        forwardedAt: true,
+        approvedAt: true,
+        rejectedAt: true
+      }
+    }),
+    prisma.examEnrollmentList.count({
+      where: { tenantId: req.auth.tenantId, examCycleId, status: "APPROVED" }
+    }),
+    prisma.auditLog.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        action: { startsWith: "EXAM_" }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 250,
+      select: {
+        id: true,
+        action: true,
+        entityType: true,
+        entityId: true,
+        role: true,
+        metadata: true,
+        createdAt: true,
+        user: { select: { id: true, username: true, email: true } }
+      }
+    })
+  ]);
+
+  const statusCounts = lists.reduce((acc, list) => {
+    acc[list.status] = (acc[list.status] || 0) + 1;
+    return acc;
+  }, {});
+
+  const timeline = rawAudit
+    .filter((event) => {
+      if (event.entityType === "EXAM_CYCLE" && event.entityId === examCycleId) {
+        return true;
+      }
+      const metadataExamCycleId = String(event?.metadata?.examCycleId || "");
+      return metadataExamCycleId === examCycleId;
+    })
+    .slice(0, 40);
+
+  const now = new Date();
+  const healthChecks = {
+    publishedWithoutApprovedList: examCycle.resultStatus === "PUBLISHED" && approvedListCount === 0,
+    examWindowEndedButDraft: now.getTime() > new Date(examCycle.examEndsAt).getTime() && examCycle.resultStatus === "DRAFT",
+    practiceStartsAfterExam: new Date(examCycle.practiceStartAt).getTime() > new Date(examCycle.examStartsAt).getTime(),
+    enrollmentEndsAfterExamStart:
+      new Date(examCycle.enrollmentEndAt).getTime() > new Date(examCycle.examStartsAt).getTime(),
+    publishedMissingPublishedAt: examCycle.resultStatus === "PUBLISHED" && !examCycle.resultPublishedAt
+  };
+
+  res.locals.auditMetadata = {
+    examCycleCode: examCycle.code,
+    timelineCount: timeline.length,
+    approvedListCount
+  };
+
+  return res.apiSuccess("Exam audit check", {
+    examCycle,
+    enrollmentListSummary: {
+      total: lists.length,
+      approved: approvedListCount,
+      byStatus: statusCounts
+    },
+    healthChecks,
+    timeline
+  });
+});
+
+const deleteExamCycle = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const password = String(req.body?.password || "").trim();
+  const confirmCode = String(req.body?.confirmCode || "").trim();
+
+  if (!password) {
+    return res.apiError(400, "password is required", "VALIDATION_ERROR");
+  }
+
+  const impact = await loadExamCycleDeleteImpact({
+    tenantId: req.auth.tenantId,
+    examCycleId
+  });
+
+  if (!confirmCode) {
+    return res.apiError(400, "confirmCode is required", "VALIDATION_ERROR");
+  }
+
+  if (confirmCode.toUpperCase() !== String(impact.examCycle.code || "").toUpperCase()) {
+    return res.apiError(400, "confirmCode must match exam cycle code", "EXAM_CYCLE_CODE_CONFIRMATION_MISMATCH");
+  }
+
+  if (!impact.flags.canDelete) {
+    return res.apiError(409, impact.blockers[0] || "Delete is blocked", "EXAM_CYCLE_DELETE_BLOCKED");
+  }
+
+  const actor = await prisma.authUser.findFirst({
+    where: {
+      id: req.auth.userId,
+      tenantId: req.auth.tenantId,
+      role: "SUPERADMIN",
+      isActive: true
+    },
+    select: { id: true, passwordHash: true }
+  });
+
+  if (!actor) {
+    return res.apiError(403, "Forbidden", "ROLE_FORBIDDEN");
+  }
+
+  const validPassword = await verifyPassword(password, actor.passwordHash);
+  if (!validPassword) {
+    return res.apiError(401, "Invalid password", "INVALID_PASSWORD");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.worksheet.updateMany({
+      where: { tenantId: req.auth.tenantId, examCycleId },
+      data: { examCycleId: null }
+    });
+
+    await tx.examCycle.delete({
+      where: { id: examCycleId }
+    });
+  });
+
+  res.locals.auditMetadata = {
+    examCycleCode: impact.examCycle.code,
+    approvedListCount: impact.summary.approvedListCount,
+    resultStatus: impact.examCycle.resultStatus,
+    submissionCount: impact.summary.submissionCount
+  };
+
+  return res.apiSuccess("Exam cycle deleted", {
+    id: impact.examCycle.id,
+    code: impact.examCycle.code,
+    name: impact.examCycle.name
+  });
+});
+
 const getExamResults = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
 
@@ -1814,6 +2108,9 @@ export {
   rejectPendingEnrollmentList,
   superadminApproveEnrollmentList,
   centerCreateTemporaryStudents,
+  getExamCycleDeleteImpact,
+  getExamCycleAuditCheck,
+  deleteExamCycle,
   getExamResults,
   exportExamResultsCsv,
   publishExamResults,

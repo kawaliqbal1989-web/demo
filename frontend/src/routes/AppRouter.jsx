@@ -43,6 +43,8 @@ import { SuperadminCompetitionPage } from "../modules/superadmin/SuperadminCompe
 import { SuperadminCompetitionPendingPage } from "../modules/superadmin/SuperadminCompetitionPendingPage";
 import { SuperadminCompetitionResultsPage } from "../modules/superadmin/SuperadminCompetitionResultsPage";
 import { SuperadminExportOperationsPage } from "../modules/superadmin/SuperadminExportOperationsPage";
+import { SuperadminQuestionBankPage } from "../modules/superadmin/SuperadminQuestionBankPage";
+import { SuperadminExamPlatformPage } from "../modules/superadmin/SuperadminExamPlatformPage";
 
 import { CenterStudentsPage } from "../modules/center/CenterStudentsPage";
 import { CenterStudentViewPage } from "../modules/center/CenterStudentViewPage";
@@ -63,6 +65,7 @@ import { CenterAssignWorksheetsPage } from "../modules/center/CenterAssignWorksh
 import { WorksheetPage } from "../modules/center/WorksheetPage";
 import { CenterExamCyclesPage } from "../modules/center/CenterExamCyclesPage";
 import { CenterExamEnrollmentPage } from "../modules/center/CenterExamEnrollmentPage";
+import { CenterQuestionBankPage } from "../modules/center/CenterQuestionBankPage";
 
 import { CenterAnalyticsPage } from "../modules/center/CenterAnalyticsPage";
 import { CenterReassignmentQueuePage } from "../modules/center/CenterReassignmentQueuePage";
@@ -115,6 +118,7 @@ import { BusinessPartnerExamResultsPage } from "../modules/businessPartner/Busin
 import { BusinessPartnerSettlementsPage } from "../modules/businessPartner/BusinessPartnerSettlementsPage";
 import { BusinessPartnerLedgerPage } from "../modules/businessPartner/BusinessPartnerLedgerPage";
 import { BusinessPartnerPracticeAllocationsPage } from "../modules/businessPartner/BusinessPartnerPracticeAllocationsPage";
+import { BusinessPartnerQuestionBankPage } from "../modules/businessPartner/BusinessPartnerQuestionBankPage";
 import { SettlementWorkflowDetailPage } from "../modules/bp/pages/SettlementWorkflowDetailPage";
 import { FranchiseDashboard } from "../modules/franchise/FranchiseDashboard";
 import { FranchiseCentersPage } from "../modules/franchise/FranchiseCentersPage";
@@ -204,6 +208,8 @@ function AppRouter() {
             <Route path="/superadmin/competition" element={<SuperadminCompetitionPage />} />
             <Route path="/superadmin/competition/:competitionId/pending" element={<SuperadminCompetitionPendingPage />} />
             <Route path="/superadmin/competition/:competitionId/results" element={<SuperadminCompetitionResultsPage />} />
+            <Route path="/superadmin/question-bank" element={<SuperadminQuestionBankPage />} />
+            <Route path="/superadmin/exam-platform" element={<SuperadminExamPlatformPage />} />
             <Route path="/superadmin/release" element={<ReleaseManagement />} />
           </Route>
 
@@ -227,6 +233,7 @@ function AppRouter() {
             <Route path="/center/worksheets/:id" element={<WorksheetPage />} />
             <Route path="/center/exam-cycles" element={<CenterExamCyclesPage />} />
             <Route path="/center/exam-cycles/:examCycleId" element={<CenterExamEnrollmentPage />} />
+            <Route path="/center/question-bank" element={<CenterQuestionBankPage />} />
             <Route path="/center/courses" element={<Navigate to="/center/worksheets" replace />} />
             <Route path="/center/fees" element={<CenterFeesPage />} />
             <Route path="/center/reports" element={<CenterReportsPage />} />
@@ -293,6 +300,7 @@ function AppRouter() {
             <Route path="/bp/revenue" element={<BusinessPartnerRevenuePage />} />
             <Route path="/bp/revenue-split" element={<BusinessPartnerRevenueSplitPage />} />
             <Route path="/bp/practice-allocations" element={<BusinessPartnerPracticeAllocationsPage />} />
+            <Route path="/bp/question-bank" element={<BusinessPartnerQuestionBankPage />} />
           </Route>
 
           <Route element={<RoleRoute allowedRoles={[ROLES.FRANCHISE]} />}>

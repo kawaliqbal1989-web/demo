@@ -609,7 +609,7 @@ async function getStudentFinancialVisibility({ tenantId, studentId, tx = prisma 
         collectedAt: true,
         createdAt: true,
         paymentMode: true,
-        transactions: {
+        paymentTransactions: {
           select: {
             financialTransactionId: true
           },

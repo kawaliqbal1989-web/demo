@@ -1,8 +1,12 @@
 import { apiClient } from "./apiClient";
 
-async function listExamCycles({ limit = 20, offset = 0 } = {}) {
+async function listExamCycles({ limit = 20, offset = 0, filter } = {}) {
   const response = await apiClient.get("/exam-cycles", {
-    params: { limit, offset }
+    params: {
+      limit,
+      offset,
+      ...(filter ? { filter } : {})
+    }
   });
   return response.data;
 }
@@ -14,6 +18,27 @@ async function createExamCycle(payload) {
 
 async function getExamCycleDeleteImpact(examCycleId) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/delete-impact`);
+  return response.data;
+}
+
+async function getExamCycleArchiveImpact(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/archive-impact`);
+  return response.data;
+}
+
+async function archiveExamCycle(examCycleId, { password, confirmCode, archiveReason } = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/archive`, {
+    password: String(password || ""),
+    confirmCode: String(confirmCode || ""),
+    archiveReason: String(archiveReason || "")
+  });
+  return response.data;
+}
+
+async function restoreExamCycle(examCycleId, { password } = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/restore`, {
+    password: String(password || "")
+  });
   return response.data;
 }
 
@@ -174,6 +199,9 @@ async function centerRejectTeacherList(examCycleId, listId, { remark } = {}) {
 export {
   listExamCycles,
   createExamCycle,
+  getExamCycleArchiveImpact,
+  archiveExamCycle,
+  restoreExamCycle,
   getExamCycleDeleteImpact,
   getExamCycleAuditCheck,
   deleteExamCycle,

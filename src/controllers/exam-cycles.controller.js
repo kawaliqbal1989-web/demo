@@ -60,13 +60,110 @@ function assertDateOrder(a, b, message) {
   }
 }
 
+function buildLifecycleFilterWhere(filter) {
+  const now = new Date();
+  const normalized = String(filter || "DEFAULT").trim().toUpperCase();
+
+  if (normalized === "ALL") {
+    return {};
+  }
+
+  if (normalized === "ARCHIVED") {
+    return { isArchived: true };
+  }
+
+  if (normalized === "COMPLETED") {
+    return {
+      isArchived: false,
+      OR: [
+        { examEndsAt: { lt: now } },
+        { resultStatus: { in: ["LOCKED", "PUBLISHED"] } }
+      ]
+    };
+  }
+
+  return {
+    ...(normalized === "ACTIVE" ? { examEndsAt: { gte: now } } : {}),
+    isArchived: false
+  };
+}
+
+async function getExamCycleById({ tenantId, examCycleId }) {
+  const cycle = await prisma.examCycle.findFirst({
+    where: { id: examCycleId, tenantId },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      isArchived: true,
+      resultStatus: true,
+      enrollmentStartAt: true,
+      enrollmentEndAt: true,
+      examStartsAt: true,
+      examEndsAt: true,
+      resultPublishedAt: true
+    }
+  });
+
+  if (!cycle) {
+    const error = new Error("Exam cycle not found");
+    error.statusCode = 404;
+    error.errorCode = "EXAM_CYCLE_NOT_FOUND";
+    throw error;
+  }
+
+  return cycle;
+}
+
+async function assertExamCycleOperational({ tenantId, examCycleId }) {
+  const cycle = await getExamCycleById({ tenantId, examCycleId });
+  if (cycle.isArchived) {
+    const error = new Error("Exam cycle is archived and unavailable for active workflows");
+    error.statusCode = 409;
+    error.errorCode = "EXAM_CYCLE_ARCHIVED";
+    throw error;
+  }
+  return cycle;
+}
+
+async function verifySuperadminPasswordOrThrow({ tenantId, userId, password }) {
+  const actor = await prisma.authUser.findFirst({
+    where: {
+      id: userId,
+      tenantId,
+      role: "SUPERADMIN",
+      isActive: true
+    },
+    select: { id: true, passwordHash: true, username: true }
+  });
+
+  if (!actor) {
+    const error = new Error("Forbidden");
+    error.statusCode = 403;
+    error.errorCode = "ROLE_FORBIDDEN";
+    throw error;
+  }
+
+  const validPassword = await verifyPassword(password, actor.passwordHash);
+  if (!validPassword) {
+    const error = new Error("Invalid password");
+    error.statusCode = 401;
+    error.errorCode = "INVALID_PASSWORD";
+    throw error;
+  }
+
+  return actor;
+}
+
 const listExamCycles = asyncHandler(async (req, res) => {
   const { take, skip, orderBy, limit, offset } = parsePagination(req.query);
+  const lifecycleFilter = req.query?.filter || req.query?.lifecycle || "DEFAULT";
 
   const scope = await resolveActorExamScope({ tenantId: req.auth.tenantId, actor: req.auth });
 
   const where = {
     tenantId: req.auth.tenantId,
+    ...buildLifecycleFilterWhere(lifecycleFilter),
     ...(scope.businessPartnerId ? { businessPartnerId: scope.businessPartnerId } : {})
   };
 
@@ -84,7 +181,13 @@ const listExamCycles = asyncHandler(async (req, res) => {
     prisma.examCycle.count({ where })
   ]);
 
-  return res.apiSuccess("Exam cycles fetched", { items, total, limit, offset });
+  return res.apiSuccess("Exam cycles fetched", {
+    items,
+    total,
+    limit,
+    offset,
+    filter: String(lifecycleFilter || "DEFAULT").toUpperCase()
+  });
 });
 
 const createExamCycle = asyncHandler(async (req, res) => {
@@ -243,27 +346,7 @@ function withinEnrollmentWindow(examCycle, now = new Date()) {
 }
 
 async function loadExamCycleDeleteImpact({ tenantId, examCycleId }) {
-  const examCycle = await prisma.examCycle.findFirst({
-    where: { id: examCycleId, tenantId },
-    select: {
-      id: true,
-      name: true,
-      code: true,
-      resultStatus: true,
-      enrollmentStartAt: true,
-      enrollmentEndAt: true,
-      examStartsAt: true,
-      examEndsAt: true,
-      resultPublishedAt: true
-    }
-  });
-
-  if (!examCycle) {
-    const error = new Error("Exam cycle not found");
-    error.statusCode = 404;
-    error.errorCode = "EXAM_CYCLE_NOT_FOUND";
-    throw error;
-  }
+  const examCycle = await getExamCycleById({ tenantId, examCycleId });
 
   const [listCount, approvedListCount, entryCount, worksheetCount, submissionCount, questionSetCount, tempStudentCount] = await Promise.all([
     prisma.examEnrollmentList.count({
@@ -319,6 +402,9 @@ async function loadExamCycleDeleteImpact({ tenantId, examCycleId }) {
   if (hasSubmissions) {
     warnings.push("Worksheet submissions exist and will lose exam-cycle linkage.");
   }
+  if (examCycle.isArchived) {
+    warnings.push("Cycle is already archived.");
+  }
 
   return {
     examCycle,
@@ -336,10 +422,94 @@ async function loadExamCycleDeleteImpact({ tenantId, examCycleId }) {
       hasStarted,
       isPublished,
       hasSubmissions,
+      isArchived: examCycle.isArchived,
       canDelete: !hasApprovedLists,
       requiresPasswordConfirmation: true
     },
     blockers,
+    warnings
+  };
+}
+
+async function loadExamCycleArchiveImpact({ tenantId, examCycleId }) {
+  const examCycle = await getExamCycleById({ tenantId, examCycleId });
+
+  const [enrollmentCount, approvedEnrollmentCount, worksheetCount, resultCount, tempStudentCount, studentIds] = await Promise.all([
+    prisma.examEnrollmentEntry.count({
+      where: { tenantId, examCycleId }
+    }),
+    prisma.examEnrollmentList.count({
+      where: { tenantId, examCycleId, status: "APPROVED" }
+    }),
+    prisma.worksheet.count({
+      where: { tenantId, examCycleId }
+    }),
+    prisma.worksheetSubmission.count({
+      where: {
+        tenantId,
+        worksheet: {
+          is: { examCycleId }
+        }
+      }
+    }),
+    prisma.student.count({
+      where: {
+        tenantId,
+        temporaryExamCycleId: examCycleId,
+        isTemporaryExam: true
+      }
+    }),
+    prisma.examEnrollmentEntry.findMany({
+      where: { tenantId, examCycleId },
+      select: { studentId: true }
+    })
+  ]);
+
+  const uniqueStudentIds = Array.from(new Set(studentIds.map((entry) => entry.studentId).filter(Boolean)));
+
+  const certificateCount = uniqueStudentIds.length
+    ? await prisma.certificate.count({
+        where: {
+          tenantId,
+          studentId: { in: uniqueStudentIds }
+        }
+      })
+    : 0;
+
+  const activeDependencies = {
+    hasApprovedEnrollment: approvedEnrollmentCount > 0,
+    hasResults: resultCount > 0,
+    hasWorksheets: worksheetCount > 0,
+    hasCertificates: certificateCount > 0,
+    hasTemporaryStudents: tempStudentCount > 0,
+    isPublished: examCycle.resultStatus === "PUBLISHED"
+  };
+
+  const warnings = [];
+  if (activeDependencies.hasApprovedEnrollment) {
+    warnings.push("Approved enrollment lists exist; archive is recommended before delete.");
+  }
+  if (activeDependencies.hasResults) {
+    warnings.push("Result submissions exist and will remain in historical reports.");
+  }
+  if (activeDependencies.hasCertificates) {
+    warnings.push("Certificates are linked to participating students and remain preserved.");
+  }
+  if (examCycle.isArchived) {
+    warnings.push("Cycle is already archived.");
+  }
+
+  return {
+    examCycle,
+    summary: {
+      enrollmentCount,
+      approvedEnrollmentCount,
+      resultCount,
+      worksheetCount,
+      certificateCount,
+      tempStudentCount
+    },
+    activeDependencies,
     warnings
   };
 }
@@ -401,6 +571,7 @@ async function getOrCreateTeacherList({ tenantId, examCycleId, teacherUserId, ce
 
 const getTeacherList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const centerNodeId = await resolveTeacherCenterNodeId({
     tenantId: req.auth.tenantId,
     teacherUserId: req.auth.userId,
@@ -440,6 +611,7 @@ const getTeacherList = asyncHandler(async (req, res) => {
 
 const teacherEnrollStudents = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const studentIds = Array.isArray(req.body?.studentIds) ? req.body.studentIds.map(String) : null;
 
   if (!studentIds || !studentIds.length) {
@@ -576,6 +748,7 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
 
 const submitTeacherListToCenter = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
 
   const centerNodeId = await resolveTeacherCenterNodeId({
     tenantId: req.auth.tenantId,
@@ -712,6 +885,7 @@ async function getOrCreateCenterCombinedList({ tenantId, examCycleId, centerNode
 
 const centerPrepareCombinedList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const centerNodeId = req.auth.hierarchyNodeId;
 
   if (!centerNodeId) {
@@ -895,6 +1069,7 @@ const centerPrepareCombinedList = asyncHandler(async (req, res) => {
 
 const centerSubmitCombinedListToFranchise = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const centerNodeId = req.auth.hierarchyNodeId;
 
   if (!centerNodeId) {
@@ -964,6 +1139,7 @@ const centerSubmitCombinedListToFranchise = asyncHandler(async (req, res) => {
 
 const centerSetCombinedListItemIncluded = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const entryId = String(req.params.entryId);
   const centerNodeId = req.auth.hierarchyNodeId;
   const included = Boolean(req.body?.included);
@@ -1017,6 +1193,7 @@ const centerSetCombinedListItemIncluded = asyncHandler(async (req, res) => {
 
 const centerRejectTeacherList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = String(req.params.listId);
   const remark = req.body?.remark;
 
@@ -1276,6 +1453,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
 
 const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const scope = await resolveActorExamScope({ tenantId: req.auth.tenantId, actor: req.auth });
 
   const statusByRole = {
@@ -1361,6 +1539,7 @@ const getEnrollmentListLevelBreakdown = asyncHandler(async (req, res) => {
 
 const getExamCycleLevelsForAssessment = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = req.query?.listId ? String(req.query.listId) : null;
 
   const levels = await getExamCycleLevels({
@@ -1374,6 +1553,7 @@ const getExamCycleLevelsForAssessment = asyncHandler(async (req, res) => {
 
 const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = req.query?.listId ? String(req.query.listId) : null;
 
   const levels = await getExamCycleLevels({
@@ -1403,6 +1583,7 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
 
 const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = req.body?.listId ? String(req.body.listId) : req.query?.listId ? String(req.query.listId) : null;
 
   const levels = await getExamCycleLevels({
@@ -1424,6 +1605,7 @@ const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
 
 const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const studentId = String(req.body?.studentId || "").trim();
   const levelId = String(req.body?.levelId || "").trim();
 
@@ -1443,6 +1625,7 @@ const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
 
 const forwardPendingEnrollmentList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = String(req.params.listId);
 
   const scope = await resolveActorExamScope({ tenantId: req.auth.tenantId, actor: req.auth });
@@ -1484,6 +1667,7 @@ const forwardPendingEnrollmentList = asyncHandler(async (req, res) => {
 
 const rejectPendingEnrollmentList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = String(req.params.listId);
   const remark = req.body?.remark;
 
@@ -1527,6 +1711,7 @@ const rejectPendingEnrollmentList = asyncHandler(async (req, res) => {
 
 const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = String(req.params.listId);
 
   const requiredLevelIds = await getRequiredLevelIdsForList({
@@ -1579,6 +1764,7 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
 
 const centerCreateTemporaryStudents = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const centerNodeId = req.auth.hierarchyNodeId;
 
   if (!centerNodeId) {
@@ -1698,6 +1884,166 @@ const centerCreateTemporaryStudents = asyncHandler(async (req, res) => {
   });
 
   return res.apiSuccess("Temporary students created", created, 201);
+});
+
+const getExamCycleArchiveImpact = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const impact = await loadExamCycleArchiveImpact({
+    tenantId: req.auth.tenantId,
+    examCycleId
+  });
+
+  res.locals.auditMetadata = {
+    examCycleCode: impact.examCycle.code,
+    approvedEnrollmentCount: impact.summary.approvedEnrollmentCount,
+    certificateCount: impact.summary.certificateCount,
+    resultCount: impact.summary.resultCount,
+    isArchived: impact.examCycle.isArchived
+  };
+
+  return res.apiSuccess("Archive impact", impact);
+});
+
+const archiveExamCycle = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const password = String(req.body?.password || "").trim();
+  const confirmCode = String(req.body?.confirmCode || "").trim();
+  const archiveReason = String(req.body?.archiveReason || "").trim();
+
+  if (!password) {
+    return res.apiError(400, "password is required", "VALIDATION_ERROR");
+  }
+
+  if (!confirmCode) {
+    return res.apiError(400, "confirmCode is required", "VALIDATION_ERROR");
+  }
+
+  if (archiveReason.length < 20) {
+    return res.apiError(400, "archiveReason must be at least 20 characters", "VALIDATION_ERROR");
+  }
+
+  const impact = await loadExamCycleArchiveImpact({ tenantId: req.auth.tenantId, examCycleId });
+
+  if (impact.examCycle.isArchived) {
+    return res.apiError(409, "Exam cycle is already archived", "EXAM_CYCLE_ALREADY_ARCHIVED");
+  }
+
+  if (confirmCode.toUpperCase() !== String(impact.examCycle.code || "").toUpperCase()) {
+    return res.apiError(400, "confirmCode must match exam cycle code", "EXAM_CYCLE_CODE_CONFIRMATION_MISMATCH");
+  }
+
+  const actor = await verifySuperadminPasswordOrThrow({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    password
+  });
+
+  const archived = await prisma.examCycle.update({
+    where: { id: examCycleId },
+    data: {
+      isArchived: true,
+      archivedAt: new Date(),
+      archivedBy: req.auth.userId,
+      archiveReason
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      isArchived: true,
+      archivedAt: true,
+      archivedBy: true,
+      archiveReason: true
+    }
+  });
+
+  await recordAudit({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    role: req.auth.role,
+    action: "EXAM_CYCLE_ARCHIVED",
+    entityType: "EXAM_CYCLE",
+    entityId: archived.id,
+    metadata: {
+      cycleId: archived.id,
+      cycleCode: archived.code,
+      cycleName: archived.name,
+      userId: req.auth.userId,
+      username: actor.username || req.auth.username || null,
+      timestamp: new Date().toISOString(),
+      reason: archiveReason,
+      tenantId: req.auth.tenantId
+    }
+  }, { strict: true });
+
+  res.locals.auditMetadata = {
+    cycleCode: archived.code,
+    reasonLength: archiveReason.length
+  };
+
+  return res.apiSuccess("Exam cycle archived", archived);
+});
+
+const restoreExamCycle = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const password = String(req.body?.password || "").trim();
+
+  if (!password) {
+    return res.apiError(400, "password is required", "VALIDATION_ERROR");
+  }
+
+  const examCycle = await getExamCycleById({ tenantId: req.auth.tenantId, examCycleId });
+  if (!examCycle.isArchived) {
+    return res.apiError(409, "Exam cycle is not archived", "EXAM_CYCLE_NOT_ARCHIVED");
+  }
+
+  const actor = await verifySuperadminPasswordOrThrow({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    password
+  });
+
+  const restored = await prisma.examCycle.update({
+    where: { id: examCycleId },
+    data: {
+      isArchived: false,
+      archivedAt: null,
+      archivedBy: null,
+      archiveReason: null
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      isArchived: true
+    }
+  });
+
+  await recordAudit({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    role: req.auth.role,
+    action: "EXAM_CYCLE_RESTORED",
+    entityType: "EXAM_CYCLE",
+    entityId: restored.id,
+    metadata: {
+      cycleId: restored.id,
+      cycleCode: restored.code,
+      cycleName: restored.name,
+      userId: req.auth.userId,
+      username: actor.username || req.auth.username || null,
+      timestamp: new Date().toISOString(),
+      reason: "RESTORE",
+      tenantId: req.auth.tenantId
+    }
+  }, { strict: true });
+
+  res.locals.auditMetadata = {
+    cycleCode: restored.code,
+    restored: true
+  };
+
+  return res.apiSuccess("Exam cycle restored", restored);
 });
 
 const getExamCycleDeleteImpact = asyncHandler(async (req, res) => {
@@ -1848,24 +2194,11 @@ const deleteExamCycle = asyncHandler(async (req, res) => {
     return res.apiError(409, impact.blockers[0] || "Delete is blocked", "EXAM_CYCLE_DELETE_BLOCKED");
   }
 
-  const actor = await prisma.authUser.findFirst({
-    where: {
-      id: req.auth.userId,
-      tenantId: req.auth.tenantId,
-      role: "SUPERADMIN",
-      isActive: true
-    },
-    select: { id: true, passwordHash: true }
+  await verifySuperadminPasswordOrThrow({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    password
   });
-
-  if (!actor) {
-    return res.apiError(403, "Forbidden", "ROLE_FORBIDDEN");
-  }
-
-  const validPassword = await verifyPassword(password, actor.passwordHash);
-  if (!validPassword) {
-    return res.apiError(401, "Invalid password", "INVALID_PASSWORD");
-  }
 
   await prisma.$transaction(async (tx) => {
     await tx.worksheet.updateMany({
@@ -1949,6 +2282,7 @@ const exportExamResultsCsv = asyncHandler(async (req, res) => {
 
 const publishExamResults = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
 
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId: req.auth.tenantId },
@@ -2019,6 +2353,7 @@ const publishExamResults = asyncHandler(async (req, res) => {
 
 const unpublishExamResults = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
 
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId: req.auth.tenantId },
@@ -2108,6 +2443,9 @@ export {
   rejectPendingEnrollmentList,
   superadminApproveEnrollmentList,
   centerCreateTemporaryStudents,
+  getExamCycleArchiveImpact,
+  archiveExamCycle,
+  restoreExamCycle,
   getExamCycleDeleteImpact,
   getExamCycleAuditCheck,
   deleteExamCycle,

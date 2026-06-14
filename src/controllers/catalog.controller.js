@@ -3,6 +3,7 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { parsePagination } from "../utils/pagination.js";
 import { resolveBusinessPartnerForUser } from "../services/financial-reporting.service.js";
 import { ensureTenantCourseCatalog } from "../services/course-bootstrap.service.js";
+import { resolveActorLevelCap } from "../services/worksheet-access-scope.service.js";
 
 function parseStatus(value) {
   const v = String(value || "").trim().toUpperCase();
@@ -199,6 +200,25 @@ const listCatalogCourseLevels = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     courseId
   };
+
+  const maxLevelRank = await resolveActorLevelCap({
+    tenantId: req.auth.tenantId,
+    auth: req.auth
+  });
+
+  if (Number.isFinite(maxLevelRank)) {
+    if (maxLevelRank <= 0) {
+      return res.apiSuccess("Catalog course levels fetched", {
+        course,
+        total: 0,
+        items: [],
+        limit,
+        offset
+      });
+    }
+
+    where.levelNumber = { lte: maxLevelRank };
+  }
 
   if (status === "ACTIVE") where.isActive = true;
   if (status === "ARCHIVED") where.isActive = false;

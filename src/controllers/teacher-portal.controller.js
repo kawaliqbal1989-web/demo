@@ -15,6 +15,7 @@ import {
 } from "../services/worksheet-reassignment.service.js";
 import { getStudent360Data } from "../services/student-360.service.js";
 import { withEffectiveStudentLevel } from "../utils/student-level.js";
+import { resolveActorLevelCap, resolveAllowedLevelIdsByRank } from "../services/worksheet-access-scope.service.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -466,7 +467,21 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
     )
   );
 
-  if (!levelIds.length) {
+  const maxLevelRank = await resolveActorLevelCap({
+    tenantId: req.auth.tenantId,
+    auth: req.auth
+  });
+
+  let scopedLevelIds = levelIds;
+  if (Number.isFinite(maxLevelRank)) {
+    const allowedLevelIds = await resolveAllowedLevelIdsByRank({
+      tenantId: req.auth.tenantId,
+      maxRank: maxLevelRank
+    });
+    scopedLevelIds = levelIds.filter((id) => allowedLevelIds.includes(id));
+  }
+
+  if (!scopedLevelIds.length) {
     return res.apiSuccess("Batch worksheet context", {
       batchId: String(batchId),
       studentCount: enrollments.length,
@@ -477,7 +492,7 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
   const worksheets = await prisma.worksheet.findMany({
     where: {
       tenantId: req.auth.tenantId,
-      levelId: { in: levelIds }
+      levelId: { in: scopedLevelIds }
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {
@@ -533,10 +548,23 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
       id: worksheetId,
       tenantId: req.auth.tenantId
     },
-    select: { id: true, levelId: true }
+    select: {
+      id: true,
+      levelId: true,
+      level: { select: { rank: true } }
+    }
   });
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const maxLevelRank = await resolveActorLevelCap({
+    tenantId: req.auth.tenantId,
+    auth: req.auth
+  });
+
+  if (Number.isFinite(maxLevelRank) && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
+    return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
   }
 
   const enrollments = await prisma.enrollment.findMany({

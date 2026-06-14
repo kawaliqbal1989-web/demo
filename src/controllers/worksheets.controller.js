@@ -5,6 +5,7 @@ import { createBulkNotification } from "../services/notification.service.js";
 import { assertCanModifyAcademic } from "../services/ownership-guard.service.js";
 import { parsePagination } from "../utils/pagination.js";
 import { recordAudit } from "../utils/audit.js";
+import { resolveActorLevelCap, resolveAllowedLevelIdsByRank } from "../services/worksheet-access-scope.service.js";
 
 async function hierarchyContainsNode(targetNodeId, actorNodeId, tenantId) {
   if (!targetNodeId || !actorNodeId) {
@@ -55,6 +56,30 @@ const listWorksheets = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     ...(levelId ? { levelId } : {})
   };
+
+  const maxLevelRank = await resolveActorLevelCap({
+    tenantId: req.auth.tenantId,
+    auth: req.auth
+  });
+
+  if (Number.isFinite(maxLevelRank)) {
+    const allowedLevelIds = await resolveAllowedLevelIdsByRank({
+      tenantId: req.auth.tenantId,
+      maxRank: maxLevelRank
+    });
+
+    if (!allowedLevelIds.length) {
+      return res.apiSuccess("Worksheets fetched", []);
+    }
+
+    if (levelId && !allowedLevelIds.includes(levelId)) {
+      return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
+    }
+
+    where.levelId = levelId
+      ? levelId
+      : { in: allowedLevelIds };
+  }
 
   if (examSelectionEligible) {
     where.isPublished = true;
@@ -137,6 +162,11 @@ const listWorksheets = asyncHandler(async (req, res) => {
 const getWorksheet = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
+  const maxLevelRank = await resolveActorLevelCap({
+    tenantId: req.auth.tenantId,
+    auth: req.auth
+  });
+
   const worksheet = await prisma.worksheet.findFirst({
     where: {
       id,
@@ -164,6 +194,10 @@ const getWorksheet = asyncHandler(async (req, res) => {
 
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  if (Number.isFinite(maxLevelRank) && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
+    return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
   }
 
   return res.apiSuccess("Worksheet fetched", worksheet);

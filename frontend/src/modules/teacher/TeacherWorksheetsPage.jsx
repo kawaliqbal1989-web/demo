@@ -1,17 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { listCatalogCourseLevels, listCatalogCourses } from "../../services/catalogService";
 import { getWorksheet, listWorksheets } from "../../services/worksheetsService";
-import { formatWorksheetQuestionPreview } from "../../utils/worksheetQuestionPreview";
-import {
-  assignWorksheetToBatch,
-  bulkAssignWorksheetToStudents,
-  getTeacherBatchWorksheetsContext,
-  listMyBatches,
-  listMyStudents
-} from "../../services/teacherPortalService";
+import { WorksheetPreviewModal } from "./components/WorksheetPreviewModal";
 
 function extractItems(resp) {
   if (!resp) return [];
@@ -22,33 +16,9 @@ function extractItems(resp) {
   return [];
 }
 
-function nextWeekStr() {
-  const d = new Date();
-  d.setDate(d.getDate() + 7);
-  return d.toISOString().slice(0, 10);
-}
-
-function formatTimeLimit(timeLimitSeconds) {
-  const seconds = Number(timeLimitSeconds);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return "No time limit";
-  }
-  if (seconds % 60 === 0) {
-    return `${Math.floor(seconds / 60)} min`;
-  }
-  return `${seconds}s`;
-}
-
 function TeacherWorksheetsPage() {
+  const navigate = useNavigate();
   const [pageLoading, setPageLoading] = useState(true);
-  const [savingAssignment, setSavingAssignment] = useState(false);
-
-  const [batches, setBatches] = useState([]);
-  const [batchId, setBatchId] = useState("");
-  const [batchWorksheetsLoading, setBatchWorksheetsLoading] = useState(false);
-  const [batchWorksheets, setBatchWorksheets] = useState([]);
-  const [worksheetId, setWorksheetId] = useState("");
-  const [dueDate, setDueDate] = useState(nextWeekStr());
 
   const [courses, setCourses] = useState([]);
   const [selectedCourse, setSelectedCourse] = useState(null);
@@ -63,20 +33,14 @@ function TeacherWorksheetsPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const [students, setStudents] = useState([]);
-  const [selectedStudentIds, setSelectedStudentIds] = useState(new Set());
-  const [bulkWorksheetId, setBulkWorksheetId] = useState("");
-  const [bulkDueDate, setBulkDueDate] = useState(nextWeekStr());
-  const [bulkAssigning, setBulkAssigning] = useState(false);
-
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [previewWorksheet, setPreviewWorksheet] = useState(null);
 
   const openWorksheetPreview = async (worksheet) => {
-    const worksheetId = String(worksheet?.id || "").trim();
-    if (!worksheetId) return;
+    const nextWorksheetId = String(worksheet?.id || "").trim();
+    if (!nextWorksheetId) return;
 
     setPreviewOpen(true);
     setPreviewLoading(true);
@@ -84,7 +48,7 @@ function TeacherWorksheetsPage() {
     setPreviewWorksheet(null);
 
     try {
-      const response = await getWorksheet(worksheetId);
+      const response = await getWorksheet(nextWorksheetId);
       const payload = response?.data || response;
       setPreviewWorksheet({
         ...payload,
@@ -99,53 +63,28 @@ function TeacherWorksheetsPage() {
     }
   };
 
-  const batchMap = useMemo(() => new Map(batches.map((b) => [b.batchId, b])), [batches]);
-  const selectedBatch = batchMap.get(batchId) || null;
+  const openBatchAssignment = (worksheet) => {
+    const nextWorksheetId = String(worksheet?.id || "").trim();
+    const params = new URLSearchParams();
+    if (nextWorksheetId) {
+      params.set("worksheetId", nextWorksheetId);
+    }
+    const suffix = params.toString();
+    navigate(`/teacher/batches${suffix ? `?${suffix}` : ""}`);
+  };
 
   const loadPage = async () => {
     setPageLoading(true);
     setError("");
     try {
-      const [batchResp, courseResp, studentResp] = await Promise.all([
-        listMyBatches(),
-        listCatalogCourses({ limit: 100, offset: 0, status: "ACTIVE" }),
-        listMyStudents()
-      ]);
-
-      const batchItems = extractItems(batchResp);
+      const courseResp = await listCatalogCourses({ limit: 100, offset: 0, status: "ACTIVE" });
       const courseItems = extractItems(courseResp);
-      const studentItems = extractItems(studentResp);
-
-      setBatches(batchItems);
       setCourses(courseItems);
-      setStudents(studentItems);
-      if (batchItems.length) setBatchId(batchItems[0].batchId);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load worksheets workspace.");
-      setBatches([]);
       setCourses([]);
     } finally {
       setPageLoading(false);
-    }
-  };
-
-  const loadBatchWorksheets = async (nextBatchId) => {
-    const id = nextBatchId || batchId;
-    if (!id) {
-      setBatchWorksheets([]);
-      return;
-    }
-
-    setBatchWorksheetsLoading(true);
-    setError("");
-    try {
-      const data = await getTeacherBatchWorksheetsContext(id);
-      setBatchWorksheets(data?.data?.worksheets || []);
-    } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to load batch worksheets.");
-      setBatchWorksheets([]);
-    } finally {
-      setBatchWorksheetsLoading(false);
     }
   };
 
@@ -187,12 +126,6 @@ function TeacherWorksheetsPage() {
     void loadPage();
   }, []);
 
-  useEffect(() => {
-    setWorksheetId("");
-    if (batchId) void loadBatchWorksheets(batchId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchId]);
-
   if (pageLoading) {
     return <LoadingState label="Loading worksheets..." />;
   }
@@ -201,7 +134,7 @@ function TeacherWorksheetsPage() {
     <section style={{ display: "grid", gap: 12 }}>
       <div>
         <h2 style={{ margin: 0 }}>Worksheets</h2>
-        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Assign worksheets to your batches and browse the catalog.</div>
+        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Discover worksheets, preview content, and assign from the batch workspace.</div>
       </div>
 
       {error ? (
@@ -218,179 +151,13 @@ function TeacherWorksheetsPage() {
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
         <div>
-          <h3 style={{ margin: 0 }}>Assign Worksheet to Batch</h3>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Use this to quickly assign a worksheet to all active students in your batch.</div>
-        </div>
-
-        <label>
-          Batch
-          <select className="select" value={batchId} onChange={(e) => setBatchId(e.target.value)}>
-            <option value="">Select batch</option>
-            {batches.map((b) => (
-              <option key={b.batchId} value={b.batchId}>
-                {b.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {selectedBatch ? (
+          <h3 style={{ margin: 0 }}>Assign in Batch Workspace</h3>
           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-            Status: {selectedBatch.status} • Active students: {selectedBatch.activeStudentCount ?? 0}
-          </div>
-        ) : null}
-
-        <label>
-          Worksheet
-          <select
-            className="select"
-            value={worksheetId}
-            onChange={(e) => setWorksheetId(e.target.value)}
-            disabled={!batchId || batchWorksheetsLoading}
-          >
-            <option value="">Select worksheet</option>
-            {batchWorksheets.map((w) => (
-              <option key={w.worksheetId} value={w.worksheetId}>
-                {w.number}. {w.title}{w.levelLabel ? ` (${w.levelLabel})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Due Date
-          <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
-        </label>
-
-        <button
-          className="button"
-          disabled={!batchId || !worksheetId || !dueDate || savingAssignment}
-          onClick={async () => {
-            setSavingAssignment(true);
-            setError("");
-            setSuccess("");
-            try {
-              const data = await assignWorksheetToBatch(batchId, { worksheetId, dueDate });
-              setSuccess(`Worksheet assigned to ${data?.data?.assignedCount || 0} students.`);
-            } catch (err) {
-              setError(getFriendlyErrorMessage(err) || "Failed to assign worksheet.");
-            } finally {
-              setSavingAssignment(false);
-            }
-          }}
-        >
-          {savingAssignment ? "Assigning..." : "Assign Worksheet"}
-        </button>
-      </div>
-
-      <div className="card" style={{ display: "grid", gap: 10 }}>
-        <div>
-          <h3 style={{ margin: 0 }}>Assign Worksheet to Multiple Students</h3>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Pick one worksheet and assign it to selected students.</div>
-        </div>
-
-        <label>
-          Worksheet
-          <select
-            className="select"
-            value={bulkWorksheetId}
-            onChange={(e) => setBulkWorksheetId(e.target.value)}
-            disabled={!batchId || batchWorksheetsLoading}
-          >
-            <option value="">Select worksheet</option>
-            {batchWorksheets.map((w) => (
-              <option key={w.worksheetId} value={w.worksheetId}>
-                {w.number}. {w.title}{w.levelLabel ? ` (${w.levelLabel})` : ""}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label>
-          Due Date
-          <input className="input" type="date" value={bulkDueDate} onChange={(e) => setBulkDueDate(e.target.value)} />
-        </label>
-
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-            <span style={{ fontWeight: 600, fontSize: 14 }}>Students ({selectedStudentIds.size} selected)</span>
-            <span>
-              <button
-                className="button secondary"
-                style={{ width: "auto", marginRight: 4, fontSize: 12, padding: "2px 8px" }}
-                onClick={() => setSelectedStudentIds(new Set(students.map((s) => s.studentId || s.id)))}
-              >
-                Select All
-              </button>
-              <button
-                className="button secondary"
-                style={{ width: "auto", fontSize: 12, padding: "2px 8px" }}
-                onClick={() => setSelectedStudentIds(new Set())}
-              >
-                Clear
-              </button>
-            </span>
-          </div>
-          <div style={{ maxHeight: 200, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 6, padding: 6 }}>
-            {students.length === 0 ? (
-              <div style={{ fontSize: 12, color: "var(--color-text-muted)", padding: 8 }}>No students found.</div>
-            ) : (
-              students.map((s) => {
-                const sid = s.studentId || s.id;
-                const displayName = String(
-                  s.fullName || `${s.firstName || ""} ${s.lastName || ""}`
-                ).trim();
-                const identifier = s.admissionNo || s.enrollmentId || sid;
-                return (
-                  <label key={sid} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={selectedStudentIds.has(sid)}
-                      onChange={() => {
-                        setSelectedStudentIds((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(sid)) next.delete(sid);
-                          else next.add(sid);
-                          return next;
-                        });
-                      }}
-                    />
-                    <span style={{ fontSize: 13 }}>
-                      {displayName || identifier}{identifier ? ` (${identifier})` : ""}
-                    </span>
-                  </label>
-                );
-              })
-            )}
+            Assignment controls are centralized in My Batches to keep policy checks and workflows in one place.
           </div>
         </div>
-
-        <button
-          className="button"
-          disabled={!bulkWorksheetId || !bulkDueDate || selectedStudentIds.size === 0 || bulkAssigning}
-          onClick={async () => {
-            setBulkAssigning(true);
-            setError("");
-            setSuccess("");
-            try {
-              const resp = await bulkAssignWorksheetToStudents({
-                worksheetId: bulkWorksheetId,
-                studentIds: [...selectedStudentIds],
-                dueDate: bulkDueDate
-              });
-              const results = resp?.data?.results || resp?.results || [];
-              const okCount = results.filter((r) => r.success).length;
-              const failCount = results.filter((r) => !r.success).length;
-              setSuccess(`Bulk assign complete: ${okCount} succeeded${failCount ? `, ${failCount} failed` : ""}.`);
-              setSelectedStudentIds(new Set());
-            } catch (err) {
-              setError(getFriendlyErrorMessage(err) || "Bulk assignment failed.");
-            } finally {
-              setBulkAssigning(false);
-            }
-          }}
-        >
-          {bulkAssigning ? "Assigning..." : `Assign to ${selectedStudentIds.size} Student${selectedStudentIds.size !== 1 ? "s" : ""}`}
+        <button className="button" style={{ width: "fit-content" }} onClick={() => openBatchAssignment(null)}>
+          Open Batch Assignment
         </button>
       </div>
 
@@ -492,39 +259,17 @@ function TeacherWorksheetsPage() {
                           className="button secondary"
                           style={{ width: "auto" }}
                           onClick={() => void openWorksheetPreview(r)}
-                          title="Read-only worksheet preview"
+                          title="Preview worksheet details"
                         >
                           👁 Preview
                         </button>
                         <button
-                          className="button secondary"
+                          className="button"
                           style={{ width: "auto" }}
-                          onClick={() => {
-                            if (!batchId) {
-                              setError("Select a batch first in 'Assign Worksheet to Batch'.");
-                              return;
-                            }
-                            setError("");
-                            // If not already in the worksheet dropdown, inject it so it appears in both forms
-                            if (!batchWorksheets.some((w) => w.worksheetId === r.id)) {
-                              setBatchWorksheets((prev) => [
-                                ...prev,
-                                {
-                                  worksheetId: r.id,
-                                  number: prev.length + 1,
-                                  title: r.title,
-                                  levelLabel: selectedLevel?.level?.name || selectedLevel?.title || ""
-                                }
-                              ]);
-                            }
-                            setWorksheetId(r.id);
-                            setBulkWorksheetId(r.id);
-                            setSuccess(`Selected: ${r.title} — choose an assignment form above.`);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
-                          }}
-                          title="Use this worksheet in the assignment forms above"
+                          onClick={() => openBatchAssignment(r)}
+                          title="Open My Batches with this worksheet preselected"
                         >
-                          Use
+                          Open Batch Assignment
                         </button>
                       </div>
                     )
@@ -543,96 +288,13 @@ function TeacherWorksheetsPage() {
         </>
       ) : null}
 
-      {previewOpen ? (
-        <div className="modal-overlay" role="dialog" aria-modal="true" onClick={() => setPreviewOpen(false)}>
-          <div className="modal-panel" style={{ maxWidth: 920, width: "96vw", maxHeight: "88vh", overflow: "auto" }} onClick={(e) => e.stopPropagation()}>
-            <div className="modal-panel__header">
-              <h3 className="modal-panel__title">Worksheet Preview</h3>
-              <button className="modal-panel__close" onClick={() => setPreviewOpen(false)} aria-label="Close">
-                x
-              </button>
-            </div>
-            <div className="modal-panel__body" style={{ display: "grid", gap: 12 }}>
-              <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                Read-only preview. This does not assign worksheets and does not modify worksheet state.
-              </div>
-
-              {previewLoading ? <LoadingState label="Loading worksheet preview..." /> : null}
-              {!previewLoading && previewError ? <div className="error">{previewError}</div> : null}
-
-              {!previewLoading && !previewError && previewWorksheet ? (
-                <>
-                  <div className="card" style={{ margin: 0, display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Worksheet title</div>
-                      <div style={{ fontWeight: 600 }}>{previewWorksheet.title || "Untitled Worksheet"}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Course</div>
-                      <div>{previewWorksheet.__courseLabel || "N/A"}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Level</div>
-                      <div>{previewWorksheet.__levelLabel || "N/A"}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Status</div>
-                      <div>{previewWorksheet.__statusLabel}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Question count</div>
-                      <div>{previewWorksheet.questions?.length || 0}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Difficulty</div>
-                      <div>{previewWorksheet.difficulty || "N/A"}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Time limit</div>
-                      <div>{formatTimeLimit(previewWorksheet.timeLimitSeconds)}</div>
-                    </div>
-                  </div>
-
-                  <div className="card" style={{ margin: 0 }}>
-                    <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase", marginBottom: 6 }}>
-                      Worksheet description
-                    </div>
-                    <div style={{ whiteSpace: "pre-wrap" }}>{previewWorksheet.description || "No description available."}</div>
-                  </div>
-
-                  <div className="dash-table-wrap">
-                    <table className="dash-table">
-                      <thead>
-                        <tr>
-                          <th>#</th>
-                          <th>Question</th>
-                          <th>Difficulty</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(previewWorksheet.questions || []).map((question, index) => (
-                          <tr key={question.id || `${index + 1}`}>
-                            <td>{question.questionNumber || index + 1}</td>
-                            <td>{formatWorksheetQuestionPreview(question)}</td>
-                            <td>{question?.questionBank?.difficulty || previewWorksheet.difficulty || "N/A"}</td>
-                          </tr>
-                        ))}
-                        {!previewWorksheet.questions?.length ? (
-                          <tr>
-                            <td colSpan={3} style={{ color: "var(--color-text-muted)" }}>
-                              No questions available.
-                            </td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <WorksheetPreviewModal
+        open={previewOpen}
+        loading={previewLoading}
+        error={previewError}
+        worksheet={previewWorksheet}
+        onClose={() => setPreviewOpen(false)}
+      />
     </section>
   );
 }

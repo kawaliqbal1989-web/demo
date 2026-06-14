@@ -4,24 +4,21 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { TeacherWorksheetsPage } from "../TeacherWorksheetsPage";
 
+const navigateMock = vi.fn();
+
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual("react-router-dom");
+  return {
+    ...actual,
+    useNavigate: () => navigateMock
+  };
+});
+
 const mocks = vi.hoisted(() => ({
-  listMyBatchesMock: vi.fn(),
-  listMyStudentsMock: vi.fn(),
-  getTeacherBatchWorksheetsContextMock: vi.fn(),
-  assignWorksheetToBatchMock: vi.fn(),
-  bulkAssignWorksheetToStudentsMock: vi.fn(),
   listCatalogCoursesMock: vi.fn(),
   listCatalogCourseLevelsMock: vi.fn(),
   listWorksheetsMock: vi.fn(),
   getWorksheetMock: vi.fn()
-}));
-
-vi.mock("../../../services/teacherPortalService", () => ({
-  listMyBatches: mocks.listMyBatchesMock,
-  listMyStudents: mocks.listMyStudentsMock,
-  getTeacherBatchWorksheetsContext: mocks.getTeacherBatchWorksheetsContextMock,
-  assignWorksheetToBatch: mocks.assignWorksheetToBatchMock,
-  bulkAssignWorksheetToStudents: mocks.bulkAssignWorksheetToStudentsMock
 }));
 
 vi.mock("../../../services/catalogService", () => ({
@@ -37,14 +34,7 @@ vi.mock("../../../services/worksheetsService", () => ({
 describe("TeacherWorksheetsPage preview", () => {
   beforeEach(() => {
     Object.values(mocks).forEach((mockFn) => mockFn.mockReset());
-
-    mocks.listMyBatchesMock.mockResolvedValue({
-      data: {
-        items: [{ batchId: "batch_1", name: "Batch A", status: "ACTIVE", activeStudentCount: 10 }]
-      }
-    });
-    mocks.listMyStudentsMock.mockResolvedValue({ data: { items: [] } });
-    mocks.getTeacherBatchWorksheetsContextMock.mockResolvedValue({ data: { worksheets: [] } });
+    navigateMock.mockReset();
 
     mocks.listCatalogCoursesMock.mockResolvedValue({
       data: {
@@ -100,7 +90,7 @@ describe("TeacherWorksheetsPage preview", () => {
     });
   });
 
-  it("renders preview button, opens modal, loads worksheet data, and does not assign", async () => {
+  it("renders preview and batch CTA, removes direct assignment sections", async () => {
     const user = userEvent.setup();
 
     render(
@@ -115,7 +105,10 @@ describe("TeacherWorksheetsPage preview", () => {
     await user.click(await screen.findByRole("button", { name: "Worksheets" }));
 
     const previewButton = await screen.findByRole("button", { name: /^👁 Preview$/ });
-    expect(await screen.findByRole("button", { name: "Use" })).toBeInTheDocument();
+    const openBatchButtons = await screen.findAllByRole("button", { name: "Open Batch Assignment" });
+
+    expect(screen.queryByText("Assign Worksheet to Batch")).not.toBeInTheDocument();
+    expect(screen.queryByText("Assign Worksheet to Multiple Students")).not.toBeInTheDocument();
 
     await user.click(previewButton);
 
@@ -129,7 +122,7 @@ describe("TeacherWorksheetsPage preview", () => {
       expect(mocks.getWorksheetMock).toHaveBeenCalledWith("ws_1");
     });
 
-    expect(mocks.assignWorksheetToBatchMock).not.toHaveBeenCalled();
-    expect(mocks.bulkAssignWorksheetToStudentsMock).not.toHaveBeenCalled();
+    await user.click(openBatchButtons[openBatchButtons.length - 1]);
+    expect(navigateMock).toHaveBeenCalledWith("/teacher/batches?worksheetId=ws_1");
   });
 });

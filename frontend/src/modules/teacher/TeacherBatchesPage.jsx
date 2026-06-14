@@ -6,6 +6,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   assignWorksheetToBatch,
+  bulkAssignWorksheetToStudents,
   getBatchRoster,
   getTeacherBatchWorksheetsContext,
   getTeacherMockTest,
@@ -13,6 +14,8 @@ import {
   listTeacherBatchMockTests,
   saveTeacherMockTestResults
 } from "../../services/teacherPortalService";
+import { getWorksheet } from "../../services/worksheetsService";
+import { WorksheetPreviewModal } from "./components/WorksheetPreviewModal";
 
 function getMockTestStatusStyle(status) {
   if (status === "PUBLISHED") {
@@ -38,7 +41,9 @@ function getMockTestStatusStyle(status) {
 function TeacherBatchesPage() {
   const [searchParams] = useSearchParams();
   const initialBatchId = searchParams.get("batchId") || "";
+  const initialWorksheetId = searchParams.get("worksheetId") || "";
   const mockTestsSectionRef = useRef(null);
+  const initialWorksheetAppliedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -55,6 +60,15 @@ function TeacherBatchesPage() {
   const [worksheetId, setWorksheetId] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [assigningWorksheet, setAssigningWorksheet] = useState(false);
+  const [studentWorksheetId, setStudentWorksheetId] = useState("");
+  const [studentDueDate, setStudentDueDate] = useState("");
+  const [selectedStudentIds, setSelectedStudentIds] = useState(new Set());
+  const [assigningToStudents, setAssigningToStudents] = useState(false);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+  const [previewWorksheet, setPreviewWorksheet] = useState(null);
 
   const [mockTestsLoading, setMockTestsLoading] = useState(false);
   const [mockTests, setMockTests] = useState([]);
@@ -67,6 +81,37 @@ function TeacherBatchesPage() {
 
   const batchMap = useMemo(() => new Map(batches.map((b) => [b.batchId, b])), [batches]);
   const selectedBatch = batchMap.get(batchId) || null;
+
+  const nextWeekStr = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  };
+
+  const openWorksheetPreview = async (targetWorksheetId, labelMeta = {}) => {
+    const id = String(targetWorksheetId || "").trim();
+    if (!id) return;
+
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewWorksheet(null);
+
+    try {
+      const response = await getWorksheet(id);
+      const payload = response?.data || response;
+      setPreviewWorksheet({
+        ...payload,
+        __courseLabel: labelMeta.courseLabel || "N/A",
+        __levelLabel: labelMeta.levelLabel || payload?.level?.name || "N/A",
+        __statusLabel: payload?.isPublished ? "PUBLISHED" : "DRAFT"
+      });
+    } catch (err) {
+      setPreviewError(getFriendlyErrorMessage(err) || "Failed to load worksheet preview.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -178,6 +223,9 @@ function TeacherBatchesPage() {
 
   useEffect(() => {
     setWorksheetId("");
+    setStudentWorksheetId("");
+    setStudentDueDate(nextWeekStr());
+    setSelectedStudentIds(new Set());
     setMockTestId("");
     setSelectedMockTest(null);
     setMarksByStudentId({});
@@ -188,6 +236,20 @@ function TeacherBatchesPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchId]);
+
+  useEffect(() => {
+    if (initialWorksheetAppliedRef.current || !initialWorksheetId || !worksheets.length) {
+      return;
+    }
+    const exists = worksheets.some((w) => String(w.worksheetId) === String(initialWorksheetId));
+    if (!exists) {
+      initialWorksheetAppliedRef.current = true;
+      return;
+    }
+    setWorksheetId(initialWorksheetId);
+    setStudentWorksheetId(initialWorksheetId);
+    initialWorksheetAppliedRef.current = true;
+  }, [initialWorksheetId, worksheets]);
 
   useEffect(() => {
     if (searchParams.get("section") !== "mock-tests") {
@@ -300,6 +362,22 @@ function TeacherBatchesPage() {
           <input className="input" type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
         </label>
 
+        <div>
+          <button
+            className="button secondary"
+            style={{ width: "auto" }}
+            disabled={!worksheetId}
+            onClick={() => {
+              const selectedWorksheet = worksheets.find((w) => w.worksheetId === worksheetId);
+              void openWorksheetPreview(worksheetId, {
+                levelLabel: selectedWorksheet?.levelLabel || "N/A"
+              });
+            }}
+          >
+            👁 Preview Selected Worksheet
+          </button>
+        </div>
+
         <button
           className="button"
           disabled={!batchId || !worksheetId || !dueDate || assigningWorksheet}
@@ -318,6 +396,135 @@ function TeacherBatchesPage() {
           }}
         >
           {assigningWorksheet ? "Assigning..." : "Assign Worksheet"}
+        </button>
+      </div>
+
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Assign Worksheet to Students</h3>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Assign one worksheet to selected students in the chosen batch.
+          </div>
+        </div>
+
+        <label>
+          Worksheet
+          <select
+            className="select"
+            value={studentWorksheetId}
+            onChange={(e) => setStudentWorksheetId(e.target.value)}
+            disabled={!batchId || worksheetsLoading}
+          >
+            <option value="">Select worksheet</option>
+            {worksheets.map((w) => (
+              <option key={w.worksheetId} value={w.worksheetId}>
+                {w.number}. {w.title}{w.levelLabel ? ` (${w.levelLabel})` : ""}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div>
+          <button
+            className="button secondary"
+            style={{ width: "auto" }}
+            disabled={!studentWorksheetId}
+            onClick={() => {
+              const selectedWorksheet = worksheets.find((w) => w.worksheetId === studentWorksheetId);
+              void openWorksheetPreview(studentWorksheetId, {
+                levelLabel: selectedWorksheet?.levelLabel || "N/A"
+              });
+            }}
+          >
+            👁 Preview Selected Worksheet
+          </button>
+        </div>
+
+        <label>
+          Due Date
+          <input className="input" type="date" value={studentDueDate} onChange={(e) => setStudentDueDate(e.target.value)} />
+        </label>
+
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Students ({selectedStudentIds.size} selected)</span>
+            <span>
+              <button
+                className="button secondary"
+                style={{ width: "auto", marginRight: 4, fontSize: 12, padding: "2px 8px" }}
+                disabled={!roster.length}
+                onClick={() => {
+                  setSelectedStudentIds(new Set(roster.map((r) => r.studentId)));
+                }}
+              >
+                Select All
+              </button>
+              <button
+                className="button secondary"
+                style={{ width: "auto", fontSize: 12, padding: "2px 8px" }}
+                onClick={() => setSelectedStudentIds(new Set())}
+              >
+                Clear
+              </button>
+            </span>
+          </div>
+          <div style={{ maxHeight: 220, overflowY: "auto", border: "1px solid var(--color-border)", borderRadius: 6, padding: 6 }}>
+            {!roster.length ? (
+              <div style={{ fontSize: 12, color: "var(--color-text-muted)", padding: 8 }}>No students found in this batch.</div>
+            ) : (
+              roster.map((row) => {
+                const displayName = String(row.fullName || "").trim() || row.studentId;
+                return (
+                  <label
+                    key={row.studentId}
+                    style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 4px", cursor: "pointer" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedStudentIds.has(row.studentId)}
+                      onChange={() => {
+                        setSelectedStudentIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(row.studentId)) next.delete(row.studentId);
+                          else next.add(row.studentId);
+                          return next;
+                        });
+                      }}
+                    />
+                    <span style={{ fontSize: 13 }}>{displayName}</span>
+                  </label>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        <button
+          className="button"
+          disabled={!studentWorksheetId || !studentDueDate || selectedStudentIds.size === 0 || assigningToStudents}
+          onClick={async () => {
+            setAssigningToStudents(true);
+            setError("");
+            setSuccess("");
+            try {
+              const resp = await bulkAssignWorksheetToStudents({
+                worksheetId: studentWorksheetId,
+                studentIds: [...selectedStudentIds],
+                dueDate: studentDueDate
+              });
+              const results = resp?.data?.results || resp?.results || [];
+              const okCount = results.filter((r) => r.success).length;
+              const failCount = results.filter((r) => !r.success).length;
+              setSuccess(`Student assignment complete: ${okCount} succeeded${failCount ? `, ${failCount} failed` : ""}.`);
+              setSelectedStudentIds(new Set());
+            } catch (err) {
+              setError(getFriendlyErrorMessage(err) || "Failed to assign worksheet to students.");
+            } finally {
+              setAssigningToStudents(false);
+            }
+          }}
+        >
+          {assigningToStudents ? "Assigning..." : `Assign to ${selectedStudentIds.size} Student${selectedStudentIds.size === 1 ? "" : "s"}`}
         </button>
       </div>
 
@@ -448,6 +655,14 @@ function TeacherBatchesPage() {
           )}
         </div>
       </div>
+
+      <WorksheetPreviewModal
+        open={previewOpen}
+        loading={previewLoading}
+        error={previewError}
+        worksheet={previewWorksheet}
+        onClose={() => setPreviewOpen(false)}
+      />
     </section>
   );
 }

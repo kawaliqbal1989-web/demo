@@ -60,6 +60,8 @@ const FRIENDLY_BY_CODE = {
   CENTER_SCOPE_REQUIRED: "Your account is missing a center scope for this action.",
   DUPLICATE_ENROLLMENT: "One or more selected students are already enrolled in this exam cycle.",
   HIERARCHY_SCOPE_DENIED: "You do not have access to this exam-cycle data.",
+  LEVEL_SCOPE_DENIED: "This worksheet level is outside your access scope.",
+  TEACHER_BATCH_FORBIDDEN: "You are not assigned to this batch.",
   WORKFLOW_ROLE_FORBIDDEN: "Your role cannot perform this exam workflow action.",
   REJECT_REMARK_REQUIRED: "Please provide a remark before rejecting this enrollment list.",
   RESULTS_NOT_PUBLISHED: "Results are not published yet for this exam cycle."

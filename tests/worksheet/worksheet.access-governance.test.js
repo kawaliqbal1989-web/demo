@@ -17,6 +17,8 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
   let teacherLevel5;
   let levelByRank;
   let testCourse;
+  let batchL3;
+  let batchL5;
 
   let wsL2;
   let wsL3;
@@ -77,7 +79,7 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
       parentUserId: centerUser.id
     });
 
-    const batchL3 = await prisma.batch.create({
+    batchL3 = await prisma.batch.create({
       data: {
         tenantId: tenant.id,
         hierarchyNodeId: centerNode.id,
@@ -86,7 +88,7 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
       }
     });
 
-    const batchL5 = await prisma.batch.create({
+    batchL5 = await prisma.batch.create({
       data: {
         tenantId: tenant.id,
         hierarchyNodeId: centerNode.id,
@@ -296,5 +298,39 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
     const directWorksheet = await http.get(`/api/worksheets/${wsL6.id}`).set(authHeader(token));
     expect(directWorksheet.status).toBe(403);
     expect(directWorksheet.body?.error_code).toBe("LEVEL_SCOPE_DENIED");
+  });
+
+  test("Teacher cannot assign worksheet above level cap in batch workspace", async () => {
+    const login = await loginAs({ email: teacherLevel3.email });
+    expect(login.status).toBe(200);
+    const token = login.body?.data?.access_token;
+
+    const assignRes = await http
+      .post(`/api/teacher/batches/${batchL3.id}/worksheets/assign`)
+      .set(authHeader(token))
+      .send({
+        worksheetId: wsL4.id,
+        dueDate: "2026-07-01"
+      });
+
+    expect(assignRes.status).toBe(403);
+    expect(assignRes.body?.error_code).toBe("LEVEL_SCOPE_DENIED");
+  });
+
+  test("Teacher cannot assign worksheet to a batch they are not assigned to", async () => {
+    const login = await loginAs({ email: teacherLevel3.email });
+    expect(login.status).toBe(200);
+    const token = login.body?.data?.access_token;
+
+    const assignRes = await http
+      .post(`/api/teacher/batches/${batchL5.id}/worksheets/assign`)
+      .set(authHeader(token))
+      .send({
+        worksheetId: wsL3.id,
+        dueDate: "2026-07-01"
+      });
+
+    expect(assignRes.status).toBe(403);
+    expect(assignRes.body?.error_code).toBe("TEACHER_BATCH_FORBIDDEN");
   });
 });

@@ -29,6 +29,7 @@ const FRIENDLY_BY_CODE = {
   EXAM_DEVICE_LOCKED: "This exam attempt is locked to another device/session.",
   EXAM_CYCLE_NOT_FOUND: "This exam cycle was not found. Refresh and try again.",
   EXAM_CODE_CONFLICT: "Could not generate a unique exam code. Please try again.",
+  LIST_LOCKED: "This enrollment list is already submitted and locked. Refresh to see the latest status.",
   EXAM_LIST_EMPTY: "This enrollment list has no students yet.",
   EXAM_LIST_ITEM_NOT_FOUND: "That entry is no longer in the combined list. Refresh and try again.",
   EXAM_LIST_NOT_FOUND: "This enrollment list was not found. Refresh and try again.",

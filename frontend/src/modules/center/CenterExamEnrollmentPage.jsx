@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
+import { getApiErrorCode } from "../../utils/apiErrors";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { downloadBlob } from "../../utils/downloadBlob";
 import { listLevels } from "../../services/levelsService";
@@ -107,6 +108,11 @@ function CenterExamEnrollmentPage() {
       await submitCenterCombinedEnrollmentList(examCycleId);
       await load();
     } catch (err) {
+      if (getApiErrorCode(err) === "LIST_LOCKED") {
+        await load();
+        return;
+      }
+
       setError(getFriendlyErrorMessage(err) || "Failed to submit list.");
     } finally {
       setSubmitting(false);
@@ -142,6 +148,11 @@ function CenterExamEnrollmentPage() {
       setTempFirstName("");
       setTempLastName("");
     } catch (err) {
+      const code = getApiErrorCode(err);
+      if (code === "LIST_LOCKED" || code === "ENROLLMENT_WINDOW_CLOSED") {
+        await load();
+      }
+
       setError(getFriendlyErrorMessage(err) || "Failed to create temporary student.");
     } finally {
       setCreatingTemp(false);

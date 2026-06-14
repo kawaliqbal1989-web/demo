@@ -58,6 +58,7 @@ const MIGRATION_SEQUENCE = [
   { wave: "wave4", file: "migration_bp_branding_governance.sql", phase: 9, order: 28 },
   { wave: "wave4", file: "migration_student_fee_recurring_waiver.sql", phase: 9, order: 29 },
   { wave: "wave4", file: "migration_payment_receipt_engine.sql", phase: 9, order: 30 },
+  { wave: "wave4", file: "migration_curriculum_access_licensing.sql", phase: 9, order: 31 },
 ];
 
 /* ── Argument parsing ── */

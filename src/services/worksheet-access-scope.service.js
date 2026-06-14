@@ -2,6 +2,21 @@ import { prisma } from "../lib/prisma.js";
 
 const LIMITED_ROLES = new Set(["TEACHER", "CENTER", "FRANCHISE"]);
 
+function normalizeLicensedRank(value) {
+  const rank = Number(value);
+  if (!Number.isFinite(rank)) return 1;
+  return Math.min(8, Math.max(1, Math.floor(rank)));
+}
+
+function isLicenseCurrentlyActive({ startDate, expiryDate, now = new Date() }) {
+  const start = startDate ? new Date(startDate) : null;
+  const expiry = expiryDate ? new Date(expiryDate) : null;
+
+  if (start && start > now) return false;
+  if (expiry && expiry < now) return false;
+  return true;
+}
+
 async function resolveScopedHierarchyNodeIds({ tenantId, auth }) {
   const role = String(auth?.role || "").toUpperCase();
   const userId = String(auth?.userId || "").trim();
@@ -73,64 +88,128 @@ async function resolveScopedHierarchyNodeIds({ tenantId, auth }) {
 
 async function resolveActorLevelCap({ tenantId, auth }) {
   const role = String(auth?.role || "").toUpperCase();
+  const userId = String(auth?.userId || "").trim();
 
   if (role === "SUPERADMIN") {
     return null;
   }
 
-  if (!LIMITED_ROLES.has(role)) {
+  if (!LIMITED_ROLES.has(role) || !userId) {
     return null;
   }
 
-  const hierarchyNodeIds = await resolveScopedHierarchyNodeIds({ tenantId, auth });
-  if (!hierarchyNodeIds.length) {
-    return 0;
-  }
+  if (role === "CENTER") {
+    const center = await prisma.centerProfile.findFirst({
+      where: {
+        tenantId,
+        authUserId: userId,
+        isActive: true,
+        status: "ACTIVE"
+      },
+      select: {
+        maxLicensedLevelRank: true,
+        licenseStartDate: true,
+        licenseExpiryDate: true
+      }
+    });
 
-  const enrollmentWhere = {
-    tenantId,
-    status: "ACTIVE",
-    hierarchyNodeId: { in: hierarchyNodeIds }
-  };
+    if (!center) return 0;
+    if (!isLicenseCurrentlyActive({ startDate: center.licenseStartDate, expiryDate: center.licenseExpiryDate })) {
+      return 0;
+    }
+    return normalizeLicensedRank(center.maxLicensedLevelRank);
+  }
 
   if (role === "TEACHER") {
-    enrollmentWhere.assignedTeacherUserId = auth.userId;
-  }
+    const teacher = await prisma.teacherProfile.findFirst({
+      where: {
+        tenantId,
+        authUserId: userId,
+        isActive: true
+      },
+      select: { hierarchyNodeId: true }
+    });
 
-  const enrollmentLevels = await prisma.enrollment.findMany({
-    where: enrollmentWhere,
-    select: {
-      levelId: true,
-      student: {
-        select: {
-          levelId: true
+    const centerHierarchyNodeId = teacher?.hierarchyNodeId || auth?.hierarchyNodeId || null;
+    if (!centerHierarchyNodeId) return 0;
+
+    const center = await prisma.centerProfile.findFirst({
+      where: {
+        tenantId,
+        isActive: true,
+        status: "ACTIVE",
+        authUser: {
+          hierarchyNodeId: centerHierarchyNodeId
         }
+      },
+      select: {
+        maxLicensedLevelRank: true,
+        licenseStartDate: true,
+        licenseExpiryDate: true
       }
+    });
+
+    if (!center) return 0;
+    if (!isLicenseCurrentlyActive({ startDate: center.licenseStartDate, expiryDate: center.licenseExpiryDate })) {
+      return 0;
     }
-  });
-
-  const levelIds = Array.from(
-    new Set(
-      enrollmentLevels
-        .map((row) => row.levelId || row.student?.levelId || null)
-        .filter(Boolean)
-    )
-  );
-
-  if (!levelIds.length) {
-    return 0;
+    return normalizeLicensedRank(center.maxLicensedLevelRank);
   }
 
-  const highest = await prisma.level.findFirst({
-    where: {
-      tenantId,
-      id: { in: levelIds }
-    },
-    orderBy: { rank: "desc" },
-    select: { rank: true }
-  });
+  if (role === "FRANCHISE") {
+    const franchise = await prisma.franchiseProfile.findFirst({
+      where: {
+        tenantId,
+        authUserId: userId,
+        isActive: true,
+        status: "ACTIVE"
+      },
+      select: {
+        id: true,
+        maxLicensedLevelRank: true,
+        licenseStartDate: true,
+        licenseExpiryDate: true
+      }
+    });
 
-  return Number(highest?.rank || 0);
+    if (!franchise) return 0;
+
+    const franchiseRank = isLicenseCurrentlyActive({
+      startDate: franchise.licenseStartDate,
+      expiryDate: franchise.licenseExpiryDate
+    })
+      ? normalizeLicensedRank(franchise.maxLicensedLevelRank)
+      : 0;
+
+    const centers = await prisma.centerProfile.findMany({
+      where: {
+        tenantId,
+        franchiseProfileId: franchise.id,
+        isActive: true,
+        status: "ACTIVE"
+      },
+      select: {
+        maxLicensedLevelRank: true,
+        licenseStartDate: true,
+        licenseExpiryDate: true
+      }
+    });
+
+    const centerRank = centers.reduce((maxRank, center) => {
+      if (!isLicenseCurrentlyActive({ startDate: center.licenseStartDate, expiryDate: center.licenseExpiryDate })) {
+        return maxRank;
+      }
+      return Math.max(maxRank, normalizeLicensedRank(center.maxLicensedLevelRank));
+    }, 0);
+
+    const effective = Math.max(franchiseRank, centerRank);
+    if (!effective) {
+      return 0;
+    }
+    return effective;
+  }
+
+  return 0;
 }
 
 async function resolveAllowedLevelIdsByRank({ tenantId, maxRank }) {

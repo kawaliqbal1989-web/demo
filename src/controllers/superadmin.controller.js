@@ -35,6 +35,12 @@ function normalizeBoolean(value, fallback = false) {
 const CENTER_BRANDING_MODES = new Set(["INHERIT_FRANCHISE", "CUSTOM_CENTER"]);
 const CENTER_COMMERCIALIZATION_TIERS = new Set(["STANDARD_CENTER", "MINI_CENTER", "PREMIUM_CENTER"]);
 
+function normalizeLicensedLevelRank(value, fallback = 1) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(8, Math.max(1, Math.floor(parsed)));
+}
+
 const listSuperadmins = asyncHandler(async (req, res) => {
   const data = await prisma.superadmin.findMany({
     where: {
@@ -1289,6 +1295,10 @@ const saGetCenterDetail = asyncHandler(async (req, res) => {
         displayName: true,
         status: true,
         isActive: true,
+        maxLicensedLevelRank: true,
+        licenseStartDate: true,
+        licenseExpiryDate: true,
+        licenseNotes: true,
         authUserId: true,
         franchiseProfileId: true,
         createdAt: true,
@@ -1462,6 +1472,105 @@ const saUpdateCenterBranding = asyncHandler(async (req, res) => {
   });
 });
 
+const saUpdateCenterCurriculumAccess = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const existing = await prisma.centerProfile.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      OR: [{ id }, { authUserId: id }]
+    },
+    select: {
+      id: true,
+      maxLicensedLevelRank: true,
+      licenseStartDate: true,
+      licenseExpiryDate: true,
+      licenseNotes: true
+    }
+  });
+
+  if (!existing) {
+    return res.apiError(404, "Center not found", "CENTER_NOT_FOUND");
+  }
+
+  const nextRank = req.body.maxLicensedLevelRank !== undefined
+    ? normalizeLicensedLevelRank(req.body.maxLicensedLevelRank, existing.maxLicensedLevelRank || 1)
+    : normalizeLicensedLevelRank(existing.maxLicensedLevelRank || 1, 1);
+
+  const nextStartDate = req.body.licenseStartDate !== undefined
+    ? (req.body.licenseStartDate ? parseISODateOnly(req.body.licenseStartDate) : null)
+    : existing.licenseStartDate;
+  if (req.body.licenseStartDate !== undefined && req.body.licenseStartDate && !nextStartDate) {
+    return res.apiError(400, "licenseStartDate must be YYYY-MM-DD", "VALIDATION_ERROR");
+  }
+
+  const nextExpiryDate = req.body.licenseExpiryDate !== undefined
+    ? (req.body.licenseExpiryDate ? parseISODateOnly(req.body.licenseExpiryDate) : null)
+    : existing.licenseExpiryDate;
+  if (req.body.licenseExpiryDate !== undefined && req.body.licenseExpiryDate && !nextExpiryDate) {
+    return res.apiError(400, "licenseExpiryDate must be YYYY-MM-DD", "VALIDATION_ERROR");
+  }
+
+  if (nextStartDate && nextExpiryDate && nextStartDate.getTime() > nextExpiryDate.getTime()) {
+    return res.apiError(400, "licenseExpiryDate cannot be earlier than licenseStartDate", "VALIDATION_ERROR");
+  }
+
+  const nextNotes = req.body.licenseNotes !== undefined
+    ? normalizeString(req.body.licenseNotes)
+    : existing.licenseNotes;
+
+  await prisma.centerProfile.update({
+    where: { id: existing.id },
+    data: {
+      maxLicensedLevelRank: nextRank,
+      licenseStartDate: nextStartDate,
+      licenseExpiryDate: nextExpiryDate,
+      licenseNotes: nextNotes
+    }
+  });
+
+  const updated = await prisma.centerProfile.findFirst({
+    where: { id: existing.id, tenantId: req.auth.tenantId },
+    include: {
+      address: true,
+      brandingApprovedBy: {
+        select: { id: true, username: true, email: true }
+      },
+      authUser: {
+        select: { id: true, username: true, email: true, isActive: true, hierarchyNodeId: true }
+      },
+      franchiseProfile: { select: { id: true, code: true, name: true } }
+    }
+  });
+
+  await recordAudit({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    role: req.auth.role,
+    action: "SA_UPDATE_CENTER_CURRICULUM_ACCESS",
+    entityType: "CENTER_PROFILE",
+    entityId: existing.id,
+    metadata: {
+      before: {
+        maxLicensedLevelRank: existing.maxLicensedLevelRank,
+        licenseStartDate: existing.licenseStartDate,
+        licenseExpiryDate: existing.licenseExpiryDate,
+        licenseNotes: existing.licenseNotes
+      },
+      after: {
+        maxLicensedLevelRank: updated?.maxLicensedLevelRank,
+        licenseStartDate: updated?.licenseStartDate,
+        licenseExpiryDate: updated?.licenseExpiryDate,
+        licenseNotes: updated?.licenseNotes
+      }
+    }
+  });
+
+  return res.apiSuccess("Center curriculum access updated", {
+    ...updated,
+    effectiveBranding: await resolveBrandingForCenter(existing.id, req.auth.tenantId)
+  });
+});
+
 export {
   listSuperadmins,
   createSuperadmin,
@@ -1478,5 +1587,6 @@ export {
   saCreateCenter,
   saSetCenterStatus,
   saGetCenterDetail,
-  saUpdateCenterBranding
+  saUpdateCenterBranding,
+  saUpdateCenterCurriculumAccess
 };

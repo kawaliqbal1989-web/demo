@@ -1299,7 +1299,11 @@ async function main() {
           installmentId: installment.id,
           type: "ENROLLMENT",
           grossAmount: payment.amount,
-          netAmount: payment.amount,
+          centerShare: payment.amount,
+          franchiseShare: 0,
+          bpShare: 0,
+          platformShare: 0,
+          createdByUserId: centerAuth.id,
           paymentMode: payment.mode,
           receivedAt: payment.paymentDate,
           createdAt: payment.paymentDate

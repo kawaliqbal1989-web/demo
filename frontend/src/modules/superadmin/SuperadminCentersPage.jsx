@@ -11,6 +11,7 @@ import {
   saDeleteCenterLogo,
   saGetCenterDetail,
   saUpdateCenterBranding,
+  saUpdateCenterCurriculumAccess,
   saUploadCenterLogo
 } from "../../services/superadminService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
@@ -30,6 +31,13 @@ const initialBrandingForm = {
 const initialCapacityForm = {
   maxStudents: "",
   maxTeachers: ""
+};
+
+const initialCurriculumAccessForm = {
+  maxLicensedLevelRank: "1",
+  licenseStartDate: "",
+  licenseExpiryDate: "",
+  licenseNotes: ""
 };
 
 function parseCapacityField(value, label) {
@@ -207,6 +215,9 @@ function SuperadminCentersPage() {
   const [brandingLoading, setBrandingLoading] = useState(false);
   const [brandingSaving, setBrandingSaving] = useState(false);
   const [brandingMessage, setBrandingMessage] = useState("");
+  const [curriculumAccessForm, setCurriculumAccessForm] = useState(initialCurriculumAccessForm);
+  const [curriculumAccessSaving, setCurriculumAccessSaving] = useState(false);
+  const [curriculumAccessMessage, setCurriculumAccessMessage] = useState("");
   const [capacityModalOpen, setCapacityModalOpen] = useState(false);
   const [capacityLoading, setCapacityLoading] = useState(false);
   const [capacitySaving, setCapacitySaving] = useState(false);
@@ -224,6 +235,16 @@ function SuperadminCentersPage() {
       brandingActive: detail?.brandingActive ?? true,
       brandingLocked: detail?.brandingLocked ?? false,
       brandingNotes: detail?.brandingNotes || ""
+    });
+  };
+
+  const applyCurriculumAccessForm = (detail) => {
+    const rank = Number(detail?.maxLicensedLevelRank || 1);
+    setCurriculumAccessForm({
+      maxLicensedLevelRank: String(Math.min(8, Math.max(1, Number.isFinite(rank) ? Math.floor(rank) : 1))),
+      licenseStartDate: detail?.licenseStartDate ? new Date(detail.licenseStartDate).toISOString().slice(0, 10) : "",
+      licenseExpiryDate: detail?.licenseExpiryDate ? new Date(detail.licenseExpiryDate).toISOString().slice(0, 10) : "",
+      licenseNotes: detail?.licenseNotes || ""
     });
   };
 
@@ -384,6 +405,7 @@ function SuperadminCentersPage() {
     const detail = result?.data || null;
     setSelectedCenterDetail(detail);
     applyBrandingForm(detail);
+    applyCurriculumAccessForm(detail);
     return detail;
   };
 
@@ -397,6 +419,7 @@ function SuperadminCentersPage() {
       setBrandingMessage(getFriendlyErrorMessage(err) || "Failed to load center branding.");
       setSelectedCenterDetail(null);
       setBrandingForm(initialBrandingForm);
+      setCurriculumAccessForm(initialCurriculumAccessForm);
     } finally {
       setBrandingLoading(false);
     }
@@ -432,6 +455,45 @@ function SuperadminCentersPage() {
       setBrandingMessage(getFriendlyErrorMessage(err) || "Failed to save center branding.");
     } finally {
       setBrandingSaving(false);
+    }
+  };
+
+  const handleCurriculumAccessFieldChange = (field, value) => {
+    setCurriculumAccessForm((current) => ({
+      ...current,
+      [field]: value
+    }));
+  };
+
+  const handleSaveCurriculumAccess = async (event) => {
+    event.preventDefault();
+    if (!selectedCenterId) {
+      return;
+    }
+
+    const rankNumber = Number(curriculumAccessForm.maxLicensedLevelRank);
+    if (!Number.isInteger(rankNumber) || rankNumber < 1 || rankNumber > 8) {
+      setCurriculumAccessMessage("Licensed max level must be an integer between 1 and 8.");
+      return;
+    }
+
+    setCurriculumAccessSaving(true);
+    setCurriculumAccessMessage("");
+    try {
+      const result = await saUpdateCenterCurriculumAccess(selectedCenterId, {
+        maxLicensedLevelRank: rankNumber,
+        licenseStartDate: curriculumAccessForm.licenseStartDate || null,
+        licenseExpiryDate: curriculumAccessForm.licenseExpiryDate || null,
+        licenseNotes: curriculumAccessForm.licenseNotes.trim() || null
+      });
+      const detail = result?.data || null;
+      setSelectedCenterDetail(detail);
+      applyCurriculumAccessForm(detail);
+      setCurriculumAccessMessage("Curriculum access updated.");
+    } catch (err) {
+      setCurriculumAccessMessage(getFriendlyErrorMessage(err) || "Failed to save curriculum access.");
+    } finally {
+      setCurriculumAccessSaving(false);
     }
   };
 
@@ -730,6 +792,87 @@ function SuperadminCentersPage() {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
                 <button className="button secondary" type="submit" style={{ width: "auto" }} disabled={brandingSaving}>
                   {brandingSaving ? "Saving..." : "Save Branding"}
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
+
+      {selectedCenterId ? (
+        <section className="card" style={{ display: "grid", gap: 16 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18 }}>Curriculum Access Licensing</div>
+            <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
+              Permanent authority for worksheet and catalog visibility. Enrollment-derived visibility is disabled.
+            </div>
+          </div>
+
+          {curriculumAccessMessage ? (
+            <div style={{ color: curriculumAccessMessage === "Curriculum access updated." ? "#166534" : "#b91c1c", fontSize: 13 }}>
+              {curriculumAccessMessage}
+            </div>
+          ) : null}
+
+          {brandingLoading ? (
+            <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>Loading curriculum access detail...</div>
+          ) : selectedCenterDetail ? (
+            <form onSubmit={handleSaveCurriculumAccess} style={{ display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>Licensed Max Level Rank</span>
+                  <input
+                    className="input"
+                    type="number"
+                    min="1"
+                    max="8"
+                    step="1"
+                    value={curriculumAccessForm.maxLicensedLevelRank}
+                    onChange={(e) => handleCurriculumAccessFieldChange("maxLicensedLevelRank", e.target.value)}
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>License Start Date</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={curriculumAccessForm.licenseStartDate}
+                    onChange={(e) => handleCurriculumAccessFieldChange("licenseStartDate", e.target.value)}
+                  />
+                </label>
+
+                <label style={{ display: "grid", gap: 6 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700 }}>License Expiry Date</span>
+                  <input
+                    className="input"
+                    type="date"
+                    value={curriculumAccessForm.licenseExpiryDate}
+                    onChange={(e) => handleCurriculumAccessFieldChange("licenseExpiryDate", e.target.value)}
+                  />
+                </label>
+              </div>
+
+              <label style={{ display: "grid", gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700 }}>License Notes</span>
+                <textarea
+                  className="input"
+                  rows={3}
+                  value={curriculumAccessForm.licenseNotes}
+                  onChange={(e) => handleCurriculumAccessFieldChange("licenseNotes", e.target.value)}
+                  placeholder="Contract, renewal, or policy notes"
+                />
+              </label>
+
+              <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", fontSize: 13, color: "var(--color-text-muted)" }}>
+                <div>Current licensed max rank: {selectedCenterDetail?.maxLicensedLevelRank || 1}</div>
+                <div>Start: {selectedCenterDetail?.licenseStartDate ? new Date(selectedCenterDetail.licenseStartDate).toLocaleDateString() : "-"}</div>
+                <div>Expiry: {selectedCenterDetail?.licenseExpiryDate ? new Date(selectedCenterDetail.licenseExpiryDate).toLocaleDateString() : "-"}</div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <button className="button secondary" type="submit" style={{ width: "auto" }} disabled={curriculumAccessSaving}>
+                  {curriculumAccessSaving ? "Saving..." : "Save Curriculum Access"}
                 </button>
               </div>
             </form>

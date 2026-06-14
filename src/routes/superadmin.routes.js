@@ -15,7 +15,8 @@ import {
   saCreateCenter,
   saSetCenterStatus,
   saGetCenterDetail,
-  saUpdateCenterBranding
+  saUpdateCenterBranding,
+  saUpdateCenterCurriculumAccess
 } from "../controllers/superadmin.controller.js";
 import {
   listSuperadminCertificates,
@@ -169,6 +170,18 @@ superadminRouter.patch(
   requireSuperadmin(),
   auditAction("SA_UPDATE_CENTER_BRANDING", "CENTER_PROFILE", (req) => req.params.id),
   saUpdateCenterBranding
+);
+superadminRouter.patch(
+  "/centers/:id/curriculum-access",
+  requireSuperadmin(),
+  auditAction("SA_UPDATE_CENTER_CURRICULUM_ACCESS", "CENTER_PROFILE", (req) => req.params.id),
+  saUpdateCenterCurriculumAccess
+);
+superadminRouter.put(
+  "/centers/:id/curriculum-access",
+  requireSuperadmin(),
+  auditAction("SA_UPDATE_CENTER_CURRICULUM_ACCESS", "CENTER_PROFILE", (req) => req.params.id),
+  saUpdateCenterCurriculumAccess
 );
 superadminRouter.post(
   "/centers/:id/logo",

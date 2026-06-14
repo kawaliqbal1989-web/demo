@@ -145,6 +145,11 @@ async function saUpdateCenterBranding(id, data) {
   return response.data;
 }
 
+async function saUpdateCenterCurriculumAccess(id, data) {
+  const response = await apiClient.patch(`/superadmin/centers/${id}/curriculum-access`, data);
+  return response.data;
+}
+
 async function saUploadCenterLogo(id, file, { onProgress } = {}) {
   const formData = new FormData();
   formData.append("file", file);
@@ -180,5 +185,6 @@ export {
   getHierarchyTree, getHierarchyDashboard, getSystemHealth,
   saCreateFranchise, saSetFranchiseStatus, saGetFranchiseDetail,
   saCreateCenter, saSetCenterStatus, saGetCenterDetail, saUpdateCenterBranding,
+  saUpdateCenterCurriculumAccess,
   saUploadCenterLogo, saDeleteCenterLogo
 };

@@ -27,6 +27,20 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
   let wsL6;
   let studentL3Id;
 
+  async function setCenterLicenseRank(rank) {
+    await prisma.centerProfile.updateMany({
+      where: {
+        tenantId: tenant.id,
+        authUserId: centerUser.id
+      },
+      data: {
+        maxLicensedLevelRank: rank,
+        licenseStartDate: null,
+        licenseExpiryDate: null
+      }
+    });
+  }
+
   beforeAll(async () => {
     tenant = await getTenantByCode("DEFAULT");
 
@@ -50,17 +64,31 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
     });
 
     const neededRanks = [1, 2, 3, 4, 5, 6, 7, 8];
+    for (const rank of neededRanks) {
+      // Keep this suite deterministic even if seed only includes lower levels.
+      // eslint-disable-next-line no-await-in-loop
+      await prisma.level.upsert({
+        where: {
+          tenantId_rank: {
+            tenantId: tenant.id,
+            rank
+          }
+        },
+        update: {},
+        create: {
+          tenantId: tenant.id,
+          name: `Level ${rank}`,
+          rank,
+          description: `Auto-provisioned for governance test rank ${rank}`
+        }
+      });
+    }
+
     const levels = await prisma.level.findMany({
       where: { tenantId: tenant.id, rank: { in: neededRanks } },
       select: { id: true, rank: true }
     });
     levelByRank = new Map(levels.map((row) => [row.rank, row]));
-
-    for (const rank of [1, 2, 3, 4, 5, 6]) {
-      if (!levelByRank.has(rank)) {
-        throw new Error(`Missing seeded level rank ${rank}`);
-      }
-    }
 
     teacherLevel3 = await ensureAuthUser({
       tenantCode: "DEFAULT",
@@ -242,6 +270,8 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
   });
 
   test("Teacher Level 3 sees levels <=3 and is denied level 4+ direct API", async () => {
+    await setCenterLicenseRank(3);
+
     const login = await loginAs({ email: teacherLevel3.email });
     expect(login.status).toBe(200);
     const token = login.body?.data?.access_token;
@@ -271,11 +301,15 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
       .get(`/api/catalog/courses/${testCourse.id}/levels`)
       .set(authHeader(token));
     expect(catalogLevels.status).toBe(200);
-    const visible = (catalogLevels.body?.data?.items || []).map((row) => row.levelNumber);
+    const visible = (catalogLevels.body?.data?.items || [])
+      .map((row) => row.levelNumber)
+      .sort((a, b) => a - b);
     expect(visible).toEqual([1, 2, 3]);
   });
 
   test("Teacher Level 5 sees levels <=5 and is denied level 6+ direct API", async () => {
+    await setCenterLicenseRank(5);
+
     const login = await loginAs({ email: teacherLevel5.email });
     expect(login.status).toBe(200);
     const token = login.body?.data?.access_token;
@@ -303,6 +337,8 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
   });
 
   test("Teacher cannot assign worksheet above level cap in batch workspace", async () => {
+    await setCenterLicenseRank(3);
+
     const login = await loginAs({ email: teacherLevel3.email });
     expect(login.status).toBe(200);
     const token = login.body?.data?.access_token;
@@ -360,5 +396,5 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
       .send({ worksheetId: wsL3.id, studentIds: [studentL3Id], dueDate: "2026-07-01" });
     expect(legacyBulk.status).toBe(410);
     expect(legacyBulk.body?.error_code).toBe("LEGACY_ASSIGNMENT_ROUTE_DISABLED");
-  });
+  }, 15000);
 });

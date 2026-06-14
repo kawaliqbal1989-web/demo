@@ -459,29 +459,20 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
     }
   });
 
-  const levelIds = Array.from(
-    new Set(
-      enrollments
-        .map((e) => e.levelId || e.student?.levelId || null)
-        .filter(Boolean)
-    )
-  );
-
   const maxLevelRank = await resolveActorLevelCap({
     tenantId: req.auth.tenantId,
     auth: req.auth
   });
 
-  let scopedLevelIds = levelIds;
+  let scopedLevelIds = null;
   if (Number.isFinite(maxLevelRank)) {
-    const allowedLevelIds = await resolveAllowedLevelIdsByRank({
+    scopedLevelIds = await resolveAllowedLevelIdsByRank({
       tenantId: req.auth.tenantId,
       maxRank: maxLevelRank
     });
-    scopedLevelIds = levelIds.filter((id) => allowedLevelIds.includes(id));
   }
 
-  if (!scopedLevelIds.length) {
+  if (Array.isArray(scopedLevelIds) && !scopedLevelIds.length) {
     return res.apiSuccess("Batch worksheet context", {
       batchId: String(batchId),
       studentCount: enrollments.length,
@@ -492,7 +483,7 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
   const worksheets = await prisma.worksheet.findMany({
     where: {
       tenantId: req.auth.tenantId,
-      levelId: { in: scopedLevelIds }
+      ...(Array.isArray(scopedLevelIds) ? { levelId: { in: scopedLevelIds } } : {})
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     select: {

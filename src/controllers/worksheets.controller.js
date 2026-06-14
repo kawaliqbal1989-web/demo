@@ -6,22 +6,65 @@ import { assertCanModifyAcademic } from "../services/ownership-guard.service.js"
 import { parsePagination } from "../utils/pagination.js";
 import { recordAudit } from "../utils/audit.js";
 
+async function hierarchyContainsNode(targetNodeId, actorNodeId, tenantId) {
+  if (!targetNodeId || !actorNodeId) {
+    return false;
+  }
+
+  if (targetNodeId === actorNodeId) {
+    return true;
+  }
+
+  let cursorId = targetNodeId;
+
+  while (cursorId) {
+    const node = await prisma.hierarchyNode.findFirst({
+      where: {
+        id: cursorId,
+        tenantId
+      },
+      select: {
+        id: true,
+        parentId: true
+      }
+    });
+
+    if (!node) {
+      return false;
+    }
+
+    if (node.parentId === actorNodeId) {
+      return true;
+    }
+
+    cursorId = node.parentId;
+  }
+
+  return false;
+}
+
 const listWorksheets = asyncHandler(async (req, res) => {
   const { take, skip, orderBy } = parsePagination(req.query);
   const levelId = req.query.levelId ? String(req.query.levelId) : null;
   const published = req.query.published === undefined ? null : String(req.query.published).trim().toLowerCase();
   const difficulty = req.query.difficulty ? String(req.query.difficulty).trim().toUpperCase() : null;
   const q = req.query.q ? String(req.query.q).trim() : null;
+  const examSelectionEligible = ["1", "true", "yes"].includes(String(req.query.examSelectionEligible || "").trim().toLowerCase());
 
   const where = {
     tenantId: req.auth.tenantId,
     ...(levelId ? { levelId } : {})
   };
 
-  if (published === "true") {
+  if (examSelectionEligible) {
+    where.isPublished = true;
+    where.examCycleId = null;
+  }
+
+  if (!examSelectionEligible && published === "true") {
     where.isPublished = true;
   }
-  if (published === "false") {
+  if (!examSelectionEligible && published === "false") {
     where.isPublished = false;
   }
 
@@ -80,12 +123,14 @@ const listWorksheets = asyncHandler(async (req, res) => {
 
   return res.apiSuccess(
     "Worksheets fetched",
-    data.map((w) => ({
-      ...w,
-      questionCount: w?._count?.questions ?? 0,
-      submissionCount: w?._count?.submissions ?? 0,
-      _count: undefined
-    }))
+    data
+      .map((w) => ({
+        ...w,
+        questionCount: w?._count?.questions ?? 0,
+        submissionCount: w?._count?.submissions ?? 0,
+        _count: undefined
+      }))
+      .filter((w) => !examSelectionEligible || w.questionCount > 0)
   );
 });
 
@@ -560,8 +605,8 @@ const submitWorksheetAnswers = asyncHandler(async (req, res) => {
     }
 
     const worksheet = await prisma.worksheet.findFirst({
-      where: { id: worksheetId, tenantId: req.auth.tenantId, isPublished: true },
-      select: { id: true, levelId: true }
+      where: { id: worksheetId, tenantId: req.auth.tenantId },
+      select: { id: true }
     });
 
     if (!worksheet) {
@@ -570,27 +615,27 @@ const submitWorksheetAnswers = asyncHandler(async (req, res) => {
 
     const student = await prisma.student.findFirst({
       where: { id: req.auth.studentId, tenantId: req.auth.tenantId, isActive: true },
-      select: { id: true, levelId: true }
+      select: { id: true }
     });
 
     if (!student) {
       return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
     }
 
-    if (worksheet.levelId !== student.levelId) {
-      const activeEnrollment = await prisma.enrollment.findFirst({
-        where: {
-          tenantId: req.auth.tenantId,
-          studentId: student.id,
-          status: "ACTIVE",
-          levelId: worksheet.levelId
-        },
-        select: { id: true }
-      });
+    const activeAssignment = await prisma.worksheetAssignment.findFirst({
+      where: {
+        tenantId: req.auth.tenantId,
+        worksheetId,
+        studentId: student.id,
+        isActive: true,
+        unassignedAt: null,
+        OR: [{ dueDate: null }, { dueDate: { gte: new Date() } }]
+      },
+      select: { worksheetId: true }
+    });
 
-      if (!activeEnrollment) {
-        return res.apiError(403, "Not enrolled for this worksheet", "WORKSHEET_NOT_ALLOWED");
-      }
+    if (!activeAssignment) {
+      return res.apiError(403, "Worksheet is not assigned to this student", "WORKSHEET_NOT_ALLOWED");
     }
   }
 
@@ -601,15 +646,28 @@ const submitWorksheetAnswers = asyncHandler(async (req, res) => {
   const student = await prisma.student.findFirst({
     where: {
       id: resolvedStudentId,
-      tenantId: req.auth.tenantId
+      tenantId: req.auth.tenantId,
+      isActive: true
     },
     select: {
-      id: true
+      id: true,
+      hierarchyNodeId: true
     }
   });
 
   if (!student) {
     return res.apiError(404, "Student not found", "STUDENT_NOT_FOUND");
+  }
+
+  if (req.auth.role !== "STUDENT") {
+    if (!req.auth.hierarchyNodeId) {
+      return res.apiError(403, "Forbidden", "SCOPE_FORBIDDEN");
+    }
+
+    const allowed = await hierarchyContainsNode(student.hierarchyNodeId, req.auth.hierarchyNodeId, req.auth.tenantId);
+    if (!allowed) {
+      return res.apiError(403, "Student is outside your scope", "SCOPE_FORBIDDEN");
+    }
   }
 
   const result = await submitWorksheet({

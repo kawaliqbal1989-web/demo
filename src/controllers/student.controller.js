@@ -114,6 +114,7 @@ const getStudentMe = asyncHandler(async (req, res) => {
         firstName: true,
         lastName: true,
         email: true,
+        gender: true,
         dateOfBirth: true,
         guardianName: true,
         guardianPhone: true,
@@ -169,6 +170,7 @@ const getStudentMe = asyncHandler(async (req, res) => {
         ...student,
         photoUrl: null,
         email: null,
+        gender: null,
         dateOfBirth: null,
         guardianName: null,
         guardianPhone: null,
@@ -197,15 +199,15 @@ const getStudentMe = asyncHandler(async (req, res) => {
         status: "ACTIVE"
       }
     }),
-    effectiveLevelId
-      ? prisma.worksheet.count({
-          where: {
-            tenantId: req.auth.tenantId,
-            levelId: effectiveLevelId,
-            isPublished: true
-          }
-        })
-      : Promise.resolve(0),
+    prisma.worksheetAssignment.count({
+      where: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id,
+        isActive: true,
+        unassignedAt: null,
+        OR: [{ dueDate: null }, { dueDate: { gte: new Date() } }]
+      }
+    }),
     prisma.authUser.findFirst({
       where: {
         id: req.auth.userId,
@@ -266,6 +268,7 @@ const getStudentMe = asyncHandler(async (req, res) => {
     status: student.isActive ? "ACTIVE" : "INACTIVE",
     email: student.email || null,
     photoUrl: student.photoUrl || null,
+    gender: student.gender || null,
     guardianName: student.guardianName || null,
     guardianPhone: student.guardianPhone || null,
     guardianEmail: student.guardianEmail || null,
@@ -296,6 +299,17 @@ const updateStudentProfile = asyncHandler(async (req, res) => {
     if (req.body[field] !== undefined) {
       const val = req.body[field] === null ? null : String(req.body[field]).trim();
       data[field] = val || null;
+    }
+  }
+
+  if (req.body.gender !== undefined) {
+    const rawGender = req.body.gender === null ? null : String(req.body.gender).trim().toUpperCase();
+    if (!rawGender) {
+      data.gender = null;
+    } else if (!["MALE", "FEMALE", "OTHER"].includes(rawGender)) {
+      return res.apiError(400, "Invalid gender", "INVALID_GENDER");
+    } else {
+      data.gender = rawGender;
     }
   }
 
@@ -419,12 +433,15 @@ const listStudentEnrollments = asyncHandler(async (req, res) => {
 });
 
 async function assertWorksheetAccessibleForStudent({ tenantId, student, worksheetId }) {
+  const now = new Date();
   const activeAssignment = await prisma.worksheetAssignment.findFirst({
     where: {
       tenantId,
       studentId: student.id,
       worksheetId,
-      isActive: true
+      isActive: true,
+      unassignedAt: null,
+      OR: [{ dueDate: null }, { dueDate: { gte: now } }]
     },
     select: { worksheetId: true }
   });
@@ -514,23 +531,11 @@ async function assertWorksheetAccessibleForStudent({ tenantId, student, workshee
     }
   }
 
-  if (!isAssigned && worksheet.levelId !== student.levelId) {
-    const activeEnrollment = await prisma.enrollment.findFirst({
-      where: {
-        tenantId,
-        studentId: student.id,
-        status: "ACTIVE",
-        levelId: worksheet.levelId
-      },
-      select: { id: true }
-    });
-
-    if (!activeEnrollment) {
-      const error = new Error("Not enrolled for this worksheet");
-      error.statusCode = 403;
-      error.errorCode = "WORKSHEET_NOT_ALLOWED";
-      throw error;
-    }
+  if (!isAssigned) {
+    const error = new Error("Worksheet is not assigned to this student");
+    error.statusCode = 403;
+    error.errorCode = "WORKSHEET_NOT_ALLOWED";
+    throw error;
   }
 
   return { worksheet, isAssigned };
@@ -553,93 +558,6 @@ function deriveAttemptStatus({ finalSubmittedAt, endsAt, now }) {
     return "TIMED_OUT";
   }
   return "IN_PROGRESS";
-}
-
-async function autoSubmitExpiredExamAttempt({ attempt, worksheet, tenantId, studentId, now = new Date() }) {
-  if (!attempt || !worksheet || worksheet.generationMode !== "EXAM" || attempt.finalSubmittedAt) {
-    return { attempt, autoSubmitted: false };
-  }
-
-  const timing = getAttemptTiming({
-    startedAt: attempt.submittedAt || now,
-    timeLimitSeconds: worksheet.timeLimitSeconds
-  });
-  const status = deriveAttemptStatus({
-    finalSubmittedAt: attempt.finalSubmittedAt,
-    endsAt: timing.endsAt,
-    now
-  });
-
-  if (status !== "TIMED_OUT") {
-    return { attempt, autoSubmitted: false };
-  }
-
-  let worksheetQuestions = Array.isArray(worksheet.questions) ? worksheet.questions : [];
-  if (!worksheetQuestions.length) {
-    worksheetQuestions = await prisma.worksheetQuestion.findMany({
-      where: {
-        tenantId,
-        worksheetId: worksheet.id
-      },
-      orderBy: { questionNumber: "asc" },
-      select: {
-        id: true,
-        questionNumber: true
-      }
-    });
-  }
-
-  const draft = getAttemptDraftFromSubmission(attempt, worksheetQuestions);
-  const answers = mapDraftAnswersToSubmissionAnswers({
-    answersByQuestionId: draft.answersByQuestionId,
-    questions: worksheetQuestions
-  });
-
-  try {
-    if (!answers.length) {
-      const updated = await prisma.worksheetSubmission.update({
-        where: { id: attempt.id },
-        data: {
-          finalSubmittedAt: now,
-          remarks: "Timed out"
-        }
-      });
-      return { attempt: updated, autoSubmitted: true };
-    }
-
-    await submitWorksheet({
-      worksheetId: worksheet.id,
-      studentId,
-      tenantId,
-      answers,
-      allowExpired: true,
-      remarksOverride: "Timed out"
-    });
-
-    const updated = await prisma.worksheetSubmission.findUnique({
-      where: { id: attempt.id }
-    });
-    return { attempt: updated || attempt, autoSubmitted: true };
-  } catch (error) {
-    logger.warn("auto_submit_expired_exam_attempt_failed", {
-      tenantId,
-      studentId,
-      worksheetId: worksheet.id,
-      attemptId: attempt.id,
-      code: error?.code || null,
-      detail: String(error?.message || "").slice(0, 300)
-    });
-
-    const updated = await prisma.worksheetSubmission.update({
-      where: { id: attempt.id },
-      data: {
-        finalSubmittedAt: now,
-        remarks: "Timed out"
-      }
-    }).catch(() => null);
-
-    return { attempt: updated || attempt, autoSubmitted: true };
-  }
 }
 
 function normalizeAnswersMap(raw) {
@@ -789,8 +707,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     const worksheet = await prisma.worksheet.findFirst({
       where: {
         id: worksheetId,
-        tenantId: req.auth.tenantId,
-        ...(access.isAssigned ? {} : { isPublished: true })
+        tenantId: req.auth.tenantId
       },
       select: {
         id: true,
@@ -878,15 +795,6 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     // Enforce device/session lock for EXAM attempts.
     attempt = await enforceExamAttemptDeviceLock({ req, attempt, worksheet });
 
-    const expiry = await autoSubmitExpiredExamAttempt({
-      attempt,
-      worksheet,
-      tenantId: req.auth.tenantId,
-      studentId: req.student.id,
-      now
-    });
-    attempt = expiry.attempt;
-
     const startedAt = attempt.submittedAt || now;
     const timing = getAttemptTiming({ startedAt, timeLimitSeconds: worksheet.timeLimitSeconds });
     const status = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
@@ -955,7 +863,7 @@ const saveStudentAttemptAnswers = asyncHandler(async (req, res) => {
     return res.apiError(400, "answersByQuestionId or answersDelta must be provided", "VALIDATION_ERROR");
   }
 
-  let attempt = await prisma.worksheetSubmission.findFirst({
+  const attempt = await prisma.worksheetSubmission.findFirst({
     where: {
       id: attemptId,
       tenantId: req.auth.tenantId,
@@ -976,6 +884,12 @@ const saveStudentAttemptAnswers = asyncHandler(async (req, res) => {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
 
+  await assertWorksheetAccessibleForStudent({
+    tenantId: req.auth.tenantId,
+    student: req.student,
+    worksheetId: worksheet.id
+  });
+
   const now = new Date();
   // Enforce device/session lock for EXAM attempts.
   try {
@@ -983,15 +897,6 @@ const saveStudentAttemptAnswers = asyncHandler(async (req, res) => {
   } catch (e) {
     return res.apiError(e.statusCode || 409, e.message || "Exam attempt locked", e.errorCode || "EXAM_DEVICE_LOCKED");
   }
-
-  const expiry = await autoSubmitExpiredExamAttempt({
-    attempt,
-    worksheet,
-    tenantId: req.auth.tenantId,
-    studentId: req.student.id,
-    now
-  });
-  attempt = expiry.attempt;
 
   const timing = getAttemptTiming({ startedAt: attempt.submittedAt || now, timeLimitSeconds: worksheet.timeLimitSeconds });
   const derivedStatus = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
@@ -1104,6 +1009,12 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
 
+  await assertWorksheetAccessibleForStudent({
+    tenantId: req.auth.tenantId,
+    student: req.student,
+    worksheetId: worksheet.id
+  });
+
   const now = new Date();
   // Enforce device/session lock for EXAM attempts.
   try {
@@ -1172,6 +1083,8 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     studentId: req.student.id,
     isActive: true,
+    unassignedAt: null,
+    OR: [{ dueDate: null }, { dueDate: { gte: new Date() } }],
     // Hide exam-linked practice worksheets; practice is via Abacus Practice (Auto).
     NOT: {
       worksheet: {
@@ -1190,69 +1103,28 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
       : {})
   };
 
-  const activeAssignmentCount = await prisma.worksheetAssignment.count({
-    where: {
-      tenantId: req.auth.tenantId,
-      studentId: req.student.id,
-      isActive: true
-    }
-  });
-
-  let total = 0;
-  let worksheets = [];
-
-  if (activeAssignmentCount > 0) {
-    const [assignmentTotal, assignments] = await Promise.all([
-      prisma.worksheetAssignment.count({ where: assignmentWhere }),
-      prisma.worksheetAssignment.findMany({
-        where: assignmentWhere,
-        orderBy: { assignedAt: "desc" },
-        skip,
-        take,
-        include: {
-          worksheet: {
-            select: {
-              id: true,
-              title: true,
-              timeLimitSeconds: true,
-              createdAt: true,
-              questions: { select: { id: true } }
-            }
+  const [total, assignments] = await Promise.all([
+    prisma.worksheetAssignment.count({ where: assignmentWhere }),
+    prisma.worksheetAssignment.findMany({
+      where: assignmentWhere,
+      orderBy: { assignedAt: "desc" },
+      skip,
+      take,
+      include: {
+        worksheet: {
+          select: {
+            id: true,
+            title: true,
+            timeLimitSeconds: true,
+            createdAt: true,
+            questions: { select: { id: true } }
           }
         }
-      })
-    ]);
+      }
+    })
+  ]);
 
-    total = assignmentTotal;
-    worksheets = assignments.map((a) => a.worksheet).filter(Boolean);
-  } else {
-    const where = {
-      tenantId: req.auth.tenantId,
-      isPublished: true,
-      levelId: req.student.levelId,
-      ...(search
-        ? {
-            OR: [{ title: { contains: search } }, { description: { contains: search } }]
-          }
-        : {})
-    };
-
-    const [fallbackTotal, fallbackWorksheets] = await Promise.all([
-      prisma.worksheet.count({ where }),
-      prisma.worksheet.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take,
-        include: {
-          questions: { select: { id: true } }
-        }
-      })
-    ]);
-
-    total = fallbackTotal;
-    worksheets = fallbackWorksheets;
-  }
+  const worksheets = assignments.map((a) => a.worksheet).filter(Boolean);
 
   const worksheetIds = worksheets.map((w) => w.id);
   let submissions = [];
@@ -1345,14 +1217,12 @@ const getStudentWorksheet = asyncHandler(async (req, res) => {
   const worksheet = await prisma.worksheet.findFirst({
     where: {
       id: worksheetId,
-      tenantId: req.auth.tenantId,
-      ...(access.isAssigned ? {} : { isPublished: true })
+      tenantId: req.auth.tenantId
     },
     select: {
       id: true,
       title: true,
       description: true,
-      generationMode: true,
       timeLimitSeconds: true,
       createdAt: true,
       questions: {
@@ -1370,26 +1240,6 @@ const getStudentWorksheet = asyncHandler(async (req, res) => {
 
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
-  }
-
-  if (worksheet.generationMode === "EXAM") {
-    const attempt = await prisma.worksheetSubmission.findUnique({
-      where: {
-        worksheetId_studentId: {
-          worksheetId,
-          studentId: req.student.id
-        }
-      }
-    });
-
-    if (attempt && !attempt.finalSubmittedAt) {
-      await autoSubmitExpiredExamAttempt({
-        attempt,
-        worksheet,
-        tenantId: req.auth.tenantId,
-        studentId: req.student.id
-      });
-    }
   }
 
   return res.apiSuccess("Worksheet fetched", worksheet);
@@ -1419,9 +1269,7 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
     select: {
       id: true,
       submittedAt: true,
-      finalSubmittedAt: true,
-      submittedAnswers: true,
-      remarks: true
+      finalSubmittedAt: true
     }
   });
 
@@ -1444,9 +1292,7 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
         select: {
           id: true,
           submittedAt: true,
-          finalSubmittedAt: true,
-          submittedAnswers: true,
-          remarks: true
+          finalSubmittedAt: true
         }
       });
     } catch (err) {
@@ -1461,9 +1307,7 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
           select: {
             id: true,
             submittedAt: true,
-            finalSubmittedAt: true,
-            submittedAnswers: true,
-            remarks: true
+            finalSubmittedAt: true
           }
         });
       }
@@ -1473,24 +1317,8 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
     }
   }
 
-  if (worksheet.generationMode === "EXAM" && attempt && !attempt.finalSubmittedAt) {
-    const expiry = await autoSubmitExpiredExamAttempt({
-      attempt,
-      worksheet,
-      tenantId: req.auth.tenantId,
-      studentId: req.student.id,
-      now
-    });
-    attempt = expiry.attempt;
-  }
-
-  if (attempt?.finalSubmittedAt) {
-    return res.apiError(409, "Worksheet already submitted", "SUBMISSION_ALREADY_FINALIZED");
-  }
-
-  const startedAt = attempt?.submittedAt || now;
   const expiresAt = worksheet.timeLimitSeconds
-    ? new Date(new Date(startedAt).getTime() + worksheet.timeLimitSeconds * 1000)
+    ? new Date(now.getTime() + worksheet.timeLimitSeconds * 1000)
     : null;
 
   return res.apiSuccess(
@@ -1498,7 +1326,7 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
     {
       attemptId: attempt.id,
       worksheetId,
-      startedAt,
+      startedAt: attempt.submittedAt || now,
       expiresAt,
       mode: attemptMode
     },
@@ -3133,7 +2961,8 @@ const getStudentExamResult = asyncHandler(async (req, res) => {
       id: true,
       name: true,
       code: true,
-      resultStatus: true
+      resultStatus: true,
+      resultPublishedAt: true
     }
   });
 
@@ -3141,14 +2970,52 @@ const getStudentExamResult = asyncHandler(async (req, res) => {
     return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
   }
 
+  const enrollment = await prisma.examEnrollmentEntry.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      examCycleId,
+      studentId: req.student.id
+    },
+    select: { id: true }
+  });
+
+  if (!enrollment) {
+    logger.warn("student_exam_result_access_denied_not_enrolled", {
+      tenantId: req.auth.tenantId,
+      studentId: req.student.id,
+      examCycleId
+    });
+    return res.apiError(404, "Exam result not found", "EXAM_RESULT_NOT_FOUND");
+  }
+
   if (examCycle.resultStatus !== "PUBLISHED") {
-    return res.apiError(403, "Results are not published", "RESULTS_NOT_PUBLISHED");
+    logger.info("student_exam_result_awaiting_publication", {
+      tenantId: req.auth.tenantId,
+      studentId: req.student.id,
+      examCycleId,
+      resultStatus: examCycle.resultStatus
+    });
+
+    return res.apiSuccess("Exam result awaiting publication", {
+      published: false,
+      message: "Result Awaiting Publication",
+      examCycle: {
+        id: examCycle.id,
+        name: examCycle.name,
+        code: examCycle.code,
+        resultStatus: examCycle.resultStatus,
+        resultPublishedAt: examCycle.resultPublishedAt || null
+      },
+      result: null,
+      submission: null
+    });
   }
 
   const submission = await prisma.worksheetSubmission.findFirst({
     where: {
       tenantId: req.auth.tenantId,
       studentId: req.student.id,
+      finalSubmittedAt: { not: null },
       worksheet: {
         is: {
           examCycleId,
@@ -3169,13 +3036,37 @@ const getStudentExamResult = asyncHandler(async (req, res) => {
     }
   });
 
+  if (!submission) {
+    logger.warn("student_exam_result_submission_missing", {
+      tenantId: req.auth.tenantId,
+      studentId: req.student.id,
+      examCycleId
+    });
+  }
+
+  const result = submission
+    ? {
+        worksheetId: submission.worksheet.id,
+        worksheetTitle: submission.worksheet.title,
+        levelId: submission.worksheet.levelId,
+        submittedAt: submission.finalSubmittedAt,
+        score: submission.score,
+        correctCount: submission.correctCount,
+        totalQuestions: submission.totalQuestions,
+        completionTimeSeconds: submission.completionTimeSeconds
+      }
+    : null;
+
   return res.apiSuccess("Exam result", {
+    published: true,
     examCycle: {
       id: examCycle.id,
       name: examCycle.name,
       code: examCycle.code,
-      resultStatus: examCycle.resultStatus
+      resultStatus: examCycle.resultStatus,
+      resultPublishedAt: examCycle.resultPublishedAt || null
     },
+    result,
     submission: submission || null
   });
 });
@@ -3366,34 +3257,13 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
         select: {
           worksheetId: true,
           id: true,
-          submittedAt: true,
-          finalSubmittedAt: true,
-          submittedAnswers: true,
-          remarks: true
+          finalSubmittedAt: true
         }
       })
     : [];
 
-  const worksheetById = new Map(assignedWorksheets.map((worksheet) => [worksheet.id, worksheet]));
-  const normalizedSubmissions = [];
-  for (const submission of submissions) {
-    const worksheet = worksheetById.get(submission.worksheetId);
-    if (!worksheet || submission.finalSubmittedAt || worksheet.generationMode !== "EXAM") {
-      normalizedSubmissions.push(submission);
-      continue;
-    }
-
-    const expiry = await autoSubmitExpiredExamAttempt({
-      attempt: submission,
-      worksheet,
-      tenantId,
-      studentId
-    });
-    normalizedSubmissions.push(expiry.attempt || submission);
-  }
-
   const latestByWorksheetId = new Map();
-  for (const s of normalizedSubmissions) {
+  for (const s of submissions) {
     if (!latestByWorksheetId.has(s.worksheetId)) {
       latestByWorksheetId.set(s.worksheetId, s);
     }

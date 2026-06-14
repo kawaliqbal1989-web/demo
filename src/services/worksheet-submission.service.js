@@ -140,6 +140,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
       }
     });
 
+    // Threshold is configured on LevelRule. If absent, preserve legacy default 85.
     const passThreshold = Number(levelRule?.passThreshold ?? 85);
     const passed = accuracy >= passThreshold;
     const submittedAnswers = normalizedAnswers.map((item) => ({

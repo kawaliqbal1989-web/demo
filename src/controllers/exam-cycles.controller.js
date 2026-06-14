@@ -665,22 +665,34 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
       studentId: { in: studentIds }
     },
     select: {
-      student: { select: { id: true, isActive: true, levelId: true } }
+      studentId: true,
+      levelId: true,
+      student: { select: { id: true, isActive: true } }
     }
   });
 
-  const allowedStudents = activeEnrollments.map((e) => e.student).filter((s) => s?.isActive);
-  const allowedIds = new Set(allowedStudents.map((s) => s.id));
+  const allowedByStudentId = new Map();
+  for (const enrollment of activeEnrollments) {
+    if (!enrollment?.student?.isActive) continue;
+    if (!enrollment?.studentId) continue;
+    if (!enrollment?.levelId) {
+      return res.apiError(409, "Active enrollment level is missing for one or more students", "ENROLLMENT_LEVEL_MISSING");
+    }
+
+    if (!allowedByStudentId.has(enrollment.studentId)) {
+      allowedByStudentId.set(enrollment.studentId, enrollment);
+    }
+  }
 
   for (const sid of studentIds) {
-    if (!allowedIds.has(sid)) {
+    if (!allowedByStudentId.has(sid)) {
       return res.apiError(403, "One or more students are not assigned/active under this teacher", "TEACHER_STUDENT_FORBIDDEN");
     }
   }
 
   await prisma.$transaction(async (tx) => {
     for (const sid of studentIds) {
-      const s = allowedStudents.find((x) => x.id === sid);
+      const enrollment = allowedByStudentId.get(sid);
 
       const existing = await tx.examEnrollmentEntry.findUnique({
         where: {
@@ -712,7 +724,7 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
           tenantId: req.auth.tenantId,
           examCycleId,
           studentId: sid,
-          enrolledLevelId: s.levelId,
+          enrolledLevelId: enrollment.levelId,
           isTemporary: false,
           sourceTeacherUserId: req.auth.userId,
           createdByUserId: req.auth.userId
@@ -1607,17 +1619,38 @@ const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const studentId = String(req.body?.studentId || "").trim();
-  const levelId = String(req.body?.levelId || "").trim();
+  const requestedLevelId = String(req.body?.levelId || "").trim();
 
-  if (!studentId || !levelId) {
-    return res.apiError(400, "studentId and levelId are required", "VALIDATION_ERROR");
+  if (!studentId) {
+    return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
+  }
+
+  const enrollment = await prisma.examEnrollmentEntry.findUnique({
+    where: {
+      tenantId_examCycleId_studentId: {
+        tenantId: req.auth.tenantId,
+        examCycleId,
+        studentId
+      }
+    },
+    select: {
+      enrolledLevelId: true
+    }
+  });
+
+  if (!enrollment?.enrolledLevelId) {
+    return res.apiError(404, "Exam enrollment not found", "EXAM_ENROLLMENT_NOT_FOUND");
+  }
+
+  if (requestedLevelId && requestedLevelId !== enrollment.enrolledLevelId) {
+    return res.apiError(409, "Requested level does not match enrolled exam level", "EXAM_LEVEL_MISMATCH");
   }
 
   const result = await generateQuestionSet({
     tenantId: req.auth.tenantId,
     examCycleId,
     studentId,
-    levelId
+    levelId: enrollment.enrolledLevelId
   });
 
   return res.apiSuccess("Question set generated", result);

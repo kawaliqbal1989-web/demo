@@ -62,6 +62,7 @@ const FRIENDLY_BY_CODE = {
   HIERARCHY_SCOPE_DENIED: "You do not have access to this exam-cycle data.",
   LEVEL_SCOPE_DENIED: "This worksheet level is outside your access scope.",
   TEACHER_BATCH_FORBIDDEN: "You are not assigned to this batch.",
+  LEGACY_ASSIGNMENT_ROUTE_DISABLED: "This assignment path has been retired. Use My Batches for worksheet assignment.",
   WORKFLOW_ROLE_FORBIDDEN: "Your role cannot perform this exam workflow action.",
   REJECT_REMARK_REQUIRED: "Please provide a remark before rejecting this enrollment list.",
   RESULTS_NOT_PUBLISHED: "Results are not published yet for this exam cycle."

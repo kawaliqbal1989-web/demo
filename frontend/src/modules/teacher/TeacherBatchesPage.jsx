@@ -5,8 +5,8 @@ import { SkeletonLoader } from "../../components/SkeletonLoader";
 import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
+  assignWorksheetToSelectedStudentsInBatch,
   assignWorksheetToBatch,
-  bulkAssignWorksheetToStudents,
   getBatchRoster,
   getTeacherBatchWorksheetsContext,
   getTeacherMockTest,
@@ -507,7 +507,7 @@ function TeacherBatchesPage() {
             setError("");
             setSuccess("");
             try {
-              const resp = await bulkAssignWorksheetToStudents({
+              const resp = await assignWorksheetToSelectedStudentsInBatch(batchId, {
                 worksheetId: studentWorksheetId,
                 studentIds: [...selectedStudentIds],
                 dueDate: studentDueDate

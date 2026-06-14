@@ -3109,6 +3109,97 @@ const bulkAssignWorksheetToStudents = asyncHandler(async (req, res) => {
   return res.apiSuccess("Bulk assignment completed", result.data);
 });
 
+/* ─── Batch-Scoped Assign: 1 worksheet → selected students in batch ─── */
+const assignTeacherBatchWorksheetToStudents = asyncHandler(async (req, res) => {
+  const tenantId = req.auth.tenantId;
+  const batchId = String(req.params.batchId || "").trim();
+
+  const teacher = await loadTeacherContext({ tenantId, teacherUserId: req.auth.userId });
+  if (!teacher?.hierarchyNodeId) {
+    return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
+  }
+
+  const allowed = await ensureTeacherAssignedToBatch({
+    tenantId,
+    teacherUserId: teacher.id,
+    batchId
+  });
+  if (!allowed) {
+    return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
+  }
+
+  const { worksheetId, studentIds, dueDate } = req.body || {};
+  if (!worksheetId) return res.apiError(400, "worksheetId is required", "VALIDATION_ERROR");
+  if (!Array.isArray(studentIds) || !studentIds.length) {
+    return res.apiError(400, "studentIds array is required", "VALIDATION_ERROR");
+  }
+  if (studentIds.length > 200) {
+    return res.apiError(400, "Cannot assign to more than 200 students at once", "VALIDATION_ERROR");
+  }
+
+  const worksheet = await prisma.worksheet.findFirst({
+    where: {
+      id: String(worksheetId),
+      tenantId
+    },
+    select: {
+      id: true,
+      level: { select: { rank: true } }
+    }
+  });
+  if (!worksheet) {
+    return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const maxLevelRank = await resolveActorLevelCap({
+    tenantId,
+    auth: req.auth
+  });
+  if (Number.isFinite(maxLevelRank) && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
+    return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
+  }
+
+  const targetIds = studentIds.map((id) => String(id).trim()).filter(Boolean);
+
+  const enrollments = await prisma.enrollment.findMany({
+    where: {
+      tenantId,
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      batchId,
+      assignedTeacherUserId: teacher.id,
+      status: "ACTIVE",
+      studentId: { in: targetIds }
+    },
+    select: { studentId: true }
+  });
+  const validStudentIds = [...new Set(enrollments.map((e) => e.studentId))];
+  if (!validStudentIds.length) {
+    return res.apiError(400, "No valid students found", "NO_VALID_STUDENTS");
+  }
+
+  const result = await svcBulkAssign({
+    tenantId,
+    worksheetId: worksheet.id,
+    studentIds: validStudentIds,
+    dueDate: dueDate ? new Date(dueDate) : null,
+    createdByUserId: req.auth.userId
+  });
+
+  if (result.error) return res.apiError(400, result.error, result.code);
+  return res.apiSuccess("Batch selected-student assignment completed", {
+    batchId,
+    ...result.data
+  });
+});
+
+const rejectLegacyTeacherAssignmentRoute = asyncHandler(async (_req, res) => {
+  return res.apiError(
+    410,
+    "Legacy teacher assignment route disabled. Use /teacher/batches assignment workflow.",
+    "LEGACY_ASSIGNMENT_ROUTE_DISABLED"
+  );
+});
+
 /* ── Student Attendance History ── */
 const getTeacherStudentAttendanceHistory = asyncHandler(async (req, res) => {
   const tenantId = req.auth.tenantId;
@@ -3322,6 +3413,8 @@ export {
   listTeacherReassignmentRequests,
   reviewTeacherReassignmentRequest,
   bulkAssignWorksheetToStudents,
+  assignTeacherBatchWorksheetToStudents,
+  rejectLegacyTeacherAssignmentRoute,
   getTeacherStudentAttendanceHistory,
   getTeacherStudent360,
 };

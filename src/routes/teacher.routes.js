@@ -21,10 +21,9 @@ import {
   listTeacherStudentAttempts,
   exportTeacherStudentAttemptsCsv,
   overrideTeacherStudentPromotion,
-  getTeacherAssignWorksheetsContext,
-  saveTeacherWorksheetAssignments,
   getTeacherBatchWorksheetsContext,
   assignTeacherBatchWorksheet,
+  assignTeacherBatchWorksheetToStudents,
   listTeacherBatchMockTests,
   getTeacherMockTest,
   upsertTeacherMockTestResults,
@@ -42,7 +41,7 @@ import {
   teacherDirectReassign,
   listTeacherReassignmentRequests,
   reviewTeacherReassignmentRequest,
-  bulkAssignWorksheetToStudents,
+  rejectLegacyTeacherAssignmentRoute,
   getTeacherStudentAttendanceHistory,
   getTeacherStudent360,
 } from "../controllers/teacher-portal.controller.js";
@@ -96,6 +95,11 @@ teacherRouter.post(
   auditAction("TEACHER_ASSIGN_BATCH_WORKSHEET", "BATCH", (req) => req.params.batchId),
   assignTeacherBatchWorksheet
 );
+teacherRouter.post(
+  "/batches/:batchId/worksheets/assign-selected",
+  auditAction("TEACHER_ASSIGN_SELECTED_BATCH_WORKSHEETS", "BATCH", (req) => req.params.batchId),
+  assignTeacherBatchWorksheetToStudents
+);
 teacherRouter.get(
   "/batches/:batchId/mock-tests",
   auditAction("TEACHER_LIST_BATCH_MOCK_TESTS", "BATCH", (req) => req.params.batchId),
@@ -132,12 +136,12 @@ teacherRouter.post(
 teacherRouter.get(
   "/students/:studentId/assign-worksheets",
   auditAction("TEACHER_VIEW_ASSIGN_WORKSHEETS", "STUDENT", (req) => req.params.studentId),
-  getTeacherAssignWorksheetsContext
+  rejectLegacyTeacherAssignmentRoute
 );
 teacherRouter.post(
   "/students/:studentId/assign-worksheets",
   auditAction("TEACHER_SAVE_ASSIGN_WORKSHEETS", "STUDENT", (req) => req.params.studentId),
-  saveTeacherWorksheetAssignments
+  rejectLegacyTeacherAssignmentRoute
 );
 
 teacherRouter.get("/students/:studentId/notes", listTeacherNotesForStudent);
@@ -192,7 +196,7 @@ teacherRouter.post(
 teacherRouter.post(
   "/worksheets/bulk-assign",
   auditAction("TEACHER_BULK_ASSIGN_WORKSHEET", "WORKSHEET"),
-  bulkAssignWorksheetToStudents
+  rejectLegacyTeacherAssignmentRoute
 );
 
 /* ── Cockpit / Intervention Console ── */

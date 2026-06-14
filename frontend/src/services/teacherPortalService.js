@@ -313,6 +313,10 @@ async function teacherDirectReassign(studentId, data) {
   const response = await apiClient.post(`/teacher/students/${studentId}/reassign`, data);
   return response.data;
 }
+async function assignWorksheetToSelectedStudentsInBatch(batchId, data) {
+  const response = await apiClient.post(`/teacher/batches/${batchId}/worksheets/assign-selected`, data);
+  return response.data;
+}
 async function bulkAssignWorksheetToStudents(data) {
   const response = await apiClient.post("/teacher/worksheets/bulk-assign", data);
   return response.data;
@@ -374,6 +378,7 @@ export {
   listTeacherReassignmentRequests,
   reviewTeacherReassignmentRequest,
   teacherDirectReassign,
+  assignWorksheetToSelectedStudentsInBatch,
   bulkAssignWorksheetToStudents,
   getStudentAttendanceHistory,
   getStudent360,

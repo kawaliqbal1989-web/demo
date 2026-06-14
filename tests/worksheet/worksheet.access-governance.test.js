@@ -25,6 +25,7 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
   let wsL4;
   let wsL5;
   let wsL6;
+  let studentL3Id;
 
   beforeAll(async () => {
     tenant = await getTenantByCode("DEFAULT");
@@ -124,6 +125,7 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
         isActive: true
       }
     });
+    studentL3Id = studentL3.id;
 
     const studentL5 = await prisma.student.create({
       data: {
@@ -332,5 +334,31 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
 
     expect(assignRes.status).toBe(403);
     expect(assignRes.body?.error_code).toBe("TEACHER_BATCH_FORBIDDEN");
+  });
+
+  test("Legacy teacher worksheet assignment routes are disabled", async () => {
+    const login = await loginAs({ email: teacherLevel3.email });
+    expect(login.status).toBe(200);
+    const token = login.body?.data?.access_token;
+
+    const legacyGet = await http
+      .get(`/api/teacher/students/${studentL3Id}/assign-worksheets`)
+      .set(authHeader(token));
+    expect(legacyGet.status).toBe(410);
+    expect(legacyGet.body?.error_code).toBe("LEGACY_ASSIGNMENT_ROUTE_DISABLED");
+
+    const legacyPost = await http
+      .post(`/api/teacher/students/${studentL3Id}/assign-worksheets`)
+      .set(authHeader(token))
+      .send({ worksheetIds: [wsL3.id] });
+    expect(legacyPost.status).toBe(410);
+    expect(legacyPost.body?.error_code).toBe("LEGACY_ASSIGNMENT_ROUTE_DISABLED");
+
+    const legacyBulk = await http
+      .post("/api/teacher/worksheets/bulk-assign")
+      .set(authHeader(token))
+      .send({ worksheetId: wsL3.id, studentIds: [studentL3Id], dueDate: "2026-07-01" });
+    expect(legacyBulk.status).toBe(410);
+    expect(legacyBulk.body?.error_code).toBe("LEGACY_ASSIGNMENT_ROUTE_DISABLED");
   });
 });

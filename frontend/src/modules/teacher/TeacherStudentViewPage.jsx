@@ -149,8 +149,8 @@ function TeacherStudentViewPage() {
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link className="button" style={{ width: "auto" }} to={`/teacher/students/${encodeURIComponent(studentId)}/assign-worksheets`}>
-            Assign Worksheets
+          <Link className="button" style={{ width: "auto" }} to={`/teacher/students/${encodeURIComponent(studentId)}/materials`}>
+            View Assignments
           </Link>
           <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/notes?studentId=${encodeURIComponent(studentId)}`}>
             Notes
@@ -210,8 +210,8 @@ function TeacherStudentViewPage() {
               <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/notes?studentId=${encodeURIComponent(studentId)}`}>
                 Open Notes
               </Link>
-              <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/students/${encodeURIComponent(studentId)}/assign-worksheets`}>
-                Assign Worksheets
+              <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/students/${encodeURIComponent(studentId)}/materials`}>
+                View Assignments
               </Link>
             </div>
           </div>

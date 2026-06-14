@@ -185,9 +185,6 @@ function TeacherStudentsPage() {
                     <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/students/${r.studentId}/materials`}>
                       Materials
                     </Link>
-                    <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/students/${r.studentId}/assign-worksheets`}>
-                      Assign Worksheets
-                    </Link>
                     <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/students/${r.studentId}/attempts`}>
                       Attempts
                     </Link>

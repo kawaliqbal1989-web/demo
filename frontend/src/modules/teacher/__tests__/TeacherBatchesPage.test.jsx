@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   getBatchRosterMock: vi.fn(),
   getTeacherBatchWorksheetsContextMock: vi.fn(),
   assignWorksheetToBatchMock: vi.fn(),
-  bulkAssignWorksheetToStudentsMock: vi.fn(),
+  assignWorksheetToSelectedStudentsInBatchMock: vi.fn(),
   listTeacherBatchMockTestsMock: vi.fn(),
   getTeacherMockTestMock: vi.fn(),
   saveTeacherMockTestResultsMock: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("../../../services/teacherPortalService", () => ({
   getBatchRoster: mocks.getBatchRosterMock,
   getTeacherBatchWorksheetsContext: mocks.getTeacherBatchWorksheetsContextMock,
   assignWorksheetToBatch: mocks.assignWorksheetToBatchMock,
-  bulkAssignWorksheetToStudents: mocks.bulkAssignWorksheetToStudentsMock,
+  assignWorksheetToSelectedStudentsInBatch: mocks.assignWorksheetToSelectedStudentsInBatchMock,
   listTeacherBatchMockTests: mocks.listTeacherBatchMockTestsMock,
   getTeacherMockTest: mocks.getTeacherMockTestMock,
   saveTeacherMockTestResults: mocks.saveTeacherMockTestResultsMock
@@ -55,7 +55,7 @@ describe("TeacherBatchesPage worksheet workspace", () => {
     mocks.listTeacherBatchMockTestsMock.mockResolvedValue({ data: { items: [] } });
 
     mocks.assignWorksheetToBatchMock.mockResolvedValue({ data: { assignedCount: 2 } });
-    mocks.bulkAssignWorksheetToStudentsMock.mockResolvedValue({
+    mocks.assignWorksheetToSelectedStudentsInBatchMock.mockResolvedValue({
       data: {
         results: [
           { studentId: "stu_1", success: true },
@@ -123,7 +123,7 @@ describe("TeacherBatchesPage worksheet workspace", () => {
     await user.click(screen.getByRole("button", { name: "Assign to 2 Students" }));
 
     await waitFor(() => {
-      expect(mocks.bulkAssignWorksheetToStudentsMock).toHaveBeenCalledWith({
+      expect(mocks.assignWorksheetToSelectedStudentsInBatchMock).toHaveBeenCalledWith("batch_1", {
         worksheetId: "ws_1",
         studentIds: ["stu_1", "stu_2"],
         dueDate: "2026-06-26"

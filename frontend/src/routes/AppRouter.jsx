@@ -87,7 +87,6 @@ import { TeacherStudentViewPage } from "../modules/teacher/TeacherStudentViewPag
 import { TeacherStudentAttemptsPage } from "../modules/teacher/TeacherStudentAttemptsPage";
 import { TeacherStudentMaterialsPage } from "../modules/teacher/TeacherStudentMaterialsPage";
 import { TeacherStudentPracticeReportPage } from "../modules/teacher/TeacherStudentPracticeReportPage";
-import { TeacherAssignWorksheetsPage } from "../modules/teacher/TeacherAssignWorksheetsPage";
 import { TeacherNotesPage } from "../modules/teacher/TeacherNotesPage";
 import { TeacherFeesPage } from "../modules/teacher/TeacherFeesPage";
 import { TeacherProfilePage } from "../modules/teacher/TeacherProfilePage";
@@ -255,7 +254,6 @@ function AppRouter() {
             <Route path="/teacher/students/:studentId/attempts" element={<TeacherStudentAttemptsPage />} />
             <Route path="/teacher/students/:studentId/materials" element={<TeacherStudentMaterialsPage />} />
             <Route path="/teacher/students/:studentId/practice-report" element={<TeacherStudentPracticeReportPage />} />
-            <Route path="/teacher/students/:studentId/assign-worksheets" element={<TeacherAssignWorksheetsPage />} />
             <Route path="/teacher/students/:studentId/attendance" element={<StudentAttendanceHistoryPage />} />
             <Route path="/teacher/students/:studentId/360" element={<Student360Page />} />
             <Route path="/teacher/attendance" element={<TeacherAttendancePage />} />

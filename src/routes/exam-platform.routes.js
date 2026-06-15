@@ -86,12 +86,12 @@ examPlatformRouter.post("/attempts/:id/moderate", requireRole("SUPERADMIN", "BP"
 examPlatformRouter.post("/attempts/:id/approve", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_ATTEMPT_APPROVE", "EXAM_ATTEMPT", (req) => req.params.id), approveAttempt);
 
 examPlatformRouter.post("/results/generate", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_RESULT_GENERATE", "EXAM_RESULT"), generateResults);
-examPlatformRouter.get("/results/:examId", requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER", "TEACHER", "STUDENT"), auditAction("EXAM_RESULT_LIST", "EXAM_RESULT", (req) => req.params.examId), listResults);
+examPlatformRouter.get("/results/:examId", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_RESULT_LIST", "EXAM_RESULT", (req) => req.params.examId), listResults);
 
 examPlatformRouter.post("/certificates/generate", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_CERTIFICATE_GENERATE", "EXAM_CERTIFICATE"), generateCertificates);
-examPlatformRouter.get("/certificates/:examId", requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER", "TEACHER", "STUDENT"), auditAction("EXAM_CERTIFICATE_LIST", "EXAM_CERTIFICATE", (req) => req.params.examId), listCertificates);
+examPlatformRouter.get("/certificates/:examId", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_CERTIFICATE_LIST", "EXAM_CERTIFICATE", (req) => req.params.examId), listCertificates);
 examPlatformRouter.post("/certificates/:id/reissue", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_CERTIFICATE_REISSUE", "EXAM_CERTIFICATE", (req) => req.params.id), reissueCertificate);
-examPlatformRouter.get("/certificates/download/:certificateNo", requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER", "TEACHER", "STUDENT"), auditAction("EXAM_CERTIFICATE_DOWNLOAD", "EXAM_CERTIFICATE", (req) => req.params.certificateNo), downloadCertificate);
+examPlatformRouter.get("/certificates/download/:certificateNo", requireRole("SUPERADMIN", "BP"), auditAction("EXAM_CERTIFICATE_DOWNLOAD", "EXAM_CERTIFICATE", (req) => req.params.certificateNo), downloadCertificate);
 
 examPlatformRouter.get("/competitions", requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER", "TEACHER"), auditAction("COMPETITION_BUILDER_LIST", "COMPETITION"), listCompetitionsBuilder);
 examPlatformRouter.post("/competitions", requireRole("SUPERADMIN", "BP", "FRANCHISE"), auditAction("COMPETITION_BUILDER_CREATE", "COMPETITION"), createCompetitionBuilder);

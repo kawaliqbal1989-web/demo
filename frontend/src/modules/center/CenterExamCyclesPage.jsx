@@ -82,12 +82,32 @@ function CenterExamCyclesPage() {
             render: (r) => `${formatDateTime(r.examStartsAt)} → ${formatDateTime(r.examEndsAt)}`
           },
           {
+            key: "normalCount",
+            header: "Normal",
+            render: (r) => String(r?.enrollmentCounts?.normalEnrollmentCount ?? 0)
+          },
+          {
+            key: "lateCount",
+            header: "Late",
+            render: (r) => String(r?.enrollmentCounts?.lateEnrollmentCount ?? 0)
+          },
+          {
+            key: "totalCount",
+            header: "Total",
+            render: (r) => String(r?.enrollmentCounts?.totalEnrollmentCount ?? 0)
+          },
+          {
             key: "actions",
             header: "Actions",
             render: (r) => (
-              <Link className="button secondary" style={{ width: "auto" }} to={`/center/exam-cycles/${r.id}`}>
-                Manage Enrollment
-              </Link>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Link className="button secondary" style={{ width: "auto" }} to={`/center/exam-cycles/${r.id}`}>
+                  Manage Enrollment
+                </Link>
+                <Link className="button secondary" style={{ width: "auto" }} to={`/center/exam-cycles/${r.id}/late-enrollment`}>
+                  Late Enrollment
+                </Link>
+              </div>
             )
           }
         ]}

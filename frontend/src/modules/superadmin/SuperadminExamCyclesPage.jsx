@@ -292,6 +292,15 @@ function SuperadminExamCyclesPage() {
         <div style={{ display: "flex", gap: 10 }}>
 
           <button
+            className="button secondary"
+            type="button"
+            onClick={() => navigate("/superadmin/exam-results")}
+            style={{ width: "auto" }}
+          >
+            Result Control Center
+          </button>
+
+          <button
             className="button"
             type="button"
             onClick={() => navigate("/superadmin/exam-cycles/new")}

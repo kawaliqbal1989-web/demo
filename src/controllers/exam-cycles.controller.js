@@ -19,6 +19,7 @@ import {
 } from "../services/assessmentConfig.service.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { generateUsername } from "../utils/username-generator.js";
+import { getEnrollmentCounts } from "./exam-late-enrollment.controller.js";
 
 function csvEscape(value) {
   if (value === null || value === undefined) return "";
@@ -181,8 +182,21 @@ const listExamCycles = asyncHandler(async (req, res) => {
     prisma.examCycle.count({ where })
   ]);
 
+  const itemsWithCounts = await Promise.all(
+    items.map(async (item) => {
+      const counts = await getEnrollmentCounts({
+        tenantId: req.auth.tenantId,
+        examCycleId: item.id
+      });
+      return {
+        ...item,
+        enrollmentCounts: counts
+      };
+    })
+  );
+
   return res.apiSuccess("Exam cycles fetched", {
-    items,
+    items: itemsWithCounts,
     total,
     limit,
     offset,
@@ -1463,6 +1477,318 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
   return { status: examCycle.resultStatus, results };
 }
 
+async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
+  const [examCycle, payload, enrollmentLevels, levelRules] = await Promise.all([
+    prisma.examCycle.findFirst({
+      where: { id: examCycleId, tenantId },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        resultStatus: true,
+        resultPublishedAt: true,
+        resultPublishedByUserId: true,
+        examStartsAt: true,
+        examEndsAt: true,
+        businessPartnerId: true
+      }
+    }),
+    buildExamResultsPayload({
+      tenantId,
+      actor,
+      examCycleId
+    }),
+    prisma.examEnrollmentEntry.findMany({
+      where: { tenantId, examCycleId },
+      select: {
+        studentId: true,
+        enrolledLevelId: true,
+        enrolledLevel: { select: { id: true, name: true, rank: true } }
+      }
+    }),
+    prisma.levelRule.findMany({
+      where: { tenantId },
+      select: { levelId: true, passThreshold: true }
+    })
+  ]);
+
+  if (!examCycle) {
+    const error = new Error("Exam cycle not found");
+    error.statusCode = 404;
+    error.errorCode = "EXAM_CYCLE_NOT_FOUND";
+    throw error;
+  }
+
+  const levelByStudentId = new Map();
+  const levelMetaById = new Map();
+  for (const entry of enrollmentLevels) {
+    levelByStudentId.set(entry.studentId, entry.enrolledLevelId);
+    if (entry.enrolledLevel?.id) {
+      levelMetaById.set(entry.enrolledLevel.id, {
+        levelId: entry.enrolledLevel.id,
+        levelName: entry.enrolledLevel.name,
+        levelRank: entry.enrolledLevel.rank
+      });
+    }
+  }
+
+  const passThresholdByLevelId = new Map();
+  for (const rule of levelRules) {
+    const threshold = Number(rule?.passThreshold);
+    passThresholdByLevelId.set(rule.levelId, Number.isFinite(threshold) ? threshold : 85);
+  }
+
+  const results = payload.results || [];
+  const appeared = results.filter((row) => row.score !== null && row.score !== undefined);
+  const absentCount = results.length - appeared.length;
+  const totalScore = appeared.reduce((sum, row) => sum + Number(row.score || 0), 0);
+  const avgScore = appeared.length ? Number((totalScore / appeared.length).toFixed(2)) : 0;
+
+  let passCount = 0;
+  let failCount = 0;
+
+  const levelWiseMap = new Map();
+  for (const row of results) {
+    const levelId = levelByStudentId.get(row.studentId) || "UNASSIGNED";
+    const levelMeta = levelMetaById.get(levelId) || {
+      levelId,
+      levelName: "Unassigned",
+      levelRank: null
+    };
+
+    if (!levelWiseMap.has(levelId)) {
+      levelWiseMap.set(levelId, {
+        levelId: levelMeta.levelId,
+        levelName: levelMeta.levelName,
+        levelRank: levelMeta.levelRank,
+        total: 0,
+        appeared: 0,
+        absent: 0,
+        pass: 0,
+        fail: 0,
+        totalScore: 0
+      });
+    }
+
+    const bucket = levelWiseMap.get(levelId);
+    bucket.total += 1;
+
+    if (row.score === null || row.score === undefined) {
+      bucket.absent += 1;
+      continue;
+    }
+
+    const numericScore = Number(row.score || 0);
+    const threshold = passThresholdByLevelId.get(levelId) ?? 85;
+    const passed = numericScore >= threshold;
+
+    bucket.appeared += 1;
+    bucket.totalScore += numericScore;
+    if (passed) {
+      bucket.pass += 1;
+      passCount += 1;
+    } else {
+      bucket.fail += 1;
+      failCount += 1;
+    }
+  }
+
+  const levelWise = Array.from(levelWiseMap.values())
+    .map((bucket) => ({
+      levelId: bucket.levelId,
+      levelName: bucket.levelName,
+      levelRank: bucket.levelRank,
+      total: bucket.total,
+      appeared: bucket.appeared,
+      absent: bucket.absent,
+      pass: bucket.pass,
+      fail: bucket.fail,
+      avgScore: bucket.appeared ? Number((bucket.totalScore / bucket.appeared).toFixed(2)) : 0
+    }))
+    .sort((a, b) => {
+      const rankA = Number(a.levelRank ?? Number.MAX_SAFE_INTEGER);
+      const rankB = Number(b.levelRank ?? Number.MAX_SAFE_INTEGER);
+      if (rankA !== rankB) return rankA - rankB;
+      return String(a.levelName || "").localeCompare(String(b.levelName || ""));
+    });
+
+  const topPerformers = appeared
+    .map((row) => ({
+      studentId: row.studentId,
+      admissionNo: row.admissionNo,
+      studentName: row.studentName,
+      score: Number(row.score || 0),
+      levelId: levelByStudentId.get(row.studentId) || null,
+      levelName: levelMetaById.get(levelByStudentId.get(row.studentId))?.levelName || null
+    }))
+    .sort((a, b) => b.score - a.score || String(a.studentName || "").localeCompare(String(b.studentName || "")))
+    .slice(0, 10);
+
+  return {
+    examCycle,
+    publication: {
+      status: payload.status,
+      canPublish: payload.status === "READY_FOR_REVIEW" || payload.status === "LOCKED",
+      canUnpublish: payload.status === "PUBLISHED",
+      resultPublishedAt: examCycle.resultPublishedAt,
+      resultPublishedByUserId: examCycle.resultPublishedByUserId
+    },
+    summary: {
+      totalCandidates: results.length,
+      appearedCount: appeared.length,
+      absentCount,
+      passCount,
+      failCount,
+      avgScore
+    },
+    topPerformers,
+    levelWise,
+    rows: results
+  };
+}
+
+const listExamResultsControlCenter = asyncHandler(async (req, res) => {
+  const { take, skip, orderBy, limit, offset } = parsePagination(req.query);
+  const statusFilter = String(req.query?.status || "ALL").trim().toUpperCase();
+  const q = String(req.query?.q || "").trim();
+
+  const where = {
+    tenantId: req.auth.tenantId,
+    ...(statusFilter && statusFilter !== "ALL" ? { resultStatus: statusFilter } : {}),
+    ...(q
+      ? {
+          OR: [
+            { code: { contains: q } },
+            { name: { contains: q } }
+          ]
+        }
+      : {})
+  };
+
+  const [items, total] = await Promise.all([
+    prisma.examCycle.findMany({
+      where,
+      orderBy: orderBy || { createdAt: "desc" },
+      skip,
+      take,
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        examStartsAt: true,
+        examEndsAt: true,
+        resultStatus: true,
+        resultPublishAt: true,
+        resultPublishedAt: true,
+        resultPublishedByUserId: true,
+        businessPartner: { select: { id: true, code: true, name: true } },
+        publishedByUser: {
+          select: {
+            id: true,
+            username: true,
+            email: true
+          }
+        },
+        _count: {
+          select: {
+            enrollmentEntries: true,
+            resultPublicationAudits: true
+          }
+        }
+      }
+    }),
+    prisma.examCycle.count({ where })
+  ]);
+
+  const enriched = await Promise.all(
+    items.map(async (cycle) => {
+      const enrollmentCounts = await getEnrollmentCounts({
+        tenantId: req.auth.tenantId,
+        examCycleId: cycle.id
+      });
+
+      const submissionsCount = await prisma.worksheetSubmission.count({
+        where: {
+          tenantId: req.auth.tenantId,
+          worksheet: {
+            is: {
+              examCycleId: cycle.id,
+              generationMode: "EXAM"
+            }
+          },
+          finalSubmittedAt: { not: null },
+          score: { not: null }
+        }
+      });
+
+      return {
+        ...cycle,
+        enrollmentCounts,
+        metrics: {
+          enrolledCount: cycle._count.enrollmentEntries,
+          appearedCount: submissionsCount,
+          publicationEvents: cycle._count.resultPublicationAudits
+        },
+        publication: {
+          canPublish: cycle.resultStatus === "READY_FOR_REVIEW" || cycle.resultStatus === "LOCKED",
+          canUnpublish: cycle.resultStatus === "PUBLISHED"
+        }
+      };
+    })
+  );
+
+  return res.apiSuccess("Exam result control center", {
+    items: enriched,
+    total,
+    limit,
+    offset,
+    status: statusFilter
+  });
+});
+
+const getExamResultsReview = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const payload = await buildExamResultReviewSummary({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    actor: req.auth
+  });
+  return res.apiSuccess("Exam result review summary", payload);
+});
+
+const getExamResultPublicationAuditTrail = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+
+  const cycle = await prisma.examCycle.findFirst({
+    where: { id: examCycleId, tenantId: req.auth.tenantId },
+    select: { id: true }
+  });
+
+  if (!cycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  const audits = await prisma.examResultPublicationAudit.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      examCycleId
+    },
+    orderBy: { actedAt: "desc" },
+    include: {
+      actedByUser: {
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          role: true
+        }
+      }
+    }
+  });
+
+  return res.apiSuccess("Exam result publication audit trail", audits);
+});
+
 const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
@@ -1790,6 +2116,19 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     examCycleId,
     combinedListId: listId,
     actorUserId: req.auth.userId
+  });
+
+  await prisma.examCycle.updateMany({
+    where: {
+      id: examCycleId,
+      tenantId: req.auth.tenantId,
+      resultStatus: { in: ["DRAFT", "LOCKED"] }
+    },
+    data: {
+      resultStatus: "READY_FOR_REVIEW",
+      resultPublishedAt: null,
+      resultPublishedByUserId: null
+    }
   });
 
   return res.apiSuccess("List approved; assessments assigned", { list: approved.list, worksheets: generation });
@@ -2316,22 +2655,59 @@ const exportExamResultsCsv = asyncHandler(async (req, res) => {
 const publishExamResults = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
+  const note = req.body?.note ? String(req.body.note).trim() : null;
+  const confirmationAccepted = req.body?.confirmationAccepted === undefined ? true : Boolean(req.body?.confirmationAccepted);
+
+  if (!confirmationAccepted) {
+    return res.apiError(400, "Publish confirmation is required", "PUBLISH_CONFIRMATION_REQUIRED");
+  }
 
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId: req.auth.tenantId },
-    select: { id: true, name: true, code: true, businessPartnerId: true }
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      businessPartnerId: true,
+      resultStatus: true
+    }
   });
 
   if (!examCycle) {
     return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
   }
 
-  const updated = await prisma.examCycle.update({
-    where: { id: examCycle.id },
-    data: {
-      resultStatus: "PUBLISHED",
-      resultPublishedAt: new Date()
-    }
+  if (examCycle.resultStatus === "PUBLISHED") {
+    return res.apiError(409, "Results are already published", "EXAM_RESULTS_ALREADY_PUBLISHED");
+  }
+
+  if (!(["READY_FOR_REVIEW", "LOCKED"].includes(examCycle.resultStatus))) {
+    return res.apiError(409, "Results must be ready for review before publishing", "EXAM_RESULTS_NOT_READY_FOR_PUBLICATION");
+  }
+
+  const publishedAt = new Date();
+  const updated = await prisma.$transaction(async (tx) => {
+    const cycle = await tx.examCycle.update({
+      where: { id: examCycle.id },
+      data: {
+        resultStatus: "PUBLISHED",
+        resultPublishedAt: publishedAt,
+        resultPublishedByUserId: req.auth.userId
+      }
+    });
+
+    await tx.examResultPublicationAudit.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        examCycleId: examCycle.id,
+        action: "PUBLISHED",
+        notes: note,
+        actedByUserId: req.auth.userId,
+        actedAt: publishedAt
+      }
+    });
+
+    return cycle;
   });
 
   await recordAudit({
@@ -2340,7 +2716,12 @@ const publishExamResults = asyncHandler(async (req, res) => {
     role: req.auth.role,
     action: "EXAM_RESULTS_PUBLISH",
     entityType: "EXAM_CYCLE",
-    entityId: examCycleId
+    entityId: examCycleId,
+    metadata: {
+      previousStatus: examCycle.resultStatus,
+      newStatus: "PUBLISHED",
+      note
+    }
   });
 
   void (async () => {
@@ -2354,7 +2735,7 @@ const publishExamResults = asyncHandler(async (req, res) => {
         ? await resolveBusinessPartnerHierarchyNodeIds({ tenantId: req.auth.tenantId, businessPartnerId: bp.id })
         : [];
 
-      const recipients = await prisma.authUser.findMany({
+      const operationalRecipients = await prisma.authUser.findMany({
         where: {
           tenantId: req.auth.tenantId,
           isActive: true,
@@ -2365,13 +2746,68 @@ const publishExamResults = asyncHandler(async (req, res) => {
         take: 500
       });
 
+      const enrolled = await prisma.examEnrollmentEntry.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          examCycleId: examCycle.id
+        },
+        select: { studentId: true }
+      });
+
+      const studentIds = Array.from(new Set(enrolled.map((row) => row.studentId).filter(Boolean)));
+
+      const [studentRecipients, parentLinks] = await Promise.all([
+        studentIds.length
+          ? prisma.authUser.findMany({
+              where: {
+                tenantId: req.auth.tenantId,
+                role: "STUDENT",
+                isActive: true,
+                studentId: { in: studentIds }
+              },
+              select: { id: true }
+            })
+          : [],
+        studentIds.length
+          ? prisma.parentStudentLink.findMany({
+              where: {
+                tenantId: req.auth.tenantId,
+                studentId: { in: studentIds },
+                isActive: true
+              },
+              select: { parentUserId: true }
+            })
+          : []
+      ]);
+
+      const parentRecipientIds = Array.from(new Set(parentLinks.map((row) => row.parentUserId).filter(Boolean)));
+      const parentRecipients = parentRecipientIds.length
+        ? await prisma.authUser.findMany({
+            where: {
+              tenantId: req.auth.tenantId,
+              role: "PARENT",
+              isActive: true,
+              id: { in: parentRecipientIds }
+            },
+            select: { id: true }
+          })
+        : [];
+
+      const recipients = Array.from(
+        new Set([
+          ...operationalRecipients.map((r) => r.id),
+          ...studentRecipients.map((r) => r.id),
+          ...parentRecipients.map((r) => r.id)
+        ])
+      ).map((id) => ({ id }));
+
       await createBulkNotification(
         recipients.map((r) => ({
           tenantId: req.auth.tenantId,
           recipientUserId: r.id,
           type: "EXAM_RESULT_PUBLISHED",
           title: "Exam Results Published",
-          message: `Results published for ${examCycle.name} (${examCycle.code})`,
+          message: `Exam results are now available for ${examCycle.name} (${examCycle.code}).`,
           entityType: "EXAM_CYCLE",
           entityId: examCycle.id
         }))
@@ -2387,22 +2823,54 @@ const publishExamResults = asyncHandler(async (req, res) => {
 const unpublishExamResults = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
+  const note = req.body?.note ? String(req.body.note).trim() : null;
+
+  if (!note || note.length < 8) {
+    return res.apiError(400, "note is required and must be at least 8 characters", "UNPUBLISH_NOTE_REQUIRED");
+  }
 
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId: req.auth.tenantId },
-    select: { id: true, name: true, code: true, businessPartnerId: true }
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      businessPartnerId: true,
+      resultStatus: true
+    }
   });
 
   if (!examCycle) {
     return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
   }
 
-  const updated = await prisma.examCycle.update({
-    where: { id: examCycle.id },
-    data: {
-      resultStatus: "LOCKED",
-      resultPublishedAt: null
-    }
+  if (examCycle.resultStatus !== "PUBLISHED") {
+    return res.apiError(409, "Results are not published", "EXAM_RESULTS_NOT_PUBLISHED");
+  }
+
+  const actedAt = new Date();
+  const updated = await prisma.$transaction(async (tx) => {
+    const cycle = await tx.examCycle.update({
+      where: { id: examCycle.id },
+      data: {
+        resultStatus: "READY_FOR_REVIEW",
+        resultPublishedAt: null,
+        resultPublishedByUserId: null
+      }
+    });
+
+    await tx.examResultPublicationAudit.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        examCycleId: examCycle.id,
+        action: "UNPUBLISHED",
+        notes: note,
+        actedByUserId: req.auth.userId,
+        actedAt
+      }
+    });
+
+    return cycle;
   });
 
   await recordAudit({
@@ -2411,7 +2879,12 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
     role: req.auth.role,
     action: "EXAM_RESULTS_UNPUBLISH",
     entityType: "EXAM_CYCLE",
-    entityId: examCycleId
+    entityId: examCycleId,
+    metadata: {
+      previousStatus: "PUBLISHED",
+      newStatus: "READY_FOR_REVIEW",
+      note
+    }
   });
 
   void (async () => {
@@ -2429,7 +2902,7 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
         where: {
           tenantId: req.auth.tenantId,
           isActive: true,
-          role: { in: ["BP", "FRANCHISE", "CENTER", "TEACHER"] },
+          role: { in: ["BP", "FRANCHISE", "CENTER", "TEACHER", "STUDENT", "PARENT"] },
           ...(nodeIds.length ? { hierarchyNodeId: { in: nodeIds } } : {})
         },
         select: { id: true },
@@ -2442,7 +2915,7 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
           recipientUserId: r.id,
           type: "EXAM_RESULT_UNPUBLISHED",
           title: "Exam Results Unpublished",
-          message: `Results unpublished for ${examCycle.name} (${examCycle.code})`,
+          message: `Exam results are temporarily unavailable for ${examCycle.name} (${examCycle.code}) due to review updates.`,
           entityType: "EXAM_CYCLE",
           entityId: examCycle.id
         }))
@@ -2457,6 +2930,7 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
 
 export {
   listExamCycles,
+  listExamResultsControlCenter,
   createExamCycle,
   getTeacherList,
   teacherEnrollStudents,
@@ -2483,6 +2957,8 @@ export {
   getExamCycleAuditCheck,
   deleteExamCycle,
   getExamResults,
+  getExamResultsReview,
+  getExamResultPublicationAuditTrail,
   exportExamResultsCsv,
   publishExamResults,
   unpublishExamResults

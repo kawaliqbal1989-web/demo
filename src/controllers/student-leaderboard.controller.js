@@ -28,9 +28,16 @@ const getStudentLeaderboard = asyncHandler(async (req, res) => {
       AND ws.tenantId = s.tenantId
       AND ws.finalSubmittedAt IS NOT NULL
       AND ws.score IS NOT NULL
+    INNER JOIN worksheet w
+      ON w.id = ws.worksheetId
+      AND w.tenantId = ws.tenantId
+    LEFT JOIN examcycle ec
+      ON ec.id = w.examCycleId
+      AND ec.tenantId = w.tenantId
     WHERE s.tenantId = ${tenantId}
       AND s.hierarchyNodeId = ${hierarchyNodeId}
       AND s.isActive = true
+      AND (w.examCycleId IS NULL OR ec.resultStatus = 'PUBLISHED')
     GROUP BY s.id, s.firstName, s.lastName, s.photoUrl
     HAVING COUNT(ws.id) >= 1
     ORDER BY avgScore DESC, totalSubmissions DESC

@@ -201,6 +201,78 @@ describe("STUDENT PORTAL (API)", () => {
     return examCycle;
   }
 
+  async function createExamAttemptFixture({ published = false } = {}) {
+    const now = Date.now();
+    const examCycle = await prisma.examCycle.create({
+      data: {
+        tenantId: tenant.id,
+        businessPartnerId: businessPartner.id,
+        name: `Attempt Exam ${randomId("exam")}`,
+        code: `AT-${randomId("code")}`,
+        enrollmentStartAt: new Date(now - 24 * 60 * 60 * 1000),
+        enrollmentEndAt: new Date(now + 24 * 60 * 60 * 1000),
+        practiceStartAt: new Date(now - 12 * 60 * 60 * 1000),
+        examStartsAt: new Date(now - 6 * 60 * 60 * 1000),
+        examEndsAt: new Date(now + 6 * 60 * 60 * 1000),
+        examDurationMinutes: 45,
+        attemptLimit: 1,
+        createdByUserId: superadminUser.id,
+        resultStatus: published ? "PUBLISHED" : "DRAFT",
+        resultPublishedAt: published ? new Date() : null
+      }
+    });
+
+    await prisma.examEnrollmentEntry.create({
+      data: {
+        tenantId: tenant.id,
+        examCycleId: examCycle.id,
+        studentId: student.id,
+        enrolledLevelId: level1.id,
+        isTemporary: false,
+        sourceTeacherUserId: null,
+        createdByUserId: centerUser.id
+      }
+    });
+
+    const examWorksheet = await prisma.worksheet.create({
+      data: {
+        tenantId: tenant.id,
+        title: `Exam Attempt Worksheet ${randomId("ews")}`,
+        description: "Exam worksheet for embargo tests",
+        levelId: level1.id,
+        createdByUserId: centerUser.id,
+        isPublished: true,
+        generationMode: "EXAM",
+        examCycleId: examCycle.id,
+        timeLimitSeconds: 2700
+      }
+    });
+
+    await prisma.worksheetQuestion.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        questionNumber: 1,
+        operands: { a: 4, b: 5 },
+        operation: "+",
+        correctAnswer: 9
+      }
+    });
+
+    await prisma.worksheetAssignment.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        studentId: student.id,
+        createdByUserId: centerUser.id,
+        isActive: true,
+        assignedAt: new Date()
+      }
+    });
+
+    return { examCycle, examWorksheet };
+  }
+
   async function createAssignedWorksheetFixture({ titlePrefix = "WS-SEC", dueDate = null } = {}) {
     const createdWorksheet = await prisma.worksheet.create({
       data: {
@@ -476,16 +548,169 @@ describe("STUDENT PORTAL (API)", () => {
     expect(res.body?.error_code).toBe("CROSS_STUDENT_SUBMISSION_DENIED");
   });
 
-  test("GET /api/student/exam-cycles/:id/result returns awaiting publication message before publish", async () => {
+  test("GET /api/student/exam-cycles/:id/result denies access before publish", async () => {
     const examCycle = await createExamResultFixture({ published: false });
 
     const res = await http.get(`/api/student/exam-cycles/${examCycle.id}/result`).set(authHeader(token));
 
+    expect(res.status).toBe(403);
+    expect(res.body?.error_code).toBe("RESULT_NOT_PUBLISHED");
+  });
+
+  test("POST /api/student/attempts/:id/submit returns embargoed response for unpublished exam", async () => {
+    const { examWorksheet } = await createExamAttemptFixture({ published: false });
+    const sessionId = `test-session-${randomId("cs")}`;
+
+    const start = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    const question = (start.body?.data?.worksheet?.questions || [])[0];
+    expect(attemptId).toBeTruthy();
+    expect(question?.questionId).toBeTruthy();
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({
+        answersByQuestionId: {
+          [question.questionId]: {
+            value: 9
+          }
+        }
+      });
+
+    expect(submit.status).toBe(200);
+    expect(submit.body?.data?.resultEmbargoed).toBe(true);
+    expect(submit.body?.data?.score).toBeUndefined();
+    expect(submit.body?.data?.resultBreakdown).toBeUndefined();
+  });
+
+  test("start/resume returns embargoed result for already submitted unpublished exam", async () => {
+    const { examWorksheet } = await createExamAttemptFixture({ published: false });
+
+    await prisma.worksheetSubmission.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        studentId: student.id,
+        score: 100,
+        submittedAt: new Date(),
+        status: "REVIEWED",
+        correctCount: 1,
+        totalQuestions: 1,
+        completionTimeSeconds: 20,
+        submittedAnswers: [{ questionNumber: 1, answer: 9 }],
+        finalSubmittedAt: new Date(),
+        passed: true,
+        evaluationHash: `hash_${randomId("eval")}`
+      }
+    });
+
+    const resume = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", `test-session-${randomId("cs")}`)
+      .send({});
+
+    expect([200, 201]).toContain(resume.status);
+    expect(resume.body?.data?.result?.resultEmbargoed).toBe(true);
+    expect(resume.body?.data?.result?.score).toBeUndefined();
+    expect(resume.body?.data?.result?.resultBreakdown).toBeUndefined();
+  });
+
+  test("GET /api/student/worksheets masks latestAttempt score for unpublished exam worksheets", async () => {
+    const { examWorksheet } = await createExamAttemptFixture({ published: false });
+
+    await prisma.worksheetSubmission.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        studentId: student.id,
+        score: 88,
+        submittedAt: new Date(),
+        status: "REVIEWED",
+        correctCount: 1,
+        totalQuestions: 1,
+        completionTimeSeconds: 55,
+        submittedAnswers: [{ questionNumber: 1, answer: 9 }],
+        finalSubmittedAt: new Date(),
+        passed: true,
+        evaluationHash: `hash_${randomId("eval")}`
+      }
+    });
+
+    const list = await http.get("/api/student/worksheets").set(authHeader(token));
+    expect(list.status).toBe(200);
+    const row = (list.body?.data?.items || []).find((item) => item.worksheetId === examWorksheet.id);
+    expect(row).toBeTruthy();
+    expect(row?.latestAttempt?.score).toBeNull();
+  });
+
+  test("GET /api/student/leaderboard excludes unpublished exam scores", async () => {
+    const baseline = await http.get("/api/student/leaderboard").set(authHeader(token));
+    expect(baseline.status).toBe(200);
+    const baselineScore = Number(baseline.body?.data?.myScore || 0);
+
+    const practiceWorksheet = await prisma.worksheet.create({
+      data: {
+        tenantId: tenant.id,
+        title: `WS-LB-${randomId("w")}`,
+        description: "Leaderboard practice worksheet",
+        levelId: level1.id,
+        createdByUserId: centerUser.id,
+        isPublished: true,
+        timeLimitSeconds: 300
+      }
+    });
+
+    await prisma.worksheetSubmission.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: practiceWorksheet.id,
+        studentId: student.id,
+        score: 10,
+        submittedAt: new Date(),
+        status: "REVIEWED",
+        correctCount: 1,
+        totalQuestions: 10,
+        completionTimeSeconds: 60,
+        submittedAnswers: [{ questionNumber: 1, answer: 1 }],
+        finalSubmittedAt: new Date(),
+        passed: false,
+        evaluationHash: `hash_${randomId("eval")}`
+      }
+    });
+
+    const { examWorksheet } = await createExamAttemptFixture({ published: false });
+    await prisma.worksheetSubmission.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        studentId: student.id,
+        score: 100,
+        submittedAt: new Date(),
+        status: "REVIEWED",
+        correctCount: 1,
+        totalQuestions: 1,
+        completionTimeSeconds: 20,
+        submittedAnswers: [{ questionNumber: 1, answer: 9 }],
+        finalSubmittedAt: new Date(),
+        passed: true,
+        evaluationHash: `hash_${randomId("eval")}`
+      }
+    });
+
+    const res = await http.get("/api/student/leaderboard").set(authHeader(token));
     expect(res.status).toBe(200);
-    expect(res.body?.data?.published).toBe(false);
-    expect(res.body?.data?.message).toBe("Result Awaiting Publication");
-    expect(res.body?.data?.result).toBeNull();
-    expect(res.body?.data?.submission).toBeNull();
+    const updatedScore = Number(res.body?.data?.myScore || 0);
+    expect(updatedScore).toBeGreaterThanOrEqual(baselineScore);
+    expect(updatedScore).toBeLessThan(100);
   });
 
   test("GET /api/student/exam-cycles/:id/result returns result payload after publish", async () => {

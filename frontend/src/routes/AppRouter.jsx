@@ -33,6 +33,7 @@ import { SuperadminExamCyclesPage } from "../modules/superadmin/SuperadminExamCy
 import { SuperadminCreateExamCyclePage } from "../modules/superadmin/SuperadminCreateExamCyclePage";
 import { SuperadminExamPendingListsPage } from "../modules/superadmin/SuperadminExamPendingListsPage";
 import { SuperadminExamResultsPage } from "../modules/superadmin/SuperadminExamResultsPage";
+import { SuperadminExamResultsControlCenterPage } from "../modules/superadmin/SuperadminExamResultsControlCenterPage";
 import { SuperadminMarginsPage } from "../modules/superadmin/SuperadminMarginsPage";
 import { SuperadminSettlementsPage } from "../modules/superadmin/SuperadminSettlementsPage";
 import { SuperadminLedgerPage } from "../modules/superadmin/SuperadminLedgerPage";
@@ -45,6 +46,7 @@ import { SuperadminCompetitionResultsPage } from "../modules/superadmin/Superadm
 import { SuperadminExportOperationsPage } from "../modules/superadmin/SuperadminExportOperationsPage";
 import { SuperadminQuestionBankPage } from "../modules/superadmin/SuperadminQuestionBankPage";
 import { SuperadminExamPlatformPage } from "../modules/superadmin/SuperadminExamPlatformPage";
+import { SuperadminExamLateEnrollmentReviewPage } from "../modules/superadmin/SuperadminExamLateEnrollmentReviewPage";
 
 import { CenterStudentsPage } from "../modules/center/CenterStudentsPage";
 import { CenterStudentViewPage } from "../modules/center/CenterStudentViewPage";
@@ -65,6 +67,7 @@ import { CenterAssignWorksheetsPage } from "../modules/center/CenterAssignWorksh
 import { WorksheetPage } from "../modules/center/WorksheetPage";
 import { CenterExamCyclesPage } from "../modules/center/CenterExamCyclesPage";
 import { CenterExamEnrollmentPage } from "../modules/center/CenterExamEnrollmentPage";
+import { CenterExamLateEnrollmentPage } from "../modules/center/CenterExamLateEnrollmentPage";
 import { CenterQuestionBankPage } from "../modules/center/CenterQuestionBankPage";
 
 import { CenterAnalyticsPage } from "../modules/center/CenterAnalyticsPage";
@@ -114,6 +117,7 @@ import { BusinessPartnerCompetitionRequestsPage } from "../modules/businessPartn
 import { BusinessPartnerExamCyclesPage } from "../modules/businessPartner/BusinessPartnerExamCyclesPage";
 import { BusinessPartnerExamPendingListsPage } from "../modules/businessPartner/BusinessPartnerExamPendingListsPage";
 import { BusinessPartnerExamResultsPage } from "../modules/businessPartner/BusinessPartnerExamResultsPage";
+import { BusinessPartnerExamLateEnrollmentPage } from "../modules/businessPartner/BusinessPartnerExamLateEnrollmentPage";
 import { BusinessPartnerSettlementsPage } from "../modules/businessPartner/BusinessPartnerSettlementsPage";
 import { BusinessPartnerLedgerPage } from "../modules/businessPartner/BusinessPartnerLedgerPage";
 import { BusinessPartnerPracticeAllocationsPage } from "../modules/businessPartner/BusinessPartnerPracticeAllocationsPage";
@@ -131,6 +135,7 @@ import { FranchiseSettlementsPage } from "../modules/franchise/FranchiseSettleme
 import { FranchiseExamCyclesPage } from "../modules/franchise/FranchiseExamCyclesPage";
 import { FranchiseExamPendingListsPage } from "../modules/franchise/FranchiseExamPendingListsPage";
 import { FranchiseExamResultsPage } from "../modules/franchise/FranchiseExamResultsPage";
+import { FranchiseExamLateEnrollmentPage } from "../modules/franchise/FranchiseExamLateEnrollmentPage";
 import { FranchiseCoursesPage } from "../modules/franchise/FranchiseCoursesPage";
 import { FranchiseWorkflowQueuePage } from "../modules/franchise/FranchiseWorkflowQueuePage";
 import { FranchiseWorkflowDetailPage } from "../modules/franchise/FranchiseWorkflowDetailPage";
@@ -191,9 +196,11 @@ function AppRouter() {
             <Route path="/superadmin/courses/:courseId/levels/:levelNumber/question-bank" element={<SuperadminCourseLevelQuestionBankPage />} />
             <Route path="/superadmin/courses/:courseId/levels/:levelNumber/worksheets" element={<SuperadminCourseLevelWorksheetsPage />} />
             <Route path="/superadmin/exam-cycles" element={<SuperadminExamCyclesPage />} />
+            <Route path="/superadmin/exam-results" element={<SuperadminExamResultsControlCenterPage />} />
             <Route path="/superadmin/exam-cycles/new" element={<SuperadminCreateExamCyclePage />} />
             <Route path="/superadmin/exam-cycles/:examCycleId/pending" element={<SuperadminExamPendingListsPage />} />
             <Route path="/superadmin/exam-cycles/:examCycleId/results" element={<SuperadminExamResultsPage />} />
+            <Route path="/superadmin/exam-cycles/:examCycleId/late-enrollment" element={<SuperadminExamLateEnrollmentReviewPage />} />
             <Route path="/superadmin/abuse-flags" element={<AbuseFlagsPage />} />
             <Route path="/superadmin/audit-logs" element={<SuperadminAuditPage />} />
             <Route path="/superadmin/revenue" element={<SuperadminRevenuePage />} />
@@ -232,6 +239,7 @@ function AppRouter() {
             <Route path="/center/worksheets/:id" element={<WorksheetPage />} />
             <Route path="/center/exam-cycles" element={<CenterExamCyclesPage />} />
             <Route path="/center/exam-cycles/:examCycleId" element={<CenterExamEnrollmentPage />} />
+            <Route path="/center/exam-cycles/:examCycleId/late-enrollment" element={<CenterExamLateEnrollmentPage />} />
             <Route path="/center/question-bank" element={<CenterQuestionBankPage />} />
             <Route path="/center/courses" element={<Navigate to="/center/worksheets" replace />} />
             <Route path="/center/fees" element={<CenterFeesPage />} />
@@ -291,6 +299,7 @@ function AppRouter() {
             <Route path="/bp/exam-cycles" element={<BusinessPartnerExamCyclesPage />} />
             <Route path="/bp/exam-cycles/:examCycleId/pending" element={<BusinessPartnerExamPendingListsPage />} />
             <Route path="/bp/exam-cycles/:examCycleId/results" element={<BusinessPartnerExamResultsPage />} />
+            <Route path="/bp/exam-cycles/:examCycleId/late-enrollment" element={<BusinessPartnerExamLateEnrollmentPage />} />
             <Route path="/bp/settlements" element={<BusinessPartnerSettlementsPage />} />
             <Route path="/bp/settlements/:id" element={<SettlementWorkflowDetailPage />} />
             <Route path="/bp/ledger" element={<BusinessPartnerLedgerPage />} />
@@ -308,6 +317,7 @@ function AppRouter() {
             <Route path="/franchise/exam-cycles" element={<FranchiseExamCyclesPage />} />
             <Route path="/franchise/exam-cycles/:examCycleId/pending" element={<FranchiseExamPendingListsPage />} />
             <Route path="/franchise/exam-cycles/:examCycleId/results" element={<FranchiseExamResultsPage />} />
+            <Route path="/franchise/exam-cycles/:examCycleId/late-enrollment" element={<FranchiseExamLateEnrollmentPage />} />
             <Route path="/franchise/centers" element={<FranchiseCentersPage />} />
             <Route path="/franchise/courses" element={<FranchiseCoursesPage />} />
             <Route path="/franchise/students" element={<FranchiseStudentsPage />} />

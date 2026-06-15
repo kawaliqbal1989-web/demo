@@ -996,6 +996,7 @@ function StudentWorksheetAttemptPage() {
   const submittedTotal = result?.total;
   const submittedAttemptedTime = result?.resultBreakdown?.completionTime;
   const submittedAtText = result?.submittedAt ? new Date(result.submittedAt).toLocaleString() : null;
+  const isResultEmbargoed = Boolean(result?.resultEmbargoed);
   const headerScoreText = Number.isFinite(Number(submittedCorrect)) && Number.isFinite(Number(submittedTotal))
     ? `${submittedCorrect}/${submittedTotal}`
     : (scoreSoFar.totalWithKey ? `${scoreSoFar.correct}/${scoreSoFar.totalWithKey}` : null);
@@ -1184,7 +1185,7 @@ function StudentWorksheetAttemptPage() {
                   : (
                     <>
                       Status: <strong className="attempt-header-strong">{statusText}</strong> · {timerSummaryLabel}: <strong className="attempt-header-strong">{timerText}</strong>
-                      {headerScoreText ? (
+                      {!isResultEmbargoed && headerScoreText ? (
                         <>
                           {" "}· Score: <strong className="attempt-header-strong">{headerScoreText}</strong>
                         </>
@@ -1246,29 +1247,42 @@ function StudentWorksheetAttemptPage() {
       {result ? (
         <div className="card" role="status" aria-live="polite">
           <h3 style={{ marginTop: 0 }}>{result?.status === "TIMED_OUT" ? "Time Up" : "Submitted"}</h3>
-          <div style={{ display: "grid", gap: 8 }}>
-            <p style={{ margin: 0 }}>
-              Score: <strong>{Number.isFinite(Number(result.score)) ? `${result.score}%` : "—"}</strong>
-              {Number.isFinite(Number(result.resultBreakdown?.correctCount)) && Number.isFinite(Number(result.total)) ? (
-                <>
-                  {" "}({result.resultBreakdown.correctCount}/{result.total})
-                </>
+          {isResultEmbargoed ? (
+            <div style={{ display: "grid", gap: 8 }}>
+              <p style={{ margin: 0 }}>
+                {result?.message || "Your exam has been submitted successfully. Results will be available after official publication."}
+              </p>
+              {submittedAtText ? (
+                <p style={{ margin: 0 }}>
+                  Submitted At: <strong>{submittedAtText}</strong>
+                </p>
               ) : null}
-            </p>
-            <p style={{ margin: 0 }}>
-              Taken Time: <strong>{Number.isFinite(Number(submittedAttemptedTime)) ? formatSeconds(submittedAttemptedTime) : timerText}</strong>
-            </p>
-            {timeLimitSeconds ? (
+            </div>
+          ) : (
+            <div style={{ display: "grid", gap: 8 }}>
               <p style={{ margin: 0 }}>
-                Total Time: <strong>{totalTimeText}</strong>
+                Score: <strong>{Number.isFinite(Number(result.score)) ? `${result.score}%` : "—"}</strong>
+                {Number.isFinite(Number(result.resultBreakdown?.correctCount)) && Number.isFinite(Number(result.total)) ? (
+                  <>
+                    {" "}({result.resultBreakdown.correctCount}/{result.total})
+                  </>
+                ) : null}
               </p>
-            ) : null}
-            {submittedAtText ? (
               <p style={{ margin: 0 }}>
-                Submitted At: <strong>{submittedAtText}</strong>
+                Taken Time: <strong>{Number.isFinite(Number(submittedAttemptedTime)) ? formatSeconds(submittedAttemptedTime) : timerText}</strong>
               </p>
-            ) : null}
-          </div>
+              {timeLimitSeconds ? (
+                <p style={{ margin: 0 }}>
+                  Total Time: <strong>{totalTimeText}</strong>
+                </p>
+              ) : null}
+              {submittedAtText ? (
+                <p style={{ margin: 0 }}>
+                  Submitted At: <strong>{submittedAtText}</strong>
+                </p>
+              ) : null}
+            </div>
+          )}
 
           {!isExamWorksheet ? (
             <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
@@ -1293,14 +1307,16 @@ function StudentWorksheetAttemptPage() {
             </div>
           ) : null}
 
-          <button
-            className="button secondary"
-            type="button"
-            style={{ width: "auto", marginTop: 10, fontSize: 12 }}
-            onClick={handleDownloadPdf}
-          >
-            📄 Download PDF
-          </button>
+          {!isResultEmbargoed ? (
+            <button
+              className="button secondary"
+              type="button"
+              style={{ width: "auto", marginTop: 10, fontSize: 12 }}
+              onClick={handleDownloadPdf}
+            >
+              📄 Download PDF
+            </button>
+          ) : null}
         </div>
       ) : null}
 

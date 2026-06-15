@@ -69,7 +69,8 @@ const FRIENDLY_BY_CODE = {
   LEGACY_ASSIGNMENT_ROUTE_DISABLED: "This assignment path has been retired. Use My Batches for worksheet assignment.",
   WORKFLOW_ROLE_FORBIDDEN: "Your role cannot perform this exam workflow action.",
   REJECT_REMARK_REQUIRED: "Please provide a remark before rejecting this enrollment list.",
-  RESULTS_NOT_PUBLISHED: "Results are not published yet for this exam cycle."
+  RESULTS_NOT_PUBLISHED: "Results are not published yet for this exam cycle.",
+  RESULT_NOT_PUBLISHED: "Results are not published yet for this exam cycle."
   ,DUPLICATE_PENDING: "A reassignment request is already pending for this worksheet."
   ,NO_SUBMISSION: "You can request reassignment only after submitting this worksheet."
   ,SWAP_WORKSHEET_REQUIRED: "Please choose a replacement worksheet for a swap request."

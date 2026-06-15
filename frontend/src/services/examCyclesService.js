@@ -163,13 +163,35 @@ async function getExamResults(examCycleId) {
   return response.data;
 }
 
-async function publishExamResults(examCycleId) {
-  const response = await apiClient.post(`/exam-cycles/${examCycleId}/results/publish`);
+async function getExamResultsControlCenter({ limit = 20, offset = 0, status = "ALL", q = "" } = {}) {
+  const response = await apiClient.get("/exam-cycles/results/control-center", {
+    params: {
+      limit,
+      offset,
+      status,
+      ...(q ? { q } : {})
+    }
+  });
   return response.data;
 }
 
-async function unpublishExamResults(examCycleId) {
-  const response = await apiClient.post(`/exam-cycles/${examCycleId}/results/unpublish`);
+async function getExamResultsReview(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/results/review`);
+  return response.data;
+}
+
+async function getExamResultPublicationAudit(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/results/publication-audit`);
+  return response.data;
+}
+
+async function publishExamResults(examCycleId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/results/publish`, payload);
+  return response.data;
+}
+
+async function unpublishExamResults(examCycleId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/results/unpublish`, payload);
   return response.data;
 }
 
@@ -193,6 +215,39 @@ async function centerRejectTeacherList(examCycleId, listId, { remark } = {}) {
   const response = await apiClient.post(`/exam-cycles/${examCycleId}/teacher-lists/${listId}/reject`, {
     remark: remark ?? null
   });
+  return response.data;
+}
+
+async function getLateEnrollmentEligibleStudents(examCycleId, { levelId } = {}) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/late-enrollment/eligible-students`, {
+    params: {
+      ...(levelId ? { levelId } : {})
+    }
+  });
+  return response.data;
+}
+
+async function createLateEnrollmentRequest(examCycleId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/late-enrollment/requests`, payload);
+  return response.data;
+}
+
+async function listLateEnrollmentRequests(examCycleId, { status = "ALL" } = {}) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/late-enrollment/requests`, {
+    params: {
+      ...(status ? { status } : {})
+    }
+  });
+  return response.data;
+}
+
+async function reviewLateEnrollmentRequest(examCycleId, requestId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/late-enrollment/requests/${requestId}/review`, payload);
+  return response.data;
+}
+
+async function getLateEnrollmentAudit(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/late-enrollment/audit`);
   return response.data;
 }
 
@@ -224,8 +279,16 @@ export {
   generateExamCycleQuestionSet,
   approveEnrollmentListAsSuperadmin,
   getExamResults,
+  getExamResultsControlCenter,
+  getExamResultsReview,
+  getExamResultPublicationAudit,
   publishExamResults,
   unpublishExamResults,
   exportEnrollmentListCsv,
-  exportExamResultsCsv
+  exportExamResultsCsv,
+  getLateEnrollmentEligibleStudents,
+  createLateEnrollmentRequest,
+  listLateEnrollmentRequests,
+  reviewLateEnrollmentRequest,
+  getLateEnrollmentAudit
 };

@@ -76,6 +76,62 @@ function buildAttemptResultPayload(submission) {
   };
 }
 
+function buildEmbargoedAttemptPayload({ status = "SUBMITTED", submittedAt }) {
+  return {
+    status,
+    submittedAt: submittedAt || null,
+    resultEmbargoed: true,
+    message: "Your exam has been submitted successfully. Results will be available after official publication."
+  };
+}
+
+async function getExamResultPublicationState({ tenantId, worksheet }) {
+  const isExamWorksheet = String(worksheet?.generationMode || "").trim().toUpperCase() === "EXAM" && Boolean(worksheet?.examCycleId);
+
+  if (!isExamWorksheet) {
+    return {
+      isExamWorksheet: false,
+      isPublished: true,
+      examCycleId: null,
+      resultStatus: null
+    };
+  }
+
+  if (worksheet?.examCycle?.id && worksheet?.examCycle?.resultStatus) {
+    return {
+      isExamWorksheet: true,
+      isPublished: worksheet.examCycle.resultStatus === "PUBLISHED",
+      examCycleId: worksheet.examCycle.id,
+      resultStatus: worksheet.examCycle.resultStatus
+    };
+  }
+
+  const examCycle = await prisma.examCycle.findFirst({
+    where: {
+      id: worksheet.examCycleId,
+      tenantId
+    },
+    select: {
+      id: true,
+      resultStatus: true
+    }
+  });
+
+  if (!examCycle) {
+    const error = new Error("Exam cycle not found for worksheet");
+    error.statusCode = 409;
+    error.errorCode = "EXAM_CYCLE_NOT_FOUND";
+    throw error;
+  }
+
+  return {
+    isExamWorksheet: true,
+    isPublished: examCycle.resultStatus === "PUBLISHED",
+    examCycleId: examCycle.id,
+    resultStatus: examCycle.resultStatus
+  };
+}
+
 function deriveStudentWorksheetKind(worksheet) {
   const mode = String(worksheet?.generationMode || "").trim().toUpperCase();
   if (mode === "EXAM") {
@@ -714,6 +770,12 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
         title: true,
         generationMode: true,
         examCycleId: true,
+        examCycle: {
+          select: {
+            id: true,
+            resultStatus: true
+          }
+        },
         timeLimitSeconds: true,
         questions: {
           orderBy: { questionNumber: "asc" },
@@ -802,6 +864,17 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     const draft = getAttemptDraftFromSubmission(attempt, worksheet.questions);
     const worksheetKind = deriveStudentWorksheetKind(worksheet);
     const attemptTimerMode = deriveAttemptTimerMode(worksheetKind);
+    const publicationState = await getExamResultPublicationState({
+      tenantId: req.auth.tenantId,
+      worksheet
+    });
+    const resultPayload = buildAttemptResultPayload(attempt);
+    const visibleResultPayload = publicationState.isExamWorksheet && !publicationState.isPublished && resultPayload
+      ? buildEmbargoedAttemptPayload({
+          status: resultPayload.status,
+          submittedAt: resultPayload.submittedAt
+        })
+      : resultPayload;
 
     return res.apiSuccess("Attempt fetched", {
       attemptId: attempt.id,
@@ -815,7 +888,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
       version: draft.version,
       savedAt: draft.savedAt,
       answersByQuestionId: draft.answersByQuestionId,
-      result: buildAttemptResultPayload(attempt),
+      result: visibleResultPayload,
       worksheet: {
         id: worksheet.id,
         title: worksheet.title,
@@ -830,7 +903,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
           prompt: q.questionBank?.prompt || null,
           operands: q.operands,
           operation: q.operation,
-          correctAnswer: worksheet.generationMode === "EXAM" ? null : q.correctAnswer,
+          correctAnswer: worksheet.generationMode === "EXAM" && !publicationState.isPublished ? null : q.correctAnswer,
           type: "number",
           required: true,
           options: null,
@@ -997,6 +1070,13 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
     select: {
       id: true,
       generationMode: true,
+      examCycleId: true,
+      examCycle: {
+        select: {
+          id: true,
+          resultStatus: true
+        }
+      },
       timeLimitSeconds: true,
       questions: {
         orderBy: { questionNumber: "asc" },
@@ -1008,6 +1088,11 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
+
+  const publicationState = await getExamResultPublicationState({
+    tenantId: req.auth.tenantId,
+    worksheet
+  });
 
   await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
@@ -1041,6 +1126,17 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
       }
     });
 
+    if (publicationState.isExamWorksheet && !publicationState.isPublished) {
+      return res.apiSuccess("Attempt submitted", {
+        receiptId: attempt.id,
+        serverNow: now,
+        ...buildEmbargoedAttemptPayload({
+          status: isTimedOut ? "TIMED_OUT" : "SUBMITTED",
+          submittedAt: now
+        })
+      });
+    }
+
     return res.apiSuccess("Attempt submitted", {
       status: isTimedOut ? "TIMED_OUT" : "SUBMITTED",
       submittedAt: now,
@@ -1058,6 +1154,19 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
     allowExpired: isTimedOut,
     remarksOverride: isTimedOut ? "Timed out" : undefined
   });
+
+  if (publicationState.isExamWorksheet && !publicationState.isPublished) {
+    return res.apiSuccess("Attempt submitted", {
+      status: isTimedOut ? "TIMED_OUT" : "SUBMITTED",
+      submittedAt: now,
+      receiptId: attempt.id,
+      serverNow: now,
+      ...buildEmbargoedAttemptPayload({
+        status: isTimedOut ? "TIMED_OUT" : "SUBMITTED",
+        submittedAt: now
+      })
+    });
+  }
 
   return res.apiSuccess("Attempt submitted", {
     status: isTimedOut ? "TIMED_OUT" : "SUBMITTED",
@@ -1115,9 +1224,16 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
           select: {
             id: true,
             title: true,
+            generationMode: true,
+            examCycleId: true,
             timeLimitSeconds: true,
             createdAt: true,
-            questions: { select: { id: true } }
+            questions: { select: { id: true } },
+            examCycle: {
+              select: {
+                resultStatus: true
+              }
+            }
           }
         }
       }
@@ -1190,7 +1306,12 @@ const listStudentWorksheets = asyncHandler(async (req, res) => {
       latestAttempt: submission
         ? {
             attemptId: submission.id,
-            score: submission.score === null ? null : Number(submission.score),
+            score:
+              worksheet.generationMode === "EXAM" && worksheet.examCycleId && worksheet.examCycle?.resultStatus !== "PUBLISHED"
+                ? null
+                : submission.score === null
+                  ? null
+                  : Number(submission.score),
             total: submission.totalQuestions ?? null,
             status: submission.finalSubmittedAt ? "SUBMITTED" : "IN_PROGRESS"
           }
@@ -1336,10 +1457,15 @@ const startStudentWorksheet = asyncHandler(async (req, res) => {
 
 const listStudentWorksheetAttempts = asyncHandler(async (req, res) => {
   const worksheetId = String(req.params.worksheetId);
-  await assertWorksheetAccessibleForStudent({
+  const access = await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
     student: req.student,
     worksheetId
+  });
+
+  const publicationState = await getExamResultPublicationState({
+    tenantId: req.auth.tenantId,
+    worksheet: access.worksheet
   });
 
   const submission = await prisma.worksheetSubmission.findUnique({
@@ -1351,7 +1477,20 @@ const listStudentWorksheetAttempts = asyncHandler(async (req, res) => {
     }
   });
 
-  return res.apiSuccess("Attempts fetched", mapSubmissionToAttempt(submission));
+  const mapped = mapSubmissionToAttempt(submission).map((attempt) => {
+    if (!publicationState.isExamWorksheet || publicationState.isPublished) {
+      return attempt;
+    }
+
+    return {
+      ...attempt,
+      score: null,
+      total: null,
+      embargoed: attempt.status === "SUBMITTED"
+    };
+  });
+
+  return res.apiSuccess("Attempts fetched", mapped);
 });
 
 const submitStudentWorksheet = asyncHandler(async (req, res) => {
@@ -1359,10 +1498,15 @@ const submitStudentWorksheet = asyncHandler(async (req, res) => {
   const attemptId = req.body?.attemptId ? String(req.body.attemptId) : null;
   const answers = req.body?.answers;
 
-  await assertWorksheetAccessibleForStudent({
+  const access = await assertWorksheetAccessibleForStudent({
     tenantId: req.auth.tenantId,
     student: req.student,
     worksheetId
+  });
+
+  const publicationState = await getExamResultPublicationState({
+    tenantId: req.auth.tenantId,
+    worksheet: access.worksheet
   });
 
   if (!attemptId) {
@@ -1393,6 +1537,16 @@ const submitStudentWorksheet = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     answers
   });
+
+  if (publicationState.isExamWorksheet && !publicationState.isPublished) {
+    return res.apiSuccess("Worksheet submitted", {
+      attemptId,
+      ...buildEmbargoedAttemptPayload({
+        status: "SUBMITTED",
+        submittedAt: new Date().toISOString()
+      })
+    });
+  }
 
   return res.apiSuccess("Worksheet submitted", {
     attemptId,
@@ -1450,7 +1604,21 @@ const getStudentPracticeReport = asyncHandler(async (req, res) => {
       where: {
         tenantId: req.auth.tenantId,
         studentId: req.student.id,
-        finalSubmittedAt: { not: null }
+        finalSubmittedAt: { not: null },
+        worksheet: {
+          is: {
+            OR: [
+              { examCycleId: null },
+              {
+                examCycle: {
+                  is: {
+                    resultStatus: "PUBLISHED"
+                  }
+                }
+              }
+            ]
+          }
+        }
       },
       orderBy: { finalSubmittedAt: "desc" },
       take: safeLimit,
@@ -2816,7 +2984,21 @@ const getStudentMyCourse = asyncHandler(async (req, res) => {
       where: {
         tenantId: req.auth.tenantId,
         studentId: student.id,
-        finalSubmittedAt: { not: null }
+        finalSubmittedAt: { not: null },
+        worksheet: {
+          is: {
+            OR: [
+              { examCycleId: null },
+              {
+                examCycle: {
+                  is: {
+                    resultStatus: "PUBLISHED"
+                  }
+                }
+              }
+            ]
+          }
+        }
       },
       orderBy: { finalSubmittedAt: "desc" },
       select: {
@@ -2996,19 +3178,7 @@ const getStudentExamResult = asyncHandler(async (req, res) => {
       resultStatus: examCycle.resultStatus
     });
 
-    return res.apiSuccess("Exam result awaiting publication", {
-      published: false,
-      message: "Result Awaiting Publication",
-      examCycle: {
-        id: examCycle.id,
-        name: examCycle.name,
-        code: examCycle.code,
-        resultStatus: examCycle.resultStatus,
-        resultPublishedAt: examCycle.resultPublishedAt || null
-      },
-      result: null,
-      submission: null
-    });
+    return res.apiError(403, "Results are not published yet for this exam cycle", "RESULT_NOT_PUBLISHED");
   }
 
   const submission = await prisma.worksheetSubmission.findFirst({

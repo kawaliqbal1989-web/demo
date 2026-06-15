@@ -109,6 +109,24 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
     return { listId };
   }
 
+  async function saveWorksheetAssessmentConfig(examCycleId) {
+    const response = await http
+      .post(`/api/exam-cycles/${examCycleId}/assessment-config`)
+      .set(authHeader(saToken))
+      .send({
+        configs: [
+          {
+            levelId: student.levelId,
+            assessmentType: "WORKSHEET",
+            worksheetId: baseExamWorksheet.id
+          }
+        ]
+      });
+
+    expect(response.status).toBe(200);
+    expect(Array.isArray(response.body?.data)).toBe(true);
+  }
+
   beforeAll(async () => {
     const [saLogin, bpLogin, frLogin, ceLogin, teLogin] = await Promise.all([
       loginAs({ email: "superadmin@abacusweb.local" }),
@@ -242,19 +260,13 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
   test("End-to-end list approval + worksheet assignment", async () => {
     const { examCycleId, practiceStartAtIso } = await createExamCycleForWorkflow();
     const { listId } = await moveExamCycleToSuperadmin(examCycleId);
+    await saveWorksheetAssessmentConfig(examCycleId);
 
     // Superadmin approves
     const approve = await http
       .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/approve`)
       .set(authHeader(saToken))
-      .send({
-        selections: [
-          {
-            levelId: student.levelId,
-            worksheetId: baseExamWorksheet.id
-          }
-        ]
-      });
+      .send({});
 
     expect(approve.status).toBe(200);
     expect(approve.body.data.list.status).toBe("APPROVED");
@@ -309,24 +321,17 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
     expect(resultsAfter.body.data.status).toBe("PUBLISHED");
   });
 
-  test("Superadmin approval rejects incomplete worksheet selections", async () => {
+  test("Superadmin approval requires complete assessment configuration", async () => {
     const { examCycleId } = await createExamCycleForWorkflow();
     const { listId } = await moveExamCycleToSuperadmin(examCycleId);
 
     const approve = await http
       .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/approve`)
       .set(authHeader(saToken))
-      .send({
-        selections: [
-          {
-            levelId: `missing-${randomId("level")}`,
-            worksheetId: baseExamWorksheet.id
-          }
-        ]
-      });
+      .send({});
 
     expect(approve.status).toBe(409);
-    expect(approve.body.error_code).toBe("EXAM_WORKSHEET_SELECTION_INCOMPLETE");
+    expect(approve.body.error_code).toBe("EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
 
     const list = await prisma.examEnrollmentList.findUniqueOrThrow({
       where: { id: listId },
@@ -344,5 +349,68 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
     });
 
     expect(assignedExamWorksheets).toBe(0);
+  });
+
+  test("Result control center exposes review summary and publication audit trail", async () => {
+    const { examCycleId } = await createExamCycleForWorkflow();
+    const { listId } = await moveExamCycleToSuperadmin(examCycleId);
+    await saveWorksheetAssessmentConfig(examCycleId);
+
+    const approve = await http
+      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/approve`)
+      .set(authHeader(saToken))
+      .send({});
+
+    expect(approve.status).toBe(200);
+
+    const review = await http
+      .get(`/api/exam-cycles/${examCycleId}/results/review`)
+      .set(authHeader(saToken));
+
+    expect(review.status).toBe(200);
+    expect(review.body.data.publication.status).toBe("READY_FOR_REVIEW");
+    expect(typeof review.body.data.summary.totalCandidates).toBe("number");
+
+    const publish = await http
+      .post(`/api/exam-cycles/${examCycleId}/results/publish`)
+      .set(authHeader(saToken))
+      .send({ confirmationAccepted: true, note: "Reviewed and approved for network publication" });
+
+    expect(publish.status).toBe(200);
+    expect(publish.body.data.resultStatus).toBe("PUBLISHED");
+
+    const unpublishMissingNote = await http
+      .post(`/api/exam-cycles/${examCycleId}/results/unpublish`)
+      .set(authHeader(saToken))
+      .send({});
+
+    expect(unpublishMissingNote.status).toBe(400);
+    expect(unpublishMissingNote.body.error_code).toBe("UNPUBLISH_NOTE_REQUIRED");
+
+    const unpublish = await http
+      .post(`/api/exam-cycles/${examCycleId}/results/unpublish`)
+      .set(authHeader(saToken))
+      .send({ note: "Detected discrepancy in verification checklist" });
+
+    expect(unpublish.status).toBe(200);
+    expect(unpublish.body.data.resultStatus).toBe("READY_FOR_REVIEW");
+
+    const publicationAudit = await http
+      .get(`/api/exam-cycles/${examCycleId}/results/publication-audit`)
+      .set(authHeader(saToken));
+
+    expect(publicationAudit.status).toBe(200);
+    expect(Array.isArray(publicationAudit.body.data)).toBe(true);
+    const actions = publicationAudit.body.data.map((entry) => entry.action);
+    expect(actions).toContain("PUBLISHED");
+    expect(actions).toContain("UNPUBLISHED");
+
+    const controlCenter = await http
+      .get("/api/exam-cycles/results/control-center?status=READY_FOR_REVIEW")
+      .set(authHeader(saToken));
+
+    expect(controlCenter.status).toBe(200);
+    expect(Array.isArray(controlCenter.body.data.items)).toBe(true);
+    expect(controlCenter.body.data.items.some((item) => item.id === examCycleId)).toBe(true);
   });
 });

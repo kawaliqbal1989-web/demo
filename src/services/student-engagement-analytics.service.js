@@ -516,7 +516,21 @@ async function computeWeakTopicsLive({ scope, threshold = DEFAULT_THRESHOLD, loo
     where: {
       tenantId: scope.tenantId,
       studentId: scope.studentId,
-      finalSubmittedAt: { not: null }
+      finalSubmittedAt: { not: null },
+      worksheet: {
+        is: {
+          OR: [
+            { examCycleId: null },
+            {
+              examCycle: {
+                is: {
+                  resultStatus: "PUBLISHED"
+                }
+              }
+            }
+          ]
+        }
+      }
     },
     orderBy: [{ finalSubmittedAt: "desc" }],
     take: normalized.lookback,
@@ -705,6 +719,20 @@ async function buildLiveEngagementBundle({ scope, asOf = new Date(), tx = prisma
         finalSubmittedAt: {
           not: null,
           gte: practiceWindowStart
+        },
+        worksheet: {
+          is: {
+            OR: [
+              { examCycleId: null },
+              {
+                examCycle: {
+                  is: {
+                    resultStatus: "PUBLISHED"
+                  }
+                }
+              }
+            ]
+          }
         }
       },
       orderBy: [{ finalSubmittedAt: "desc" }],
@@ -728,7 +756,21 @@ async function buildLiveEngagementBundle({ scope, asOf = new Date(), tx = prisma
       where: {
         tenantId: scope.tenantId,
         studentId: scope.studentId,
-        finalSubmittedAt: { not: null }
+        finalSubmittedAt: { not: null },
+        worksheet: {
+          is: {
+            OR: [
+              { examCycleId: null },
+              {
+                examCycle: {
+                  is: {
+                    resultStatus: "PUBLISHED"
+                  }
+                }
+              }
+            ]
+          }
+        }
       }
     }),
     tx.worksheetAssignment.findMany({

@@ -3,6 +3,7 @@ import { requireOperationalRoles, requireRole, requireSuperadmin } from "../midd
 import { auditAction } from "../middleware/audit-logger.js";
 import {
   listExamCycles,
+  listExamResultsControlCenter,
   createExamCycle,
   getTeacherList,
   teacherEnrollStudents,
@@ -29,10 +30,19 @@ import {
   getExamCycleAuditCheck,
   deleteExamCycle,
   getExamResults,
+  getExamResultsReview,
+  getExamResultPublicationAuditTrail,
   exportExamResultsCsv,
   publishExamResults,
   unpublishExamResults
 } from "../controllers/exam-cycles.controller.js";
+import {
+  listLateEnrollmentEligibleStudents,
+  createLateEnrollmentRequest,
+  listLateEnrollmentRequests,
+  reviewLateEnrollmentRequest,
+  getLateEnrollmentAudit
+} from "../controllers/exam-late-enrollment.controller.js";
 
 const examCyclesRouter = Router();
 
@@ -225,7 +235,64 @@ examCyclesRouter.post(
   superadminApproveEnrollmentList
 );
 
+// Late enrollment
+examCyclesRouter.get(
+  "/:id/late-enrollment/eligible-students",
+  requireRole("CENTER"),
+  auditAction("EXAM_LATE_ENROLLMENT_ELIGIBLE_LIST", "EXAM_CYCLE", (req) => req.params.id),
+  listLateEnrollmentEligibleStudents
+);
+
+examCyclesRouter.post(
+  "/:id/late-enrollment/requests",
+  requireRole("CENTER"),
+  auditAction("EXAM_LATE_ENROLLMENT_REQUEST_CREATE", "EXAM_CYCLE", (req) => req.params.id),
+  createLateEnrollmentRequest
+);
+
+examCyclesRouter.get(
+  "/:id/late-enrollment/requests",
+  requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER"),
+  auditAction("EXAM_LATE_ENROLLMENT_REQUEST_LIST", "EXAM_CYCLE", (req) => req.params.id),
+  listLateEnrollmentRequests
+);
+
+examCyclesRouter.post(
+  "/:id/late-enrollment/requests/:requestId/review",
+  requireSuperadmin(),
+  auditAction("EXAM_LATE_ENROLLMENT_REQUEST_REVIEW", "EXAM_LATE_ENROLLMENT_REQUEST", (req) => req.params.requestId),
+  reviewLateEnrollmentRequest
+);
+
+examCyclesRouter.get(
+  "/:id/late-enrollment/audit",
+  requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER"),
+  auditAction("EXAM_LATE_ENROLLMENT_AUDIT", "EXAM_CYCLE", (req) => req.params.id),
+  getLateEnrollmentAudit
+);
+
 // Results
+examCyclesRouter.get(
+  "/results/control-center",
+  requireSuperadmin(),
+  auditAction("EXAM_RESULTS_CONTROL_CENTER_VIEW", "EXAM_CYCLE"),
+  listExamResultsControlCenter
+);
+
+examCyclesRouter.get(
+  "/:id/results/review",
+  requireSuperadmin(),
+  auditAction("EXAM_RESULTS_REVIEW_VIEW", "EXAM_CYCLE", (req) => req.params.id),
+  getExamResultsReview
+);
+
+examCyclesRouter.get(
+  "/:id/results/publication-audit",
+  requireSuperadmin(),
+  auditAction("EXAM_RESULTS_PUBLICATION_AUDIT_VIEW", "EXAM_CYCLE", (req) => req.params.id),
+  getExamResultPublicationAuditTrail
+);
+
 examCyclesRouter.get(
   "/:id/results",
   requireRole("SUPERADMIN", "BP", "FRANCHISE", "CENTER", "TEACHER"),

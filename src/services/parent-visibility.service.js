@@ -265,7 +265,21 @@ async function getParentWorksheetProgressVisibility({ tenantId, authUserId, stud
       where: {
         tenantId,
         studentId: scope.selectedStudent.studentId,
-        finalSubmittedAt: { not: null }
+        finalSubmittedAt: { not: null },
+        worksheet: {
+          is: {
+            OR: [
+              { examCycleId: null },
+              {
+                examCycle: {
+                  is: {
+                    resultStatus: "PUBLISHED"
+                  }
+                }
+              }
+            ]
+          }
+        }
       },
       orderBy: [{ finalSubmittedAt: "desc" }],
       take: 12,

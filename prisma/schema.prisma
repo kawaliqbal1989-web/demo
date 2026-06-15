@@ -199,8 +199,31 @@ enum ExamEnrollmentListType {
 
 enum ExamResultStatus {
   DRAFT
+  READY_FOR_REVIEW
   LOCKED
   PUBLISHED
+}
+
+enum ExamResultPublicationAction {
+  PUBLISHED
+  UNPUBLISHED
+}
+
+enum ExamLateEnrollmentRequestStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  PARTIALLY_APPROVED
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum ExamLateEnrollmentStudentStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  EXPIRED
 }
 
 enum SubmissionStatus {
@@ -787,6 +810,9 @@ model Tenant {
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
   examLevelAssessmentConfigs             ExamLevelAssessmentConfig[]
   examGeneratedQuestionSets              ExamGeneratedQuestionSet[]
+  examResultPublicationAudits            ExamResultPublicationAudit[]
+  examLateEnrollmentRequests             ExamLateEnrollmentRequest[]
+  examLateEnrollmentStudents             ExamLateEnrollmentStudent[]
   aiPlaygroundLogs                       AiPlaygroundLog[]
   aiCustomTools                          AiCustomTool[]
   worksheetReassignmentRequests          WorksheetReassignmentRequest[]
@@ -908,6 +934,7 @@ model AuthUser {
   worksheetAssignmentsCreated WorksheetAssignment[] @relation("WorksheetAssignmentCreatedBy")
 
   examCyclesCreated            ExamCycle[]           @relation("ExamCycleCreatedBy")
+  examCyclesPublished          ExamCycle[]           @relation("ExamCycleResultPublishedBy")
   examEnrollmentListsCreated   ExamEnrollmentList[]  @relation("ExamEnrollmentListCreatedBy")
   examEnrollmentListsRejected  ExamEnrollmentList[]  @relation("ExamEnrollmentListRejectedBy")
   examEnrollmentEntriesCreated ExamEnrollmentEntry[] @relation("ExamEnrollmentEntryCreatedBy")
@@ -920,6 +947,10 @@ model AuthUser {
 
   examEnrollmentLevelWorksheetSelectionsCreated ExamEnrollmentLevelWorksheetSelection[] @relation("ExamEnrollmentLevelWorksheetSelectionCreatedBy")
   examLevelAssessmentConfigsCreated             ExamLevelAssessmentConfig[]             @relation("ExamLevelAssessmentConfigCreatedBy")
+  examResultPublicationAudits                   ExamResultPublicationAudit[]            @relation("ExamResultPublicationAuditActor")
+  examLateEnrollmentRequestsSubmitted           ExamLateEnrollmentRequest[]             @relation("ExamLateEnrollmentRequestSubmittedBy")
+  examLateEnrollmentRequestsReviewed            ExamLateEnrollmentRequest[]             @relation("ExamLateEnrollmentRequestReviewedBy")
+  examLateEnrollmentStudentsApproved            ExamLateEnrollmentStudent[]             @relation("ExamLateEnrollmentStudentApprovedBy")
 
   worksheetReassignmentRequestsCreated  WorksheetReassignmentRequest[] @relation("WorksheetReassignRequestedBy")
   worksheetReassignmentRequestsReviewed WorksheetReassignmentRequest[] @relation("WorksheetReassignReviewedBy")
@@ -1164,6 +1195,7 @@ model HierarchyNode {
   mockTests             MockTest[]
 
   examEnrollmentLists       ExamEnrollmentList[]       @relation("ExamEnrollmentListCenterNode")
+  examLateEnrollmentRequests ExamLateEnrollmentRequest[] @relation("ExamLateEnrollmentRequestCenterNode")
   centerPracticeAllocations CenterPracticeAllocation[] @relation("CenterPracticeAllocationNode")
   assessments               Assessment[]
   assessmentParticipants    AssessmentParticipant[]
@@ -1438,6 +1470,7 @@ model Level {
   batches                                Batch[]
   enrollments                            Enrollment[]
   examEnrollmentEntries                  ExamEnrollmentEntry[]                   @relation("ExamEnrollmentEntryLevel")
+  examLateEnrollmentStudents             ExamLateEnrollmentStudent[]
   examPracticePlans                      ExamPracticePlan[]
   examTextbookData                       ExamTextbookData[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
@@ -1548,6 +1581,7 @@ model Student {
 
   examEnrollmentEntries         ExamEnrollmentEntry[]
   examGeneratedQuestionSets     ExamGeneratedQuestionSet[]
+  examLateEnrollmentStudents    ExamLateEnrollmentStudent[]
   aiPlaygroundLogs              AiPlaygroundLog[]
   aiCustomTools                 AiCustomTool[]
   worksheetReassignmentRequests WorksheetReassignmentRequest[]
@@ -1974,6 +2008,7 @@ model ExamCycle {
   resultPublishAt     DateTime?
   resultStatus        ExamResultStatus @default(DRAFT)
   resultPublishedAt   DateTime?
+  resultPublishedByUserId String?
   isArchived          Boolean          @default(false)
   archivedAt          DateTime?
   archivedBy          String?
@@ -1985,20 +2020,45 @@ model ExamCycle {
   tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   businessPartner BusinessPartner @relation(fields: [businessPartnerId], references: [id], onDelete: Restrict)
   createdBy       AuthUser        @relation("ExamCycleCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  publishedByUser AuthUser?       @relation("ExamCycleResultPublishedBy", fields: [resultPublishedByUserId], references: [id], onDelete: SetNull)
 
   enrollmentLists   ExamEnrollmentList[]
   enrollmentEntries ExamEnrollmentEntry[]
+  lateEnrollmentRequests ExamLateEnrollmentRequest[]
   worksheets        Worksheet[]
   tempStudents      Student[]             @relation("TempExamStudents")
   practicePlans     ExamPracticePlan[]
   levelAssessmentConfigs ExamLevelAssessmentConfig[]
   generatedQuestionSets ExamGeneratedQuestionSet[]
+  resultPublicationAudits ExamResultPublicationAudit[]
 
   @@unique([tenantId, code])
   @@index([tenantId, createdAt])
   @@index([tenantId, isArchived, createdAt])
   @@index([businessPartnerId])
+  @@index([tenantId, resultStatus, examEndsAt])
+  @@index([resultPublishedByUserId])
     @@map("examcycle")
+}
+
+model ExamResultPublicationAudit {
+  id            String                      @id @default(cuid())
+  tenantId      String
+  examCycleId   String
+  action        ExamResultPublicationAction
+  notes         String?
+  actedByUserId String
+  actedAt       DateTime                    @default(now())
+  createdAt     DateTime                    @default(now())
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  examCycle   ExamCycle @relation(fields: [examCycleId], references: [id], onDelete: Cascade)
+  actedByUser AuthUser  @relation("ExamResultPublicationAuditActor", fields: [actedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, examCycleId, actedAt])
+  @@index([tenantId, action, actedAt])
+  @@index([actedByUserId, actedAt])
+  @@map("examresultpublicationaudit")
 }
 
 model ExamPracticePlan {
@@ -2194,6 +2254,61 @@ model ExamGeneratedQuestionSet {
   @@index([tenantId, studentId])
   @@index([tenantId, levelId])
   @@map("examgeneratedquestionset")
+}
+
+model ExamLateEnrollmentRequest {
+  id               String                          @id @default(cuid())
+  tenantId         String
+  examCycleId      String
+  centerId         String
+  submittedByUserId String
+  status           ExamLateEnrollmentRequestStatus @default(SUBMITTED)
+  submittedAt      DateTime                        @default(now())
+  reviewedAt       DateTime?
+  reviewedByUserId String?
+  remarks          String?
+  createdAt        DateTime                        @default(now())
+  updatedAt        DateTime                        @updatedAt
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  examCycle   ExamCycle     @relation(fields: [examCycleId], references: [id], onDelete: Cascade)
+  centerNode  HierarchyNode @relation("ExamLateEnrollmentRequestCenterNode", fields: [centerId], references: [id], onDelete: Restrict)
+  submittedBy AuthUser      @relation("ExamLateEnrollmentRequestSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy  AuthUser?     @relation("ExamLateEnrollmentRequestReviewedBy", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  students ExamLateEnrollmentStudent[]
+
+  @@index([tenantId, examCycleId, status], map: "ELER_tenant_cycle_status_idx")
+  @@index([tenantId, centerId, submittedAt], map: "ELER_tenant_center_submitted_idx")
+  @@index([tenantId, submittedByUserId, submittedAt], map: "ELER_tenant_submitter_submitted_idx")
+  @@index([reviewedByUserId], map: "ELER_reviewedBy_idx")
+  @@map("examlateenrollmentrequest")
+}
+
+model ExamLateEnrollmentStudent {
+  id               String                          @id @default(cuid())
+  requestId        String
+  tenantId         String
+  studentId        String
+  levelId          String
+  status           ExamLateEnrollmentStudentStatus @default(SUBMITTED)
+  reviewRemarks    String?
+  approvedAt       DateTime?
+  approvedByUserId String?
+  createdAt        DateTime                        @default(now())
+  updatedAt        DateTime                        @updatedAt
+
+  request    ExamLateEnrollmentRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  tenant     Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student    Student                   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  level      Level                     @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  approvedBy AuthUser?                 @relation("ExamLateEnrollmentStudentApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([requestId, studentId], map: "ELES_request_student_uq")
+  @@index([tenantId, studentId, status], map: "ELES_tenant_student_status_idx")
+  @@index([tenantId, levelId, status], map: "ELES_tenant_level_status_idx")
+  @@index([approvedByUserId], map: "ELES_approvedBy_idx")
+  @@map("examlateenrollmentstudent")
 }
 
 model WorksheetAssignment {

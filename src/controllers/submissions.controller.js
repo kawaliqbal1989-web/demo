@@ -10,6 +10,23 @@ const listSubmissions = asyncHandler(async (req, res) => {
     tenantId
   };
 
+  if (role !== "SUPERADMIN") {
+    where.worksheet = {
+      is: {
+        OR: [
+          { examCycleId: null },
+          {
+            examCycle: {
+              is: {
+                resultStatus: "PUBLISHED"
+              }
+            }
+          }
+        ]
+      }
+    };
+  }
+
   if (role === "CENTER" || role === "TEACHER") {
     where.student = { hierarchyNodeId };
   } else if (role === "FRANCHISE" || role === "BP") {

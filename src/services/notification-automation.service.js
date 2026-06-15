@@ -219,7 +219,21 @@ async function runRiskAlertRule(tenantId) {
           tenantId,
           studentId: enr.studentId,
           submittedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-          score: { not: null }
+          score: { not: null },
+          worksheet: {
+            is: {
+              OR: [
+                { examCycleId: null },
+                {
+                  examCycle: {
+                    is: {
+                      resultStatus: "PUBLISHED"
+                    }
+                  }
+                }
+              ]
+            }
+          }
         },
         select: { score: true },
         orderBy: { submittedAt: "desc" },

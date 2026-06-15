@@ -5,6 +5,7 @@ function ConfirmDialog({
   title = "Confirm",
   message = "Are you sure?",
   confirmLabel = "Confirm",
+  confirmDisabled = false,
   cancelLabel = "Cancel",
   danger = false,
   onConfirm,
@@ -45,6 +46,7 @@ function ConfirmDialog({
             className="button"
             style={{ width: "auto", ...(danger ? { background: "var(--color-text-danger)", borderColor: "var(--color-text-danger)" } : {}) }}
             onClick={onConfirm}
+            disabled={confirmDisabled}
           >
             {confirmLabel}
           </button>

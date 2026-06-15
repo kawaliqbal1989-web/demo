@@ -190,7 +190,17 @@ async function getWorksheetAnalytics({ tenantId, centerId, batchId, teacherUserI
     FROM student s
     LEFT JOIN level l ON l.id = s.levelId
     LEFT JOIN worksheetassignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
+    LEFT JOIN worksheet wwa ON wwa.id = wa.worksheetId AND wwa.tenantId = wa.tenantId
     LEFT JOIN worksheetsubmission ws ON ws.studentId = s.id AND ws.worksheetId = wa.worksheetId AND ws.tenantId = ${tenantId}
+      AND (
+        wwa.examCycleId IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM examcycle ecPub
+          WHERE ecPub.id = wwa.examCycleId
+            AND ecPub.resultStatus = 'PUBLISHED'
+        )
+      )
     WHERE ${where}
     AND wa.worksheetId IS NOT NULL
     GROUP BY s.id, s.admissionNo, s.firstName, s.lastName, l.name
@@ -207,7 +217,17 @@ async function getWorksheetAnalytics({ tenantId, centerId, batchId, teacherUserI
       COALESCE(AVG(ws.completionTimeSeconds), 0) AS avgTime
     FROM student s
     LEFT JOIN worksheetassignment wa ON wa.studentId = s.id AND wa.tenantId = ${tenantId} AND wa.isActive = 1 ${dateFilter}
+    LEFT JOIN worksheet wwa ON wwa.id = wa.worksheetId AND wwa.tenantId = wa.tenantId
     LEFT JOIN worksheetsubmission ws ON ws.studentId = s.id AND ws.worksheetId = wa.worksheetId AND ws.tenantId = ${tenantId}
+      AND (
+        wwa.examCycleId IS NULL
+        OR EXISTS (
+          SELECT 1
+          FROM examcycle ecPub
+          WHERE ecPub.id = wwa.examCycleId
+            AND ecPub.resultStatus = 'PUBLISHED'
+        )
+      )
     WHERE ${where}
     AND wa.worksheetId IS NOT NULL
   `);
@@ -374,7 +394,14 @@ async function getExamAnalytics({ tenantId, centerId, examCycleId, levelId, from
         COUNT(ws2.id) AS totalAttempts
       FROM worksheetsubmission ws2
       JOIN worksheet w ON w.id = ws2.worksheetId AND w.tenantId = ws2.tenantId
-      WHERE w.examCycleId IS NOT NULL AND ws2.tenantId = ${tenantId}
+      WHERE w.examCycleId IS NOT NULL
+        AND ws2.tenantId = ${tenantId}
+        AND EXISTS (
+          SELECT 1
+          FROM examcycle ecPub
+          WHERE ecPub.id = w.examCycleId
+            AND ecPub.resultStatus = 'PUBLISHED'
+        )
       GROUP BY ws2.studentId, w.examCycleId
     ) sub ON sub.studentId = ee.studentId AND sub.examCycleId = ee.examCycleId
     WHERE ${where}
@@ -395,7 +422,14 @@ async function getExamAnalytics({ tenantId, centerId, examCycleId, levelId, from
       SELECT ws2.studentId, w.examCycleId, AVG(ws2.score) AS avgScore
       FROM worksheetsubmission ws2
       JOIN worksheet w ON w.id = ws2.worksheetId AND w.tenantId = ws2.tenantId
-      WHERE w.examCycleId IS NOT NULL AND ws2.tenantId = ${tenantId}
+      WHERE w.examCycleId IS NOT NULL
+        AND ws2.tenantId = ${tenantId}
+        AND EXISTS (
+          SELECT 1
+          FROM examcycle ecPub
+          WHERE ecPub.id = w.examCycleId
+            AND ecPub.resultStatus = 'PUBLISHED'
+        )
       GROUP BY ws2.studentId, w.examCycleId
     ) sub ON sub.studentId = ee.studentId AND sub.examCycleId = ee.examCycleId
     WHERE ${where}
@@ -547,8 +581,34 @@ async function getStudentProgressAnalytics({ tenantId, centerId, batchId, teache
         (SELECT MAX(slph.createdAt) FROM studentlevelprogressionhistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}),
         s.createdAt
       )) AS daysAtCurrentLevel,
-      (SELECT COUNT(*) FROM worksheetsubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS worksheetsDone,
-      (SELECT COALESCE(AVG(ws.score), 0) FROM worksheetsubmission ws WHERE ws.studentId = s.id AND ws.tenantId = ${tenantId}) AS avgScore,
+      (SELECT COUNT(*)
+       FROM worksheetsubmission ws
+       JOIN worksheet w ON w.id = ws.worksheetId AND w.tenantId = ws.tenantId
+       WHERE ws.studentId = s.id
+         AND ws.tenantId = ${tenantId}
+         AND (
+           w.examCycleId IS NULL
+           OR EXISTS (
+             SELECT 1
+             FROM examcycle ecPub
+             WHERE ecPub.id = w.examCycleId
+               AND ecPub.resultStatus = 'PUBLISHED'
+           )
+         )) AS worksheetsDone,
+      (SELECT COALESCE(AVG(ws.score), 0)
+       FROM worksheetsubmission ws
+       JOIN worksheet w ON w.id = ws.worksheetId AND w.tenantId = ws.tenantId
+       WHERE ws.studentId = s.id
+         AND ws.tenantId = ${tenantId}
+         AND (
+           w.examCycleId IS NULL
+           OR EXISTS (
+             SELECT 1
+             FROM examcycle ecPub
+             WHERE ecPub.id = w.examCycleId
+               AND ecPub.resultStatus = 'PUBLISHED'
+           )
+         )) AS avgScore,
       (SELECT COUNT(*) FROM studentlevelprogressionhistory slph WHERE slph.studentId = s.id AND slph.tenantId = ${tenantId}) AS totalPromotions
     FROM student s
     LEFT JOIN level l ON l.id = s.levelId

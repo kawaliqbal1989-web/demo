@@ -13,6 +13,12 @@ function createHttpError(statusCode, message, errorCode) {
 const REQUEST_PENDING_STATUSES = ["SUBMITTED", "UNDER_REVIEW", "PARTIALLY_APPROVED"];
 const REQUEST_FINAL_STATUSES = ["APPROVED", "REJECTED", "EXPIRED"];
 const STUDENT_PENDING_STATUSES = ["SUBMITTED", "UNDER_REVIEW"];
+const LATE_ENROLLMENT_ALLOWED_LIST_STATUSES = [
+  "SUBMITTED_TO_FRANCHISE",
+  "SUBMITTED_TO_BUSINESS_PARTNER",
+  "SUBMITTED_TO_SUPERADMIN",
+  "APPROVED"
+];
 
 async function getExamCycleOrThrow({ tenantId, examCycleId }) {
   const examCycle = await prisma.examCycle.findFirst({
@@ -92,20 +98,68 @@ async function expirePendingRequestsForCycle({ tenantId, examCycleId }) {
   return ids.length;
 }
 
-async function assertLateEnrollmentAvailabilityForCenter({ tenantId, examCycleId, centerId }) {
-  const approvedListCount = await prisma.examEnrollmentList.count({
+async function assertLateEnrollmentAvailabilityForCenter({ tenantId, examCycleId, centerId, levelId }) {
+  const forwardedListCount = await prisma.examEnrollmentList.count({
     where: {
       tenantId,
       examCycleId,
       type: "CENTER_COMBINED",
       hierarchyNodeId: centerId,
-      status: "APPROVED"
+      status: { in: LATE_ENROLLMENT_ALLOWED_LIST_STATUSES }
     }
   });
 
-  if (approvedListCount <= 0) {
-    throw createHttpError(409, "Late enrollment is available only after superadmin approved center list", "LATE_ENROLLMENT_NOT_AVAILABLE");
+  if (forwardedListCount <= 0) {
+    throw createHttpError(409, "Late enrollment is available only after center list is forwarded upward", "LATE_ENROLLMENT_NOT_AVAILABLE");
   }
+
+  const config = await prisma.examLevelAssessmentConfig.findFirst({
+    where: { tenantId, examCycleId, levelId },
+    select: { assessmentType: true }
+  });
+
+  if (!config) {
+    throw createHttpError(409, "No approved exam package exists for the selected level.", "LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
+  }
+
+  if (config.assessmentType === "WORKSHEET") {
+    const worksheetPackageCount = await prisma.worksheetAssignment.count({
+      where: {
+        tenantId,
+        isActive: true,
+        worksheet: {
+          is: {
+            tenantId,
+            examCycleId,
+            generationMode: "EXAM",
+            levelId
+          }
+        }
+      }
+    });
+
+    if (worksheetPackageCount <= 0) {
+      throw createHttpError(409, "No approved exam package exists for the selected level.", "LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
+    }
+    return;
+  }
+
+  if (config.assessmentType === "QUESTION_BANK") {
+    const questionSetCount = await prisma.examGeneratedQuestionSet.count({
+      where: {
+        tenantId,
+        examCycleId,
+        levelId
+      }
+    });
+
+    if (questionSetCount <= 0) {
+      throw createHttpError(409, "No approved exam package exists for the selected level.", "LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
+    }
+    return;
+  }
+
+  throw createHttpError(409, "No approved exam package exists for the selected level.", "LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
 }
 
 async function getEnrollmentCounts({ tenantId, examCycleId }) {
@@ -201,7 +255,8 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
   await assertLateEnrollmentAvailabilityForCenter({
     tenantId: req.auth.tenantId,
     examCycleId,
-    centerId: req.auth.hierarchyNodeId
+    centerId: req.auth.hierarchyNodeId,
+    levelId
   });
 
   const [enrolledEntries, pendingLateRows, centerStudents, counts] = await Promise.all([
@@ -279,7 +334,12 @@ const createLateEnrollmentRequest = asyncHandler(async (req, res) => {
   const examCycle = await getExamCycleOrThrow({ tenantId: req.auth.tenantId, examCycleId });
   await expirePendingRequestsForCycle({ tenantId: req.auth.tenantId, examCycleId });
   assertLateEnrollmentWriteAllowed(examCycle);
-  await assertLateEnrollmentAvailabilityForCenter({ tenantId: req.auth.tenantId, examCycleId, centerId });
+  await assertLateEnrollmentAvailabilityForCenter({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    centerId,
+    levelId
+  });
 
   const [students, alreadyEnrolled, pendingLateRows] = await Promise.all([
     prisma.student.findMany({

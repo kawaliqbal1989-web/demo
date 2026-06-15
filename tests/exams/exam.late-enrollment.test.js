@@ -119,6 +119,104 @@ describe("EXAM LATE ENROLLMENT", () => {
     return listId;
   }
 
+  async function moveExamToForwardedWithConfig(examCycleId, { createReusableWorksheetPackage = false } = {}) {
+    const enroll = await http
+      .post(`/api/exam-cycles/${examCycleId}/teacher-list/enroll`)
+      .set(authHeader(teacherToken))
+      .send({ studentIds: [baseStudent.id] });
+    expect([200, 201]).toContain(enroll.status);
+
+    const submitTeacher = await http
+      .post(`/api/exam-cycles/${examCycleId}/teacher-list/submit`)
+      .set(authHeader(teacherToken))
+      .send({});
+    expect(submitTeacher.status).toBe(200);
+
+    const prepareCenter = await http
+      .post(`/api/exam-cycles/${examCycleId}/center-list/prepare`)
+      .set(authHeader(centerToken))
+      .send({});
+    expect(prepareCenter.status).toBe(200);
+
+    const submitCenter = await http
+      .post(`/api/exam-cycles/${examCycleId}/center-list/submit`)
+      .set(authHeader(centerToken))
+      .send({});
+    expect(submitCenter.status).toBe(200);
+
+    const pendingFr = await http
+      .get(`/api/exam-cycles/${examCycleId}/enrollment-lists/pending`)
+      .set(authHeader(franchiseToken));
+    expect(pendingFr.status).toBe(200);
+    const listId = pendingFr.body.data[0].id;
+
+    const frForward = await http
+      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/forward`)
+      .set(authHeader(franchiseToken))
+      .send({});
+    expect(frForward.status).toBe(200);
+
+    const bpForward = await http
+      .post(`/api/exam-cycles/${examCycleId}/enrollment-lists/${listId}/forward`)
+      .set(authHeader(bpToken))
+      .send({});
+    expect(bpForward.status).toBe(200);
+
+    const saveConfig = await http
+      .post(`/api/exam-cycles/${examCycleId}/assessment-config`)
+      .set(authHeader(saToken))
+      .send({
+        configs: [
+          {
+            levelId: baseStudent.levelId,
+            assessmentType: "WORKSHEET",
+            worksheetId: baseWorksheet.id
+          }
+        ]
+      });
+    expect(saveConfig.status).toBe(200);
+
+    if (createReusableWorksheetPackage) {
+      const examWorksheet = await prisma.worksheet.create({
+        data: {
+          tenantId: tenant.id,
+          title: `Reusable Exam Worksheet ${randomId("WS")}`,
+          description: "Reusable exam worksheet package",
+          difficulty: "MEDIUM",
+          levelId: baseStudent.levelId,
+          createdByUserId: teacher.id,
+          isPublished: true,
+          generationMode: "EXAM",
+          examCycleId
+        },
+        select: { id: true }
+      });
+
+      await prisma.worksheetAssignment.upsert({
+        where: {
+          worksheetId_studentId: {
+            worksheetId: examWorksheet.id,
+            studentId: baseStudent.id
+          }
+        },
+        create: {
+          tenantId: tenant.id,
+          worksheetId: examWorksheet.id,
+          studentId: baseStudent.id,
+          createdByUserId: teacher.id,
+          assignedAt: new Date(),
+          isActive: true
+        },
+        update: {
+          isActive: true,
+          unassignedAt: null
+        }
+      });
+    }
+
+    return listId;
+  }
+
   beforeAll(async () => {
     const [saLogin, bpLogin, frLogin, ceLogin, teLogin] = await Promise.all([
       loginAs({ email: "superadmin@abacusweb.local" }),
@@ -374,5 +472,34 @@ describe("EXAM LATE ENROLLMENT", () => {
 
     expect(lockApproveRes.status).toBe(409);
     expect(lockApproveRes.body.error_code).toBe("EXAM_RESULT_PUBLISHED_LOCK");
+  });
+
+  test("allows late enrollment after list is forwarded upward when reusable package exists", async () => {
+    const examCycleId = await createExamCycle();
+    await moveExamToForwardedWithConfig(examCycleId, { createReusableWorksheetPackage: true });
+
+    const lateStudent = await createStudentForCenter({ levelId: baseStudent.levelId });
+
+    const response = await http
+      .post(`/api/exam-cycles/${examCycleId}/late-enrollment/requests`)
+      .set(authHeader(centerToken))
+      .send({ levelId: baseStudent.levelId, studentIds: [lateStudent.id] });
+
+    expect(response.status).toBe(201);
+  });
+
+  test("blocks late enrollment when no approved package exists for selected level", async () => {
+    const examCycleId = await createExamCycle();
+    await moveExamToForwardedWithConfig(examCycleId, { createReusableWorksheetPackage: false });
+
+    const lateStudent = await createStudentForCenter({ levelId: baseStudent.levelId });
+
+    const response = await http
+      .post(`/api/exam-cycles/${examCycleId}/late-enrollment/requests`)
+      .set(authHeader(centerToken))
+      .send({ levelId: baseStudent.levelId, studentIds: [lateStudent.id] });
+
+    expect(response.status).toBe(409);
+    expect(response.body.error_code).toBe("LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
   });
 });

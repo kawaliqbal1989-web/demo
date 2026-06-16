@@ -259,7 +259,7 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
     levelId
   });
 
-  const [enrolledEntries, pendingLateRows, centerStudents, counts] = await Promise.all([
+  const [enrolledEntries, pendingLateRows, centerEnrollments, counts] = await Promise.all([
     prisma.examEnrollmentEntry.findMany({
       where: { tenantId: req.auth.tenantId, examCycleId },
       select: { studentId: true }
@@ -279,22 +279,46 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
       },
       select: { studentId: true }
     }),
-    prisma.student.findMany({
+    prisma.enrollment.findMany({
       where: {
         tenantId: req.auth.tenantId,
         hierarchyNodeId: req.auth.hierarchyNodeId,
-        isActive: true,
-        levelId
+        status: "ACTIVE",
+        levelId,
+        student: {
+          is: {
+            isActive: true,
+            OR: [
+              { courseId: { not: null } },
+              {
+                assignedCourses: {
+                  some: { tenantId: req.auth.tenantId }
+                }
+              }
+            ]
+          }
+        }
       },
       select: {
-        id: true,
-        admissionNo: true,
-        firstName: true,
-        lastName: true,
         levelId: true,
-        level: { select: { id: true, name: true, rank: true } }
+        level: { select: { id: true, name: true, rank: true } },
+        student: {
+          select: {
+            id: true,
+            admissionNo: true,
+            firstName: true,
+            lastName: true,
+            course: { select: { id: true, code: true, name: true } },
+            assignedCourses: {
+              where: { tenantId: req.auth.tenantId },
+              select: { course: { select: { id: true, code: true, name: true } } },
+              orderBy: { createdAt: "desc" },
+              take: 1
+            }
+          }
+        }
       },
-      orderBy: [{ firstName: "asc" }, { lastName: "asc" }]
+      orderBy: [{ student: { firstName: "asc" } }, { student: { lastName: "asc" } }]
     }),
     getEnrollmentCounts({ tenantId: req.auth.tenantId, examCycleId })
   ]);
@@ -304,7 +328,20 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
     ...pendingLateRows.map((row) => row.studentId)
   ]);
 
-  const eligibleStudents = centerStudents.filter((student) => !excludedStudentIds.has(student.id));
+  const eligibleStudents = centerEnrollments
+    .filter((enrollment) => enrollment?.student?.id && !excludedStudentIds.has(enrollment.student.id))
+    .map((enrollment) => {
+      const fallbackCourse = enrollment.student.assignedCourses?.[0]?.course || null;
+      return {
+        id: enrollment.student.id,
+        admissionNo: enrollment.student.admissionNo,
+        firstName: enrollment.student.firstName,
+        lastName: enrollment.student.lastName,
+        levelId: enrollment.levelId,
+        level: enrollment.level || null,
+        course: enrollment.student.course || fallbackCourse
+      };
+    });
 
   return res.apiSuccess("Eligible late enrollment students", {
     examCycleId,
@@ -341,15 +378,34 @@ const createLateEnrollmentRequest = asyncHandler(async (req, res) => {
     levelId
   });
 
-  const [students, alreadyEnrolled, pendingLateRows] = await Promise.all([
-    prisma.student.findMany({
+  const [assignedEnrollments, alreadyEnrolled, pendingLateRows] = await Promise.all([
+    prisma.enrollment.findMany({
       where: {
         tenantId: req.auth.tenantId,
-        id: { in: studentIds },
         hierarchyNodeId: centerId,
-        isActive: true
+        status: "ACTIVE",
+        studentId: { in: studentIds },
+        levelId,
+        student: {
+          is: {
+            isActive: true
+          }
+        }
       },
-      select: { id: true, levelId: true }
+      select: {
+        studentId: true,
+        levelId: true,
+        student: {
+          select: {
+            courseId: true,
+            assignedCourses: {
+              where: { tenantId: req.auth.tenantId },
+              select: { id: true },
+              take: 1
+            }
+          }
+        }
+      }
     }),
     prisma.examEnrollmentEntry.findMany({
       where: {
@@ -376,12 +432,18 @@ const createLateEnrollmentRequest = asyncHandler(async (req, res) => {
     })
   ]);
 
-  if (students.length !== studentIds.length) {
-    return res.apiError(403, "One or more students are outside your center scope", "HIERARCHY_SCOPE_DENIED");
+  if (assignedEnrollments.length !== studentIds.length) {
+    return res.apiError(409, "One or more students are not actively assigned to the selected level", "LATE_ENROLLMENT_LEVEL_MISMATCH");
   }
 
-  if (students.some((student) => student.levelId !== levelId)) {
-    return res.apiError(409, "One or more students are not in the selected level", "LATE_ENROLLMENT_LEVEL_MISMATCH");
+  const hasMissingCourseAssignment = assignedEnrollments.some((enrollment) => {
+    const hasPrimaryCourse = Boolean(enrollment?.student?.courseId);
+    const hasAssignedCourse = Boolean(enrollment?.student?.assignedCourses?.length);
+    return !hasPrimaryCourse && !hasAssignedCourse;
+  });
+
+  if (hasMissingCourseAssignment) {
+    return res.apiError(409, "One or more students do not have an assigned course", "LATE_ENROLLMENT_COURSE_NOT_ASSIGNED");
   }
 
   if (alreadyEnrolled.length) {

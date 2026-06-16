@@ -188,6 +188,11 @@ function CenterExamLateEnrollmentPage() {
               key: "level",
               header: "Level",
               render: (row) => row?.level?.name || ""
+            },
+            {
+              key: "course",
+              header: "Course",
+              render: (row) => row?.course?.code || row?.course?.name || "-"
             }
           ]}
         />

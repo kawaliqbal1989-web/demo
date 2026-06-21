@@ -154,10 +154,6 @@ const getCertificateTemplate = asyncHandler(async (req, res) => {
 });
 
 const upsertCertificateTemplate = asyncHandler(async (req, res) => {
-  if (req.auth?.role !== "SUPERADMIN") {
-    return res.apiError(403, "Only superadmin can mutate certificate branding", "FORBIDDEN");
-  }
-
   res.set("Cache-Control", "no-store");
   const tenantId = req.auth.tenantId;
   const businessPartnerId = req.bpScope.businessPartner.id;
@@ -196,10 +192,6 @@ const upsertCertificateTemplate = asyncHandler(async (req, res) => {
 
 function makeUploadHandler({ fieldPath, fieldUrl, uploadSubDir }) {
   return asyncHandler(async (req, res) => {
-    if (req.auth?.role !== "SUPERADMIN") {
-      return res.apiError(403, "Only superadmin can mutate certificate branding", "FORBIDDEN");
-    }
-
     res.set("Cache-Control", "no-store");
     const tenantId = req.auth.tenantId;
     const businessPartnerId = req.bpScope.businessPartner.id;

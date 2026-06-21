@@ -28,6 +28,7 @@ const verifyCertificate = asyncHandler(async (req, res) => {
       status: true,
       issuedAt: true,
       revokedAt: true,
+      levelSnapshot: true,
       brandingSnapshot: true,
       metadata: true,
       student: {
@@ -57,12 +58,13 @@ const verifyCertificate = asyncHandler(async (req, res) => {
   }
 
   const brandingSnapshot = readCertificateBrandingSnapshot(cert);
+  const levelSnapshot = cert.levelSnapshot || cert.metadata?.academicSnapshot?.level || null;
 
   return res.apiSuccess("Certificate verified", {
     certificateNumber: cert.certificateNumber,
     status: cert.status,
     studentName: formatStudentName(cert.student),
-    levelName: cert.level.name,
+    levelName: levelSnapshot?.name || cert.level.name,
     issuedAt: cert.issuedAt,
     revokedAt: cert.revokedAt,
     organizationName: brandingSnapshot?.organizationName || cert.tenant?.businessPartners?.[0]?.name || cert.tenant?.name || null,

@@ -33,6 +33,7 @@ function BusinessPartnerCertificatesPage() {
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
+  const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -46,7 +47,12 @@ function BusinessPartnerCertificatesPage() {
 
   const [issueStudentId, setIssueStudentId] = useState("");
   const [issueLevelId, setIssueLevelId] = useState("");
-  const [students, setStudents] = useState([]);
+  const [studentQuery, setStudentQuery] = useState("");
+  const [studentPage, setStudentPage] = useState(1);
+  const [studentPageSize] = useState(25);
+  const [studentTotal, setStudentTotal] = useState(0);
+  const [studentOptions, setStudentOptions] = useState([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
   const [levels, setLevels] = useState([]);
   const [centers, setCenters] = useState([]);
   const [revokeTarget, setRevokeTarget] = useState(null);
@@ -59,11 +65,12 @@ function BusinessPartnerCertificatesPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await listPartnerCertificates(params);
+      const data = await listPartnerCertificates({ ...params, includeSummary: true });
       setRows(data.data.items || []);
-      setLimit(data.data.limit);
-      setOffset(data.data.offset);
+      setLimit(data.data.limit || data.data.pageSize || 20);
+      setOffset(data.data.offset || 0);
       setTotal(data.data.total || 0);
+      setSummary(data.data.summary || null);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load certificates.");
     } finally {
@@ -71,15 +78,44 @@ function BusinessPartnerCertificatesPage() {
     }
   };
 
+  const loadStudents = async ({ reset = false, query = studentQuery } = {}) => {
+    setLoadingStudents(true);
+    try {
+      const nextPage = reset ? 1 : studentPage;
+      const res = await listPartnerStudents({
+        page: nextPage,
+        pageSize: studentPageSize,
+        q: query,
+        status: "ACTIVE"
+      });
+
+      const payload = res.data || {};
+      const nextItems = payload.items || [];
+
+      setStudentTotal(payload.total || 0);
+      setStudentPage(payload.page || nextPage);
+      setStudentOptions((prev) => (reset ? nextItems : [...prev, ...nextItems]));
+    } catch {
+      if (reset) {
+        setStudentOptions([]);
+        setStudentTotal(0);
+      }
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  const loadMoreStudents = () => {
+    if (loadingStudents || studentOptions.length >= studentTotal) {
+      return;
+    }
+    setStudentPage((prev) => prev + 1);
+  };
+
   useEffect(() => {
     void load(getFilters());
     void (async () => {
-      try {
-        const stu = await listPartnerStudents({ limit: 100, offset: 0 });
-        setStudents(stu.data.items || []);
-      } catch {
-        setStudents([]);
-      }
+      await loadStudents({ reset: true, query: "" });
 
       try {
         const lv = await listLevels({ limit: 50, offset: 0 });
@@ -96,7 +132,26 @@ function BusinessPartnerCertificatesPage() {
         setCenters([]);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setStudentPage(1);
+      void loadStudents({ reset: true, query: studentQuery });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentQuery]);
+
+  useEffect(() => {
+    if (studentPage <= 1) {
+      return;
+    }
+    void loadStudents({ reset: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [studentPage]);
 
   if (loading && !rows.length) {
     return <LoadingState label="Loading certificates..." />;
@@ -162,6 +217,14 @@ function BusinessPartnerCertificatesPage() {
       header: "Student",
       render: (r) => `${r.student?.admissionNo || ""} - ${r.student?.firstName || ""} ${r.student?.lastName || ""}`.trim()
     },
+    {
+      key: "course",
+      header: "Course",
+      render: (r) => {
+        const code = r.course?.code ? `${r.course.code} - ` : "";
+        return `${code}${r.course?.name || "-"}`;
+      }
+    },
     { key: "level", header: "Level", render: (r) => `L${r.level?.rank ?? ""} ${r.level?.name || ""}`.trim() },
     { key: "issuedAt", header: "Issued", render: (r) => new Date(r.issuedAt).toLocaleString() },
     {
@@ -190,7 +253,7 @@ function BusinessPartnerCertificatesPage() {
         <h2 style={{ margin: 0 }}>Certificates</h2>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="button" type="button" onClick={() => setBulkOpen(true)} style={{ width: "auto" }}>
-            📦 Bulk Issue
+            Bulk Issue
           </button>
           <button className="button secondary" type="button" onClick={handleExportCsv} style={{ width: "auto" }}>
             Export CSV
@@ -200,10 +263,22 @@ function BusinessPartnerCertificatesPage() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Issue Certificate</h3>
-        <form onSubmit={handleIssue} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <select className="input" value={issueStudentId} onChange={(e) => setIssueStudentId(e.target.value)} style={{ width: 320 }}>
+        <form onSubmit={handleIssue} style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gap: 8 }}>
+            <label style={{ fontSize: 12, color: "#6b7280" }}>Search student</label>
+            <input
+              className="input"
+              value={studentQuery}
+              onChange={(e) => setStudentQuery(e.target.value)}
+              placeholder="Search by name, admission no, or center"
+              style={{ width: 420, maxWidth: "100%" }}
+            />
+          </div>
+
+          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <select className="input" value={issueStudentId} onChange={(e) => setIssueStudentId(e.target.value)} style={{ width: 320 }}>
             <option value="">Select student</option>
-            {students.map((s) => (
+            {studentOptions.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.admissionNo} - {s.firstName} {s.lastName}
               </option>
@@ -222,8 +297,46 @@ function BusinessPartnerCertificatesPage() {
           <button className="button" type="submit" style={{ width: "auto" }}>
             Issue
           </button>
+
+            <button
+              className="button secondary"
+              type="button"
+              onClick={loadMoreStudents}
+              disabled={loadingStudents || studentOptions.length >= studentTotal}
+              style={{ width: "auto" }}
+            >
+              {loadingStudents ? "Loading..." : (studentOptions.length >= studentTotal ? "All loaded" : "Load more")}
+            </button>
+          </div>
+
+          <div style={{ fontSize: 12, color: "#6b7280" }}>
+            Loaded {studentOptions.length} of {studentTotal} students
+          </div>
         </form>
       </div>
+
+      {summary?.totals ? (
+        <div className="card" style={{ display: "grid", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Certificate Scope Summary</h3>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
+            <span>Total Students: <strong>{summary.totals.totalStudents || 0}</strong></span>
+            <span>Eligible Students: <strong>{summary.totals.eligibleStudents || 0}</strong></span>
+            <span>Certified Students: <strong>{summary.totals.certifiedStudents || 0}</strong></span>
+          </div>
+          <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+            <div><strong>Level Wise</strong></div>
+            {(summary.levelWise || []).map((row) => (
+              <div key={row.levelId}>{`L${row.level?.rank ?? "?"} ${row.level?.name || "Unknown"}: ${row.count}`}</div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gap: 4, fontSize: 12 }}>
+            <div><strong>Course Wise</strong></div>
+            {(summary.courseWise || []).map((row, idx) => (
+              <div key={`${row.courseId || "no-course"}-${idx}`}>{`${row.course?.name || "Unassigned"}: ${row.count}`}</div>
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <div className="card" style={{ display: "grid", gap: 12 }}>
         <form onSubmit={handleSearch} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -359,19 +472,32 @@ function BusinessPartnerCertificatesPage() {
 function BulkIssueModal({ levels, onClose, onDone }) {
   const [levelId, setLevelId] = useState("");
   const [eligible, setEligible] = useState([]);
+  const [eligibleTotal, setEligibleTotal] = useState(0);
+  const [eligiblePage, setEligiblePage] = useState(1);
+  const [eligiblePageSize] = useState(100);
   const [selected, setSelected] = useState(new Set());
   const [loadingEligible, setLoadingEligible] = useState(false);
   const [issuing, setIssuing] = useState(false);
   const [result, setResult] = useState(null);
 
-  const fetchEligible = async (lid) => {
+  const fetchEligible = async (lid, { reset = false } = {}) => {
     if (!lid) { setEligible([]); setSelected(new Set()); return; }
     setLoadingEligible(true);
     try {
-      const res = await listEligibleStudentsForCertificate(lid);
-      const list = res.data || [];
-      setEligible(list);
-      setSelected(new Set(list.map((s) => s.id)));
+      const page = reset ? 1 : eligiblePage;
+      const res = await listEligibleStudentsForCertificate(lid, { page, pageSize: eligiblePageSize });
+      const payload = res.data || {};
+      const list = payload.items || [];
+
+      if (reset) {
+        setEligible(list);
+        setSelected(new Set(list.map((s) => s.id)));
+      } else {
+        setEligible((prev) => [...prev, ...list]);
+      }
+
+      setEligibleTotal(payload.total || 0);
+      setEligiblePage(payload.page || page);
     } catch {
       toast.error("Failed to load eligible students.");
       setEligible([]);
@@ -384,8 +510,24 @@ function BulkIssueModal({ levels, onClose, onDone }) {
     const v = e.target.value;
     setLevelId(v);
     setResult(null);
-    void fetchEligible(v);
+    setEligiblePage(1);
+    void fetchEligible(v, { reset: true });
   };
+
+  const loadMoreEligible = () => {
+    if (!levelId || loadingEligible || eligible.length >= eligibleTotal) {
+      return;
+    }
+    setEligiblePage((prev) => prev + 1);
+  };
+
+  useEffect(() => {
+    if (eligiblePage <= 1 || !levelId) {
+      return;
+    }
+    void fetchEligible(levelId, { reset: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [eligiblePage]);
 
   const toggleStudent = (id) => {
     setSelected((prev) => {
@@ -443,6 +585,7 @@ function BulkIssueModal({ levels, onClose, onDone }) {
               <div style={{ fontWeight: 700, fontSize: 18, marginTop: 8 }}>{result.issued} Certificates Issued</div>
               {result.skipped > 0 && <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4 }}>{result.skipped} skipped (already issued)</div>}
               {result.invalidStudents > 0 && <div style={{ fontSize: 13, color: "#ef4444", marginTop: 4 }}>{result.invalidStudents} invalid student(s)</div>}
+              {result.levelMismatchStudents > 0 && <div style={{ fontSize: 13, color: "#ef4444", marginTop: 4 }}>{result.levelMismatchStudents} level mismatch student(s)</div>}
             </div>
             <button className="button" onClick={onDone} style={{ width: "100%" }}>Done</button>
           </div>
@@ -472,7 +615,7 @@ function BulkIssueModal({ levels, onClose, onDone }) {
             {!loadingEligible && eligible.length > 0 && (
               <>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontSize: 13, color: "#6b7280" }}>{eligible.length} eligible student(s) — {selected.size} selected</span>
+                  <span style={{ fontSize: 13, color: "#6b7280" }}>{eligible.length} loaded of {eligibleTotal} eligible student(s) — {selected.size} selected</span>
                   <button className="button secondary" type="button" onClick={toggleAll} style={{ width: "auto", fontSize: 12 }}>
                     {selected.size === eligible.length ? "Deselect All" : "Select All"}
                   </button>
@@ -498,6 +641,16 @@ function BulkIssueModal({ levels, onClose, onDone }) {
                     </label>
                   ))}
                 </div>
+
+                <button
+                  className="button secondary"
+                  type="button"
+                  onClick={loadMoreEligible}
+                  disabled={loadingEligible || eligible.length >= eligibleTotal}
+                  style={{ width: "100%", marginTop: 8 }}
+                >
+                  {loadingEligible ? "Loading..." : (eligible.length >= eligibleTotal ? "All eligible students loaded" : "Load more eligible students")}
+                </button>
 
                 <button
                   className="button"

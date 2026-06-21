@@ -5,9 +5,11 @@ async function getPartnerDashboard() {
   return response.data;
 }
 
-async function listPartnerStudents({ limit = 20, offset = 0, q, status } = {}) {
+async function listPartnerStudents({ page, pageSize, limit = 20, offset = 0, q, status } = {}) {
   const response = await apiClient.get("/partner/students", {
     params: {
+      page: page || undefined,
+      pageSize: pageSize || undefined,
       limit,
       offset,
       q: q || undefined,
@@ -30,9 +32,11 @@ async function exportPartnerStudentsCsv({ q, status } = {}) {
   return response;
 }
 
-async function listPartnerCertificates({ limit = 20, offset = 0, q, status, levelId, centerId, issuedFrom, issuedTo } = {}) {
+async function listPartnerCertificates({ page, pageSize, limit = 20, offset = 0, q, status, levelId, centerId, issuedFrom, issuedTo, includeSummary } = {}) {
   const response = await apiClient.get("/partner/certificates", {
     params: {
+      page: page || undefined,
+      pageSize: pageSize || undefined,
       limit,
       offset,
       q: q || undefined,
@@ -40,7 +44,8 @@ async function listPartnerCertificates({ limit = 20, offset = 0, q, status, leve
       levelId: levelId || undefined,
       centerId: centerId || undefined,
       issuedFrom: issuedFrom || undefined,
-      issuedTo: issuedTo || undefined
+      issuedTo: issuedTo || undefined,
+      includeSummary: includeSummary === undefined ? undefined : (includeSummary ? "1" : "0")
     }
   });
   return response.data;
@@ -89,9 +94,15 @@ async function bulkIssuePartnerCertificates({ studentIds, levelId, reason }) {
   return response.data;
 }
 
-async function listEligibleStudentsForCertificate(levelId) {
+async function listEligibleStudentsForCertificate(levelId, { page, pageSize, limit, offset } = {}) {
   const response = await apiClient.get("/partner/certificates/eligible", {
-    params: { levelId }
+    params: {
+      levelId,
+      page: page || undefined,
+      pageSize: pageSize || undefined,
+      limit: limit || undefined,
+      offset: offset || undefined
+    }
   });
   return response.data;
 }

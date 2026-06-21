@@ -8,6 +8,10 @@ import { buildHierarchyDashboardSummary } from "../services/hierarchy-dashboard.
 import { logger } from "../lib/logger.js";
 import { buildCertificateBrandingSnapshotForStudent } from "../services/branding.service.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
+import { BP_SCOPE_IMPOSSIBLE_TOKEN } from "../utils/bp-scope-filters.js";
+
+const CERTIFICATE_DEFAULT_PAGE_SIZE = 20;
+const CERTIFICATE_MAX_PAGE_SIZE = 500;
 
 function parseStatus(status) {
   if (!status) {
@@ -40,6 +44,80 @@ function generateCertificateNumber() {
   return `CERT-${day}-${rand}`;
 }
 
+function toPositiveInteger(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function parsePageRequest(query = {}, {
+  defaultPageSize = CERTIFICATE_DEFAULT_PAGE_SIZE,
+  maxPageSize = CERTIFICATE_MAX_PAGE_SIZE
+} = {}) {
+  const requestedPageSize = toPositiveInteger(query.pageSize || query.limit) || defaultPageSize;
+  const pageSize = Math.min(maxPageSize, Math.max(1, requestedPageSize));
+
+  const rawPage = toPositiveInteger(query.page);
+  const rawOffset = toPositiveInteger(query.offset);
+
+  const offset = rawOffset !== null ? Math.max(0, rawOffset) : Math.max(0, ((rawPage || 1) - 1) * pageSize);
+  const page = rawPage || Math.floor(offset / pageSize) + 1;
+
+  return {
+    page,
+    pageSize,
+    limit: pageSize,
+    offset,
+    skip: offset,
+    take: pageSize
+  };
+}
+
+function buildPagedResponse({ items, total, page, pageSize, limit, offset }) {
+  const safeTotal = Number(total || 0);
+  const totalPages = Math.max(1, Math.ceil(safeTotal / pageSize));
+
+  return {
+    items,
+    total: safeTotal,
+    page,
+    pageSize,
+    totalPages,
+    limit,
+    offset
+  };
+}
+
+function normalizeScopeNodeIds(nodeIds) {
+  return (Array.isArray(nodeIds) ? nodeIds : [])
+    .filter((id) => typeof id === "string" && id.length && id !== BP_SCOPE_IMPOSSIBLE_TOKEN);
+}
+
+async function logBpCertificateScopeDiagnostics(req, endpoint) {
+  const scopedNodeIds = normalizeScopeNodeIds(req.bpScope?.hierarchyNodeIds);
+  const studentCount = await prisma.student.count({
+    where: {
+      tenantId: req.auth.tenantId,
+      ...(scopedNodeIds.length ? { hierarchyNodeId: { in: scopedNodeIds } } : { id: { in: ["__NO_SCOPE__"] } })
+    }
+  });
+
+  logger.info("bp_certificate_scope_diagnostics", {
+    endpoint,
+    tenantId: req.auth.tenantId,
+    bpId: req.bpScope?.businessPartner?.id || null,
+    bpRoot: req.bpScope?.businessPartner?.hierarchyNodeId || null,
+    franchiseCount: normalizeScopeNodeIds(req.bpScope?.franchiseIds).length,
+    centerCount: normalizeScopeNodeIds(req.bpScope?.centerIds).length,
+    nodeCount: scopedNodeIds.length,
+    studentCount
+  });
+
+  return { scopedNodeIds, studentCount };
+}
+
 async function safeCertificateCount(args) {
   try {
     return await prisma.certificate.count(args);
@@ -53,22 +131,51 @@ async function safeCertificateCount(args) {
   }
 }
 
-function mergeCertificateMetadata(metadata, brandingSnapshot) {
+function mergeCertificateMetadata(metadata, brandingSnapshot, academicSnapshot) {
   if (!brandingSnapshot) {
-    return metadata || null;
+    if (!academicSnapshot) {
+      return metadata || null;
+    }
+    return {
+      ...(metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata : {}),
+      academicSnapshot
+    };
   }
 
   if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
     return {
       ...metadata,
-      brandingSnapshot
+      brandingSnapshot,
+      ...(academicSnapshot ? { academicSnapshot } : {})
     };
   }
 
   return {
     brandingSnapshot,
+    ...(academicSnapshot ? { academicSnapshot } : {}),
     ...(metadata === undefined || metadata === null ? {} : { legacyMetadata: metadata })
   };
+}
+
+function resolveCertificateAcademicSnapshot(certificate) {
+  const metadataSnapshot = certificate?.metadata?.academicSnapshot || null;
+
+  const levelSnapshot = certificate?.levelSnapshot || metadataSnapshot?.level || null;
+  const courseSnapshot = certificate?.courseSnapshot || metadataSnapshot?.course || null;
+
+  const level = {
+    id: levelSnapshot?.id || certificate?.level?.id || null,
+    name: levelSnapshot?.name || certificate?.level?.name || null,
+    rank: levelSnapshot?.rank ?? certificate?.level?.rank ?? null
+  };
+
+  const course = {
+    id: courseSnapshot?.id || certificate?.courseId || certificate?.student?.course?.id || null,
+    name: courseSnapshot?.name || certificate?.student?.course?.name || null,
+    code: courseSnapshot?.code || certificate?.student?.course?.code || null
+  };
+
+  return { level, course };
 }
 
 const getPartnerDashboard = asyncHandler(async (req, res) => {
@@ -268,11 +375,14 @@ const getPartnerDashboard = asyncHandler(async (req, res) => {
 });
 
 const listPartnerStudents = asyncHandler(async (req, res) => {
-  const { take, skip, limit, offset, orderBy } = parsePagination(req.query);
+  const { take, skip, page, pageSize, limit, offset } = parsePageRequest(req.query, {
+    defaultPageSize: 25,
+    maxPageSize: 200
+  });
   const q = req.query.q ? String(req.query.q).trim() : null;
   const isActive = parseStatus(req.query.status);
 
-  const nodeIds = req.bpScope.hierarchyNodeIds;
+  const nodeIds = normalizeScopeNodeIds(req.bpScope.hierarchyNodeIds);
   const where = {
     tenantId: req.auth.tenantId,
     ...(nodeIds.length ? { hierarchyNodeId: { in: nodeIds } } : {}),
@@ -298,7 +408,7 @@ const listPartnerStudents = asyncHandler(async (req, res) => {
   const [items, total] = await Promise.all([
     prisma.student.findMany({
       where,
-      orderBy,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip,
       take,
       select: {
@@ -317,12 +427,14 @@ const listPartnerStudents = asyncHandler(async (req, res) => {
     prisma.student.count({ where })
   ]);
 
-  return res.apiSuccess("Partner students fetched", {
+  return res.apiSuccess("Partner students fetched", buildPagedResponse({
     items,
+    total,
+    page,
+    pageSize,
     limit,
-    offset,
-    total
-  });
+    offset
+  }));
 });
 
 const exportPartnerStudentsCsv = asyncHandler(async (req, res) => {
@@ -385,18 +497,19 @@ const exportPartnerStudentsCsv = asyncHandler(async (req, res) => {
 });
 
 const listPartnerCertificates = asyncHandler(async (req, res) => {
-  const { take, skip, limit, offset, orderBy } = parsePagination(req.query);
+  const { take, skip, page, pageSize, limit, offset } = parsePageRequest(req.query);
   const q = req.query.q ? String(req.query.q).trim() : null;
   const status = parseCertificateStatus(req.query.status);
   const levelId = req.query.levelId || null;
   const centerId = req.query.centerId || null;
   const issuedFrom = req.query.issuedFrom || null;
   const issuedTo = req.query.issuedTo || null;
-  const nodeIds = req.bpScope.hierarchyNodeIds;
+  const includeSummary = String(req.query.includeSummary || "1") !== "0";
+  const { scopedNodeIds } = await logBpCertificateScopeDiagnostics(req, "listPartnerCertificates");
 
   const studentFilter = {};
-  if (nodeIds.length) {
-    studentFilter.hierarchyNodeId = centerId ? centerId : { in: nodeIds };
+  if (scopedNodeIds.length) {
+    studentFilter.hierarchyNodeId = centerId ? centerId : { in: scopedNodeIds };
   } else if (centerId) {
     studentFilter.hierarchyNodeId = centerId;
   }
@@ -432,7 +545,7 @@ const listPartnerCertificates = asyncHandler(async (req, res) => {
   const [items, total] = await Promise.all([
     prisma.certificate.findMany({
       where,
-      orderBy,
+      orderBy: [{ issuedAt: "desc" }, { id: "desc" }],
       skip,
       take,
       select: {
@@ -442,12 +555,23 @@ const listPartnerCertificates = asyncHandler(async (req, res) => {
         issuedAt: true,
         revokedAt: true,
         reason: true,
+        courseId: true,
+        courseSnapshot: true,
+        levelSnapshot: true,
+        metadata: true,
         student: {
           select: {
             id: true,
             admissionNo: true,
             firstName: true,
             lastName: true,
+            course: {
+              select: {
+                id: true,
+                code: true,
+                name: true
+              }
+            },
             hierarchyNode: { select: { id: true, name: true, code: true, type: true } }
           }
         },
@@ -465,11 +589,162 @@ const listPartnerCertificates = asyncHandler(async (req, res) => {
     prisma.certificate.count({ where })
   ]);
 
+  const mappedItems = items.map((item) => {
+    const snapshot = resolveCertificateAcademicSnapshot(item);
+    return {
+      ...item,
+      level: snapshot.level,
+      course: snapshot.course
+    };
+  });
+
+  let summary = null;
+  if (includeSummary) {
+    const studentWhere = {
+      tenantId: req.auth.tenantId,
+      ...(scopedNodeIds.length ? { hierarchyNodeId: { in: scopedNodeIds } } : { id: { in: ["__NO_SCOPE__"] } })
+    };
+
+    const [
+      totalStudents,
+      levelDistribution,
+      courseDistribution,
+      completionPairs,
+      issuedPairs,
+      certifiedDistinct
+    ] = await Promise.all([
+      prisma.student.count({ where: studentWhere }),
+      prisma.student.groupBy({
+        by: ["levelId"],
+        where: studentWhere,
+        _count: { _all: true }
+      }),
+      prisma.student.groupBy({
+        by: ["courseId"],
+        where: studentWhere,
+        _count: { _all: true }
+      }),
+      prisma.studentLevelCompletion.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          student: {
+            ...(scopedNodeIds.length ? { hierarchyNodeId: { in: scopedNodeIds } } : { id: { in: ["__NO_SCOPE__"] } })
+          }
+        },
+        select: {
+          studentId: true,
+          levelId: true
+        }
+      }),
+      prisma.certificate.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          status: "ISSUED",
+          ...(scopedNodeIds.length
+            ? {
+                student: {
+                  is: {
+                    hierarchyNodeId: { in: scopedNodeIds }
+                  }
+                }
+              }
+            : {
+                studentId: { in: ["__NO_SCOPE__"] }
+              })
+        },
+        select: {
+          studentId: true,
+          levelId: true
+        }
+      }),
+      prisma.certificate.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          status: "ISSUED",
+          ...(scopedNodeIds.length
+            ? {
+                student: {
+                  is: {
+                    hierarchyNodeId: { in: scopedNodeIds }
+                  }
+                }
+              }
+            : {
+                studentId: { in: ["__NO_SCOPE__"] }
+              })
+        },
+        distinct: ["studentId"],
+        select: { studentId: true }
+      })
+    ]);
+
+    const [levelRows, courseRows] = await Promise.all([
+      prisma.level.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          id: { in: levelDistribution.map((row) => row.levelId) }
+        },
+        select: {
+          id: true,
+          rank: true,
+          name: true
+        }
+      }),
+      prisma.course.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          id: { in: courseDistribution.map((row) => row.courseId).filter(Boolean) }
+        },
+        select: {
+          id: true,
+          code: true,
+          name: true
+        }
+      })
+    ]);
+
+    const levelMap = new Map(levelRows.map((row) => [row.id, row]));
+    const courseMap = new Map(courseRows.map((row) => [row.id, row]));
+    const issuedKeySet = new Set(issuedPairs.map((row) => `${row.studentId}:${row.levelId}`));
+    const eligibleStudentsSet = new Set(
+      completionPairs
+        .filter((row) => !issuedKeySet.has(`${row.studentId}:${row.levelId}`))
+        .map((row) => row.studentId)
+    );
+
+    summary = {
+      totals: {
+        totalStudents,
+        eligibleStudents: eligibleStudentsSet.size,
+        certifiedStudents: certifiedDistinct.length
+      },
+      levelWise: levelDistribution
+        .map((row) => ({
+          levelId: row.levelId,
+          count: row._count._all,
+          level: levelMap.get(row.levelId) || null
+        }))
+        .sort((a, b) => b.count - a.count),
+      courseWise: courseDistribution
+        .map((row) => ({
+          courseId: row.courseId,
+          count: row._count._all,
+          course: row.courseId ? (courseMap.get(row.courseId) || null) : null
+        }))
+        .sort((a, b) => b.count - a.count)
+    };
+  }
+
   return res.apiSuccess("Partner certificates fetched", {
-    items,
-    limit,
-    offset,
-    total
+    ...buildPagedResponse({
+      items: mappedItems,
+      total,
+      page,
+      pageSize,
+      limit,
+      offset
+    }),
+    ...(summary ? { summary } : {})
   });
 });
 
@@ -479,14 +754,39 @@ const issuePartnerCertificate = asyncHandler(async (req, res) => {
     return res.apiError(400, "studentId and levelId are required", "VALIDATION_ERROR");
   }
 
-  const nodeIds = req.bpScope.hierarchyNodeIds;
+  await logBpCertificateScopeDiagnostics(req, "issuePartnerCertificate");
+
+  const nodeIds = normalizeScopeNodeIds(req.bpScope.hierarchyNodeIds);
   const student = await prisma.student.findFirst({
     where: {
       id: studentId,
       tenantId: req.auth.tenantId,
       ...(nodeIds.length ? { hierarchyNodeId: { in: nodeIds } } : {})
     },
-    select: { id: true, hierarchyNodeId: true }
+    select: {
+      id: true,
+      hierarchyNodeId: true,
+      levelId: true,
+      courseId: true,
+      course: {
+        select: {
+          id: true,
+          code: true,
+          name: true
+        }
+      },
+      batchEnrollments: {
+        where: {
+          tenantId: req.auth.tenantId,
+          status: "ACTIVE"
+        },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        take: 1,
+        select: {
+          levelId: true
+        }
+      }
+    }
   });
 
   if (!student) {
@@ -495,12 +795,37 @@ const issuePartnerCertificate = asyncHandler(async (req, res) => {
 
   const level = await prisma.level.findFirst({
     where: { id: levelId, tenantId: req.auth.tenantId },
-    select: { id: true }
+    select: { id: true, name: true, rank: true }
   });
 
   if (!level) {
     return res.apiError(404, "Level not found", "LEVEL_NOT_FOUND");
   }
+
+  const effectiveLevelId = student.batchEnrollments?.[0]?.levelId || student.levelId;
+  if (effectiveLevelId !== level.id) {
+    return res.apiError(
+      409,
+      "Requested level does not match student enrollment level",
+      "CERTIFICATE_LEVEL_MISMATCH"
+    );
+  }
+
+  const courseSnapshot = {
+    id: student.courseId || null,
+    code: student.course?.code || null,
+    name: student.course?.name || null
+  };
+  const levelSnapshot = {
+    id: level.id,
+    name: level.name,
+    rank: level.rank
+  };
+  const academicSnapshot = {
+    capturedAt: new Date().toISOString(),
+    course: courseSnapshot,
+    level: levelSnapshot
+  };
 
   const brandingSnapshot = await buildCertificateBrandingSnapshotForStudent(
     student.id,
@@ -514,10 +839,13 @@ const issuePartnerCertificate = asyncHandler(async (req, res) => {
       status: "ISSUED",
       studentId: student.id,
       levelId: level.id,
+      courseId: student.courseId || null,
       issuedByUserId: req.auth.userId,
       reason: reason ? String(reason).trim() : null,
+      courseSnapshot,
+      levelSnapshot,
       brandingSnapshot,
-      metadata: mergeCertificateMetadata(metadata, brandingSnapshot),
+      metadata: mergeCertificateMetadata(metadata, brandingSnapshot, academicSnapshot),
       verificationToken: crypto.randomUUID()
     }
   });
@@ -535,12 +863,14 @@ const bulkIssuePartnerCertificates = asyncHandler(async (req, res) => {
     return res.apiError(400, "Maximum 200 students per bulk operation", "VALIDATION_ERROR");
   }
 
-  const nodeIds = req.bpScope.hierarchyNodeIds;
+  await logBpCertificateScopeDiagnostics(req, "bulkIssuePartnerCertificates");
+
+  const nodeIds = normalizeScopeNodeIds(req.bpScope.hierarchyNodeIds);
   const tenantId = req.auth.tenantId;
 
   const level = await prisma.level.findFirst({
     where: { id: levelId, tenantId },
-    select: { id: true }
+    select: { id: true, name: true, rank: true }
   });
   if (!level) {
     return res.apiError(404, "Level not found", "LEVEL_NOT_FOUND");
@@ -553,29 +883,80 @@ const bulkIssuePartnerCertificates = asyncHandler(async (req, res) => {
       tenantId,
       ...(nodeIds.length ? { hierarchyNodeId: { in: nodeIds } } : {})
     },
-    select: { id: true }
+    select: {
+      id: true,
+      levelId: true,
+      courseId: true,
+      course: {
+        select: {
+          id: true,
+          code: true,
+          name: true
+        }
+      },
+      batchEnrollments: {
+        where: {
+          tenantId,
+          status: "ACTIVE"
+        },
+        orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+        take: 1,
+        select: {
+          levelId: true
+        }
+      }
+    }
   });
   const validStudentIds = new Set(validStudents.map((s) => s.id));
+
+  const levelMatchedStudents = validStudents.filter((student) => {
+    const effectiveLevelId = student.batchEnrollments?.[0]?.levelId || student.levelId;
+    return effectiveLevelId === level.id;
+  });
+  const levelMatchedStudentIds = new Set(levelMatchedStudents.map((student) => student.id));
 
   // Find existing certificates for these students + level (skip duplicates)
   const existing = await prisma.certificate.findMany({
     where: {
       tenantId,
       levelId,
-      studentId: { in: [...validStudentIds] },
+      studentId: { in: [...levelMatchedStudentIds] },
       status: "ISSUED"
     },
     select: { studentId: true }
   });
   const alreadyIssuedIds = new Set(existing.map((c) => c.studentId));
 
-  const toIssue = [...validStudentIds].filter((id) => !alreadyIssuedIds.has(id));
+  const toIssue = [...levelMatchedStudentIds].filter((id) => !alreadyIssuedIds.has(id));
 
   const brandingSnapshots = new Map();
+  const academicSnapshots = new Map();
   await Promise.all(
     toIssue.map(async (studentId) => {
       const snapshot = await buildCertificateBrandingSnapshotForStudent(studentId, tenantId);
+      const student = levelMatchedStudents.find((row) => row.id === studentId);
+
+      const courseSnapshot = {
+        id: student?.courseId || null,
+        code: student?.course?.code || null,
+        name: student?.course?.name || null
+      };
+      const levelSnapshot = {
+        id: level.id,
+        name: level.name,
+        rank: level.rank
+      };
+
       brandingSnapshots.set(studentId, snapshot);
+      academicSnapshots.set(studentId, {
+        courseSnapshot,
+        levelSnapshot,
+        academicSnapshot: {
+          capturedAt: new Date().toISOString(),
+          course: courseSnapshot,
+          level: levelSnapshot
+        }
+      });
     })
   );
 
@@ -588,10 +969,17 @@ const bulkIssuePartnerCertificates = asyncHandler(async (req, res) => {
           status: "ISSUED",
           studentId,
           levelId: level.id,
+          courseId: academicSnapshots.get(studentId)?.courseSnapshot?.id || null,
           issuedByUserId: req.auth.userId,
           reason: reason ? String(reason).trim() : null,
+          courseSnapshot: academicSnapshots.get(studentId)?.courseSnapshot || null,
+          levelSnapshot: academicSnapshots.get(studentId)?.levelSnapshot || null,
           brandingSnapshot: brandingSnapshots.get(studentId) || null,
-          metadata: mergeCertificateMetadata(null, brandingSnapshots.get(studentId) || null),
+          metadata: mergeCertificateMetadata(
+            null,
+            brandingSnapshots.get(studentId) || null,
+            academicSnapshots.get(studentId)?.academicSnapshot || null
+          ),
           verificationToken: crypto.randomUUID()
         }
       })
@@ -602,6 +990,7 @@ const bulkIssuePartnerCertificates = asyncHandler(async (req, res) => {
     issued: created.length,
     skipped: alreadyIssuedIds.size,
     invalidStudents: studentIds.length - validStudentIds.size,
+    levelMismatchStudents: validStudents.length - levelMatchedStudents.length,
     certificates: created
   }, 201);
 });
@@ -612,49 +1001,66 @@ const listEligibleStudentsForCertificate = asyncHandler(async (req, res) => {
     return res.apiError(400, "levelId is required", "VALIDATION_ERROR");
   }
 
-  const nodeIds = req.bpScope.hierarchyNodeIds;
+  const { take, skip, page, pageSize, limit, offset } = parsePageRequest(req.query, {
+    defaultPageSize: 50,
+    maxPageSize: 200
+  });
+
+  const { scopedNodeIds } = await logBpCertificateScopeDiagnostics(req, "listEligibleStudentsForCertificate");
+
   const tenantId = req.auth.tenantId;
 
-  // Students who completed this level
-  const completions = await prisma.studentLevelCompletion.findMany({
-    where: {
-      tenantId,
-      levelId,
-      student: {
-        ...(nodeIds.length ? { hierarchyNodeId: { in: nodeIds } } : {})
-      }
-    },
-    select: {
-      studentId: true,
-      completedAt: true,
-      student: {
-        select: { id: true, fullName: true, admissionNo: true }
+  const eligibleWhere = {
+    tenantId,
+    levelId,
+    student: {
+      is: {
+        ...(scopedNodeIds.length ? { hierarchyNodeId: { in: scopedNodeIds } } : { id: { in: ["__NO_SCOPE__"] } }),
+        certificates: {
+          none: {
+            tenantId,
+            levelId,
+            status: "ISSUED"
+          }
+        }
       }
     }
-  });
+  };
 
-  // Students who already have a certificate for this level
-  const existingCerts = await prisma.certificate.findMany({
-    where: {
-      tenantId,
-      levelId,
-      studentId: { in: completions.map((c) => c.studentId) },
-      status: "ISSUED"
-    },
-    select: { studentId: true }
-  });
-  const alreadyCertified = new Set(existingCerts.map((c) => c.studentId));
+  const [completions, total] = await Promise.all([
+    prisma.studentLevelCompletion.findMany({
+      where: eligibleWhere,
+      skip,
+      take,
+      orderBy: [{ completedAt: "desc" }, { studentId: "asc" }],
+      select: {
+        studentId: true,
+        completedAt: true,
+        student: {
+          select: { id: true, firstName: true, lastName: true, admissionNo: true }
+        }
+      }
+    }),
+    prisma.studentLevelCompletion.count({
+      where: eligibleWhere
+    })
+  ]);
 
-  const eligible = completions
-    .filter((c) => !alreadyCertified.has(c.studentId))
-    .map((c) => ({
+  const items = completions.map((c) => ({
       id: c.student.id,
-      fullName: c.student.fullName,
+      fullName: [c.student.firstName, c.student.lastName].filter(Boolean).join(" ").trim() || "-",
       admissionNo: c.student.admissionNo,
       completedAt: c.completedAt
     }));
 
-  return res.apiSuccess("Eligible students fetched", eligible);
+  return res.apiSuccess("Eligible students fetched", buildPagedResponse({
+    items,
+    total,
+    page,
+    pageSize,
+    limit,
+    offset
+  }));
 });
 
 const revokePartnerCertificate = asyncHandler(async (req, res) => {
@@ -711,7 +1117,7 @@ const exportPartnerCertificatesCsv = asyncHandler(async (req, res) => {
   const centerId = req.query.centerId || null;
   const issuedFrom = req.query.issuedFrom || null;
   const issuedTo = req.query.issuedTo || null;
-  const nodeIds = req.bpScope.hierarchyNodeIds;
+  const nodeIds = normalizeScopeNodeIds(req.bpScope.hierarchyNodeIds);
 
   const studentFilter = {};
   if (nodeIds.length) {
@@ -755,11 +1161,20 @@ const exportPartnerCertificatesCsv = asyncHandler(async (req, res) => {
       issuedAt: true,
       revokedAt: true,
       reason: true,
+      courseSnapshot: true,
+      levelSnapshot: true,
+      metadata: true,
       student: {
         select: {
           admissionNo: true,
           firstName: true,
-          lastName: true
+          lastName: true,
+          course: {
+            select: {
+              code: true,
+              name: true
+            }
+          }
         }
       },
       level: {
@@ -779,21 +1194,28 @@ const exportPartnerCertificatesCsv = asyncHandler(async (req, res) => {
         "admissionNo",
         "firstName",
         "lastName",
+        "courseCode",
+        "courseName",
         "levelRank",
         "levelName"
       ],
-      ...rows.map((r) => [
-        r.certificateNumber,
-        r.status,
-        r.issuedAt.toISOString(),
-        r.revokedAt ? r.revokedAt.toISOString() : "",
-        r.reason || "",
-        r.student?.admissionNo || "",
-        r.student?.firstName || "",
-        r.student?.lastName || "",
-        String(r.level?.rank ?? ""),
-        r.level?.name || ""
-      ])
+      ...rows.map((r) => {
+        const snapshot = resolveCertificateAcademicSnapshot(r);
+        return [
+          r.certificateNumber,
+          r.status,
+          r.issuedAt.toISOString(),
+          r.revokedAt ? r.revokedAt.toISOString() : "",
+          r.reason || "",
+          r.student?.admissionNo || "",
+          r.student?.firstName || "",
+          r.student?.lastName || "",
+          snapshot.course.code || "",
+          snapshot.course.name || "",
+          String(snapshot.level.rank ?? ""),
+          snapshot.level.name || ""
+        ];
+      })
     ]
   );
 

@@ -3254,6 +3254,7 @@ model Course {
   students         Student[]
   assignedStudents StudentAssignedCourse[]
   assessments      Assessment[]
+  certificates     Certificate[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
@@ -4274,11 +4275,14 @@ model Certificate {
   status            CertificateStatus @default(ISSUED)
   studentId         String
   levelId           String
+  courseId          String?
   issuedByUserId    String
   issuedAt          DateTime          @default(now())
   revokedAt         DateTime?
   revokedByUserId   String?
   reason            String?
+  courseSnapshot    Json?
+  levelSnapshot     Json?
   brandingSnapshot  Json?
   metadata          Json?
   verificationToken String?           @unique
@@ -4288,6 +4292,7 @@ model Certificate {
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
   level     Level     @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  course    Course?   @relation(fields: [courseId], references: [id], onDelete: SetNull)
   issuedBy  AuthUser  @relation("CertificateIssuedBy", fields: [issuedByUserId], references: [id], onDelete: Restrict)
   revokedBy AuthUser? @relation("CertificateRevokedBy", fields: [revokedByUserId], references: [id], onDelete: SetNull)
 
@@ -4295,6 +4300,7 @@ model Certificate {
   @@index([tenantId, status, issuedAt])
   @@index([tenantId, studentId, issuedAt])
   @@index([tenantId, levelId, issuedAt])
+  @@index([tenantId, courseId, issuedAt])
    @@map("certificate")
 }
 

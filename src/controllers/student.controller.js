@@ -3977,6 +3977,8 @@ const listStudentCertificates = asyncHandler(async (req, res) => {
     issuedAt: true,
     revokedAt: true,
     reason: true,
+    courseSnapshot: true,
+    levelSnapshot: true,
     brandingSnapshot: true,
     metadata: true,
     level: { select: { id: true, name: true, rank: true } }
@@ -4005,11 +4007,13 @@ const listStudentCertificates = asyncHandler(async (req, res) => {
   }
 
   const data = certs.map((c) => ({
+    courseSnapshot: c.courseSnapshot || c.metadata?.academicSnapshot?.course || null,
+    levelSnapshot: c.levelSnapshot || c.metadata?.academicSnapshot?.level || null,
     id: c.id,
     certificateNumber: c.certificateNumber,
     status: c.status,
-    levelName: c.level?.name || "—",
-    levelRank: c.level?.rank ?? null,
+    levelName: c.levelSnapshot?.name || c.metadata?.academicSnapshot?.level?.name || c.level?.name || "—",
+    levelRank: c.levelSnapshot?.rank ?? c.metadata?.academicSnapshot?.level?.rank ?? c.level?.rank ?? null,
     issuedAt: c.issuedAt,
     revokedAt: c.revokedAt,
     reason: c.reason,

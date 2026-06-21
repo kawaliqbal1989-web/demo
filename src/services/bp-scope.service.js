@@ -349,6 +349,20 @@ async function resolveAccessibleCenterScope({
 } = {}) {
   const accessibleFranchiseIds = dedupeIds(franchiseIds);
 
+  const explicitRows = await tx.businessPartnerCenterScope.findMany({
+    where: {
+      tenantId,
+      businessPartnerId
+    },
+    select: {
+      centerId: true,
+      status: true,
+      activeFrom: true,
+      activeTo: true
+    }
+  });
+  const explicitCenterIds = dedupeIds(explicitRows.map((row) => row.centerId));
+
   const centerWhere = {
     tenantId,
     OR: [
@@ -362,39 +376,31 @@ async function resolveAccessibleCenterScope({
     ]
   };
 
+  if (explicitCenterIds.length) {
+    centerWhere.OR.push({
+      id: { in: explicitCenterIds }
+    });
+  }
+
   if (accessibleFranchiseIds.length) {
     centerWhere.OR.push({
       franchiseProfileId: { in: accessibleFranchiseIds }
     });
   }
 
-  const [explicitRows, centerProfiles] = await Promise.all([
-    tx.businessPartnerCenterScope.findMany({
-      where: {
-        tenantId,
-        businessPartnerId
-      },
-      select: {
-        centerId: true,
-        status: true,
-        activeFrom: true,
-        activeTo: true
-      }
-    }),
-    tx.centerProfile.findMany({
-      where: centerWhere,
-      select: {
-        id: true,
-        franchiseProfileId: true,
-        status: true,
-        franchiseProfile: {
-          select: {
-            businessPartnerId: true
-          }
+  const centerProfiles = await tx.centerProfile.findMany({
+    where: centerWhere,
+    select: {
+      id: true,
+      franchiseProfileId: true,
+      status: true,
+      franchiseProfile: {
+        select: {
+          businessPartnerId: true
         }
       }
-    })
-  ]);
+    }
+  });
 
   const explicitAllowedIds = new Set(
     explicitRows.filter((row) => isScopeRowActive(row, now)).map((row) => row.centerId)

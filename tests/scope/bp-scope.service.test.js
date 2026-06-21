@@ -176,6 +176,13 @@ describe("bp-scope.service", () => {
         tx
       })
     ).resolves.toEqual(["center-explicit", "center-derived", "center-legacy"]);
+
+    const callArgs = tx.centerProfile.findMany.mock.calls[0][0];
+    expect(callArgs.where.OR).toEqual(
+      expect.arrayContaining([
+        { id: { in: ["center-blocked", "center-explicit"] } }
+      ])
+    );
   });
 
   test("resolveBusinessPartnerScope deduplicates explicit scope and hierarchy traversal roots", async () => {

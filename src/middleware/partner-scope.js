@@ -5,6 +5,7 @@ import {
   resolveBusinessPartnerScope
 } from "../services/bp-scope.service.js";
 import { toBpScopeIdsOrImpossible } from "../utils/bp-scope-filters.js";
+import { logger } from "../lib/logger.js";
 
 async function ensureBusinessPartnerHierarchyRoot({ tenantId, authUserId, businessPartner }) {
   if (businessPartner?.hierarchyNodeId) {
@@ -114,12 +115,32 @@ const requireBusinessPartnerScope = asyncHandler(async (req, res, next) => {
     centerIds
   };
 
+  const effectiveNodeIds = (resolvedScope?.hierarchyNodeIds || [])
+    .filter((id) => typeof id === "string" && id.trim().length);
+
+  const scopeStudentCount = await prisma.student.count({
+    where: {
+      tenantId: req.auth.tenantId,
+      ...(effectiveNodeIds.length ? { hierarchyNodeId: { in: effectiveNodeIds } } : { id: { in: ["__NO_SCOPE__"] } })
+    }
+  });
+
+  logger.info("bp_scope_validation", {
+    tenantId: req.auth.tenantId,
+    bpId: partner.id,
+    bpRoot: effectivePartner.hierarchyNodeId || null,
+    franchiseCount: resolvedScope?.franchiseIds?.length || 0,
+    centerCount: resolvedScope?.centerIds?.length || 0,
+    studentCount: scopeStudentCount
+  });
+
   res.locals.auditMetadata = {
     ...(res.locals.auditMetadata || {}),
     businessPartnerId: partner.id,
     scopeNodeIdsCount: resolvedScope?.hierarchyNodeIds?.length || 0,
     scopeFranchiseIdsCount: resolvedScope?.franchiseIds?.length || 0,
     scopeCenterIdsCount: resolvedScope?.centerIds?.length || 0,
+    scopeStudentCount,
     bpScopeUsedLegacyFallback: Boolean(resolvedScope?.meta?.usedLegacyFallback),
     bpScopeUsedExplicitScopes: Boolean(resolvedScope?.meta?.usedExplicitScopes),
     bpScopeCacheHit: Boolean(resolvedScope?.meta?.cacheHit)

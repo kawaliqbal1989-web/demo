@@ -23,6 +23,7 @@ describe("BP CERTIFICATE MODULE HARDENING", () => {
   const createdCompletionIds = [];
   const createdCertificateIds = [];
   const createdCourseIds = [];
+  const createdBatchIds = [];
 
   const prefix = randomId("bp_cert");
 
@@ -116,6 +117,10 @@ describe("BP CERTIFICATE MODULE HARDENING", () => {
     if (createdCourseIds.length) {
       await prisma.course.deleteMany({ where: { id: { in: createdCourseIds } } });
     }
+
+    if (createdBatchIds.length) {
+      await prisma.batch.deleteMany({ where: { id: { in: createdBatchIds } } });
+    }
   });
 
   test("supports student pagination beyond 100 records", async () => {
@@ -153,6 +158,60 @@ describe("BP CERTIFICATE MODULE HARDENING", () => {
     const admissions = new Set(response.body.data.items.map((row) => row.admissionNo));
     expect(admissions.has(a[0].admissionNo)).toBe(true);
     expect(admissions.has(b[0].admissionNo)).toBe(true);
+  });
+
+  test("student search returns current course and enrollment level details", async () => {
+    const course = await prisma.course.create({
+      data: {
+        tenantId: tenant.id,
+        code: `CRS-${randomId("search")}`,
+        name: "Abacus Search Course"
+      }
+    });
+    createdCourseIds.push(course.id);
+
+    const [student] = await createStudents({
+      count: 1,
+      hierarchyNodeId: primaryNodeId,
+      levelId: level1.id,
+      startAt: 6050,
+      courseId: course.id
+    });
+
+    const batch = await prisma.batch.create({
+      data: {
+        tenantId: tenant.id,
+        hierarchyNodeId: primaryNodeId,
+        name: `${prefix}_BATCH_${randomId("search")}`,
+        levelId: level2.id,
+        status: "ACTIVE",
+        isActive: true
+      }
+    });
+    createdBatchIds.push(batch.id);
+
+    await prisma.enrollment.create({
+      data: {
+        tenantId: tenant.id,
+        hierarchyNodeId: primaryNodeId,
+        studentId: student.id,
+        batchId: batch.id,
+        levelId: level2.id,
+        status: "ACTIVE"
+      }
+    });
+
+    const response = await http
+      .get(`/api/partner/students?page=1&pageSize=200&q=${student.admissionNo}`)
+      .set(authHeader(bpToken));
+
+    expect(response.status).toBe(200);
+    const found = response.body.data.items.find((row) => row.id === student.id);
+    expect(found).toBeTruthy();
+    expect(found.courseId).toBe(course.id);
+    expect(found.courseName).toBe(course.name);
+    expect(found.levelId).toBe(level2.id);
+    expect(found.levelName).toBe(level2.name);
   });
 
   test("franchise center students are visible to BP", async () => {

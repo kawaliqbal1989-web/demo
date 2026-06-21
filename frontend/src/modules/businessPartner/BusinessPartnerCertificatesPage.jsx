@@ -28,6 +28,18 @@ function downloadBlob(blob, filename) {
   window.URL.revokeObjectURL(url);
 }
 
+function formatStudentOptionLabel(student) {
+  const fullName = `${student.firstName || ""} ${student.lastName || ""}`.trim() || "Unnamed";
+  const admission = student.admissionNo ? `(${student.admissionNo})` : "";
+  const course = student.courseName || "Unassigned Course";
+  const level = student.levelName
+    ? (student.levelRank ? `Level ${student.levelRank} - ${student.levelName}` : student.levelName)
+    : "Unassigned Level";
+  const center = student.hierarchyNode?.name || "Unassigned Center";
+
+  return `${fullName} ${admission} | ${course} | ${level} | ${center}`.trim();
+}
+
 function BusinessPartnerCertificatesPage() {
   const [rows, setRows] = useState([]);
   const [limit, setLimit] = useState(20);
@@ -276,11 +288,11 @@ function BusinessPartnerCertificatesPage() {
           </div>
 
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <select className="input" value={issueStudentId} onChange={(e) => setIssueStudentId(e.target.value)} style={{ width: 320 }}>
+            <select className="input" value={issueStudentId} onChange={(e) => setIssueStudentId(e.target.value)} style={{ width: 520, maxWidth: "100%" }}>
             <option value="">Select student</option>
             {studentOptions.map((s) => (
               <option key={s.id} value={s.id}>
-                {s.admissionNo} - {s.firstName} {s.lastName}
+                {formatStudentOptionLabel(s)}
               </option>
             ))}
           </select>

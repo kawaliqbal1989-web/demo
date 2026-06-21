@@ -417,8 +417,40 @@ const listPartnerStudents = asyncHandler(async (req, res) => {
         firstName: true,
         lastName: true,
         email: true,
+        courseId: true,
+        levelId: true,
         isActive: true,
         createdAt: true,
+        course: {
+          select: {
+            id: true,
+            name: true
+          }
+        },
+        level: {
+          select: {
+            id: true,
+            name: true,
+            rank: true
+          }
+        },
+        batchEnrollments: {
+          where: {
+            tenantId: req.auth.tenantId,
+            status: "ACTIVE"
+          },
+          orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+          take: 1,
+          select: {
+            level: {
+              select: {
+                id: true,
+                name: true,
+                rank: true
+              }
+            }
+          }
+        },
         hierarchyNode: {
           select: { id: true, name: true, code: true, type: true }
         }
@@ -427,8 +459,29 @@ const listPartnerStudents = asyncHandler(async (req, res) => {
     prisma.student.count({ where })
   ]);
 
+  const mappedItems = items.map((student) => {
+    const currentEnrollmentLevel = student.batchEnrollments?.[0]?.level || null;
+    const effectiveLevel = currentEnrollmentLevel || student.level || null;
+
+    return {
+      id: student.id,
+      admissionNo: student.admissionNo,
+      firstName: student.firstName,
+      lastName: student.lastName,
+      email: student.email,
+      isActive: student.isActive,
+      createdAt: student.createdAt,
+      hierarchyNode: student.hierarchyNode,
+      courseId: student.course?.id || student.courseId || null,
+      courseName: student.course?.name || null,
+      levelId: effectiveLevel?.id || null,
+      levelName: effectiveLevel?.name || null,
+      levelRank: effectiveLevel?.rank ?? null
+    };
+  });
+
   return res.apiSuccess("Partner students fetched", buildPagedResponse({
-    items,
+    items: mappedItems,
     total,
     page,
     pageSize,

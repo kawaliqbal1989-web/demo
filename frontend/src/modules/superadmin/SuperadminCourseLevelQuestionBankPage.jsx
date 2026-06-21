@@ -58,7 +58,7 @@ function computeCorrectAnswer(operation, terms, operators) {
         total = total / normalized[i];
       } else return null;
     }
-    if (!Number.isFinite(total) || !Number.isInteger(total)) return null;
+    if (!Number.isFinite(total)) return null;
     return total;
   }
 
@@ -79,7 +79,7 @@ function computeCorrectAnswer(operation, terms, operators) {
         return null;
       }
       const divided = current / next;
-      if (!Number.isInteger(divided)) {
+      if (!Number.isFinite(divided)) {
         return null;
       }
       current = divided;
@@ -227,12 +227,8 @@ function SuperadminCourseLevelQuestionBankPage() {
         setBankError("All numbers must be valid.");
         return;
       }
-      if (!bankNumbersParsed.every((value) => Number.isInteger(value))) {
-        setBankError("Only integer values are supported.");
-        return;
-      }
       if (bankCalculatedAnswer === null) {
-        setBankError("Invalid operation result. For division, use values that produce an integer answer.");
+        setBankError("Invalid operation result.");
         return;
       }
 

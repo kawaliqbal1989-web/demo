@@ -21,8 +21,15 @@ function normalizeDifficulty(value) {
   return null;
 }
 
-function normalizeInt(value) {
-  const parsed = Number.parseInt(String(value), 10);
+function normalizeNumber(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const raw = String(value).trim();
+  if (!raw.length) {
+    return null;
+  }
+  const parsed = Number(raw);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
@@ -81,9 +88,9 @@ const createQuestionBankEntry = asyncHandler(async (req, res) => {
   const prompt = normalizeString(req.body.prompt);
   const operands = safeJson(req.body.operands);
   const operation = normalizeString(req.body.operation);
-  const correctAnswer = normalizeInt(req.body.correctAnswer);
+  const correctAnswer = normalizeNumber(req.body.correctAnswer);
 
-  if (!levelId || !difficulty || !prompt || !operation || !Number.isInteger(correctAnswer)) {
+  if (!levelId || !difficulty || !prompt || !operation || correctAnswer === null) {
     return res.apiError(400, "levelId, difficulty, prompt, operation, correctAnswer are required", "VALIDATION_ERROR");
   }
 
@@ -123,14 +130,14 @@ const updateQuestionBankEntry = asyncHandler(async (req, res) => {
   const prompt = req.body.prompt === undefined ? null : normalizeString(req.body.prompt);
   const operands = req.body.operands === undefined ? null : safeJson(req.body.operands);
   const operation = req.body.operation === undefined ? null : normalizeString(req.body.operation);
-  const correctAnswer = req.body.correctAnswer === undefined ? null : normalizeInt(req.body.correctAnswer);
+  const correctAnswer = req.body.correctAnswer === undefined ? null : normalizeNumber(req.body.correctAnswer);
 
   if (req.body.difficulty !== undefined && !difficulty) {
     return res.apiError(400, "difficulty must be EASY, MEDIUM, or HARD", "VALIDATION_ERROR");
   }
 
-  if (req.body.correctAnswer !== undefined && !Number.isInteger(correctAnswer)) {
-    return res.apiError(400, "correctAnswer must be an integer", "VALIDATION_ERROR");
+  if (req.body.correctAnswer !== undefined && correctAnswer === null) {
+    return res.apiError(400, "correctAnswer must be a valid number", "VALIDATION_ERROR");
   }
 
   if (req.body.operands !== undefined && (!operands || typeof operands !== "object")) {
@@ -238,9 +245,9 @@ const importQuestionBank = asyncHandler(async (req, res) => {
     const prompt = normalizeString(item?.prompt);
     const operands = item?.operands && typeof item.operands === "object" ? item.operands : null;
     const operation = normalizeString(item?.operation);
-    const correctAnswer = normalizeInt(item?.correctAnswer);
+    const correctAnswer = normalizeNumber(item?.correctAnswer);
 
-    if (!difficulty || !prompt || !operation || !Number.isInteger(correctAnswer) || !operands) {
+    if (!difficulty || !prompt || !operation || correctAnswer === null || !operands) {
       return res.apiError(400, "Each item requires difficulty, prompt, operation, correctAnswer, operands", "VALIDATION_ERROR");
     }
 

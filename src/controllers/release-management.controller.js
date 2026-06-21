@@ -96,6 +96,7 @@ const MIGRATION_SEQUENCE = [
   { wave: "wave4", file: "migration_bp_branding_governance.sql", phase: 9, order: 28, description: "Add superadmin-managed BP branding metadata columns and FK tracking" },
   { wave: "wave4", file: "migration_student_fee_recurring_waiver.sql", phase: 9, order: 29, description: "Recurring student fee templates with month waiver/pause history" },
   { wave: "wave4", file: "migration_payment_receipt_engine.sql", phase: 9, order: 30, description: "Immutable payment receipts, allocations, refunds, and receipt audit trail" },
+  { wave: "wave4", file: "migration_question_bank_decimal_correct_answer.sql", phase: 9, order: 31, description: "Allow decimal correctAnswer values for question bank and worksheet questions" },
 ];
 
 const handleGetMigrationSequence = asyncHandler(async (req, res) => {

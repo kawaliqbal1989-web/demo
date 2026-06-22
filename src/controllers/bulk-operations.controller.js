@@ -21,11 +21,18 @@ export async function handleBulkStatusChange(req, res) {
       studentIds,
       isActive,
       performedByUserId: req.auth.userId,
+      actorRole: req.auth.role,
+      actorHierarchyNodeId: req.auth.hierarchyNodeId,
     });
+    res.locals.auditMetadata = {
+      bulkAction: 'status',
+      selectedCount: studentIds.length,
+      ...result,
+    };
     res.json(result);
   } catch (err) {
     console.error('Bulk status change error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, error_code: err.errorCode || 'BULK_STATUS_CHANGE_FAILED' });
   }
 }
 
@@ -44,11 +51,19 @@ export async function handleBulkPromote(req, res) {
       studentIds,
       newLevelId,
       performedByUserId: req.auth.userId,
+      actorRole: req.auth.role,
+      actorHierarchyNodeId: req.auth.hierarchyNodeId,
     });
+    res.locals.auditMetadata = {
+      bulkAction: 'promote',
+      selectedCount: studentIds.length,
+      targetLevelId: newLevelId,
+      ...result,
+    };
     res.json(result);
   } catch (err) {
     console.error('Bulk promote error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, error_code: err.errorCode || 'BULK_PROMOTE_FAILED' });
   }
 }
 
@@ -68,11 +83,20 @@ export async function handleBulkTransfer(req, res) {
       targetBatchId,
       targetTeacherUserId: targetTeacherUserId || null,
       performedByUserId: req.auth.userId,
+      actorRole: req.auth.role,
+      actorHierarchyNodeId: req.auth.hierarchyNodeId,
     });
+    res.locals.auditMetadata = {
+      bulkAction: 'transfer',
+      selectedCount: studentIds.length,
+      targetBatchId,
+      targetTeacherUserId: targetTeacherUserId || null,
+      ...result,
+    };
     res.json(result);
   } catch (err) {
     console.error('Bulk transfer error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, error_code: err.errorCode || 'BULK_TRANSFER_FAILED' });
   }
 }
 
@@ -90,11 +114,18 @@ export async function handleBulkFeeUpdate(req, res) {
       admissionFeeAmount,
       feeConcessionAmount,
       performedByUserId: req.auth.userId,
+      actorRole: req.auth.role,
+      actorHierarchyNodeId: req.auth.hierarchyNodeId,
     });
+    res.locals.auditMetadata = {
+      bulkAction: 'fees',
+      selectedCount: studentIds.length,
+      ...result,
+    };
     res.json(result);
   } catch (err) {
     console.error('Bulk fee update error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, error_code: err.errorCode || 'BULK_FEE_UPDATE_FAILED' });
   }
 }
 
@@ -113,10 +144,18 @@ export async function handleBulkAssignTeacher(req, res) {
       studentIds,
       teacherUserId,
       performedByUserId: req.auth.userId,
+      actorRole: req.auth.role,
+      actorHierarchyNodeId: req.auth.hierarchyNodeId,
     });
+    res.locals.auditMetadata = {
+      bulkAction: 'assign-teacher',
+      selectedCount: studentIds.length,
+      teacherUserId,
+      ...result,
+    };
     res.json(result);
   } catch (err) {
     console.error('Bulk assign teacher error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message, error_code: err.errorCode || 'BULK_ASSIGN_TEACHER_FAILED' });
   }
 }

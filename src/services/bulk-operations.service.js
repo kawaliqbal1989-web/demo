@@ -1,14 +1,45 @@
 import { prisma } from '../lib/prisma.js';
 
+function makeBulkError(message, statusCode = 400, errorCode = 'BULK_OPERATION_INVALID') {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  err.errorCode = errorCode;
+  return err;
+}
+
+function buildScopedStudentWhere({ tenantId, studentIds, actorRole, actorHierarchyNodeId }) {
+  return {
+    tenantId,
+    id: { in: studentIds },
+    ...(actorRole !== 'SUPERADMIN' && actorHierarchyNodeId ? { hierarchyNodeId: actorHierarchyNodeId } : {})
+  };
+}
+
+function normalizeNumericFee(value, fieldName) {
+  if (value === undefined) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) {
+    throw makeBulkError(`${fieldName} must be a non-negative number`, 400, 'INVALID_FEE_VALUE');
+  }
+  return n;
+}
+
 // ─── Bulk Student Status ────────────────────────────────────
-export async function bulkUpdateStudentStatus({ tenantId, studentIds, isActive, performedByUserId }) {
+export async function bulkUpdateStudentStatus({ tenantId, studentIds, isActive, performedByUserId, actorRole, actorHierarchyNodeId }) {
   if (!studentIds?.length) return { updated: 0 };
 
-  // Verify all students belong to this tenant
+  const scopedWhere = buildScopedStudentWhere({
+    tenantId,
+    studentIds,
+    actorRole,
+    actorHierarchyNodeId
+  });
+
   const students = await prisma.student.findMany({
-    where: { tenantId, id: { in: studentIds } },
+    where: scopedWhere,
     select: { id: true, isActive: true },
   });
+
   const validIds = students.map(s => s.id);
   const alreadyMatchIds = students.filter(s => s.isActive === isActive).map(s => s.id);
   const toUpdateIds = validIds.filter(id => !alreadyMatchIds.includes(id));
@@ -32,45 +63,74 @@ export async function bulkUpdateStudentStatus({ tenantId, studentIds, isActive, 
 }
 
 // ─── Bulk Level Promotion ───────────────────────────────────
-export async function bulkPromoteStudents({ tenantId, studentIds, newLevelId, performedByUserId }) {
+export async function bulkPromoteStudents({ tenantId, studentIds, newLevelId, performedByUserId, actorRole, actorHierarchyNodeId }) {
   if (!studentIds?.length) return { promoted: 0 };
 
   // Verify level exists
   const level = await prisma.level.findFirst({ where: { tenantId, id: newLevelId } });
-  if (!level) throw new Error('Target level not found');
+  if (!level) throw makeBulkError('Target level not found', 404, 'LEVEL_NOT_FOUND');
+
+  const scopedWhere = buildScopedStudentWhere({
+    tenantId,
+    studentIds,
+    actorRole,
+    actorHierarchyNodeId
+  });
 
   const students = await prisma.student.findMany({
-    where: { tenantId, id: { in: studentIds } },
+    where: scopedWhere,
     select: { id: true, levelId: true },
   });
+
   const validIds = students.map(s => s.id);
   const alreadySame = students.filter(s => s.levelId === newLevelId).map(s => s.id);
   const toPromoteIds = validIds.filter(id => !alreadySame.includes(id));
 
   if (!toPromoteIds.length) return { promoted: 0, skipped: alreadySame.length, invalid: studentIds.length - validIds.length };
 
-  const result = await prisma.student.updateMany({
-    where: { tenantId, id: { in: toPromoteIds } },
-    data: { levelId: newLevelId },
+  const result = await prisma.$transaction(async (tx) => {
+    const updatedStudents = await tx.student.updateMany({
+      where: { tenantId, id: { in: toPromoteIds } },
+      data: { levelId: newLevelId },
+    });
+
+    // Keep effective level in sync for students with active enrollments.
+    await tx.enrollment.updateMany({
+      where: {
+        tenantId,
+        studentId: { in: toPromoteIds },
+        status: 'ACTIVE'
+      },
+      data: {
+        levelId: newLevelId
+      }
+    });
+
+    return updatedStudents.count;
   });
 
-  return { promoted: result.count, skipped: alreadySame.length, invalid: studentIds.length - validIds.length };
+  return { promoted: result, skipped: alreadySame.length, invalid: studentIds.length - validIds.length };
 }
 
 // ─── Bulk Batch Transfer ────────────────────────────────────
-export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId, targetTeacherUserId, performedByUserId }) {
+export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId, targetTeacherUserId, performedByUserId, actorRole, actorHierarchyNodeId }) {
   if (!studentIds?.length) return { transferred: 0 };
 
   // Verify target batch exists and is active
   const batch = await prisma.batch.findFirst({
-    where: { tenantId, id: targetBatchId, isActive: true },
+    where: {
+      tenantId,
+      id: targetBatchId,
+      isActive: true,
+      ...(actorRole !== 'SUPERADMIN' && actorHierarchyNodeId ? { hierarchyNodeId: actorHierarchyNodeId } : {})
+    },
     include: {
       teacherAssignments: {
         select: { teacherUserId: true }
       }
     }
   });
-  if (!batch) throw new Error('Target batch not found or inactive');
+  if (!batch) throw makeBulkError('Target batch not found or inactive', 404, 'TARGET_BATCH_NOT_FOUND');
 
   // If teacher specified, verify they exist
   if (targetTeacherUserId) {
@@ -83,12 +143,30 @@ export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId
         isActive: true
       }
     });
-    if (!teacher) throw new Error('Target teacher not found');
+    if (!teacher) throw makeBulkError('Target teacher not found', 404, 'TARGET_TEACHER_NOT_FOUND');
   }
+
+  const scopedWhere = buildScopedStudentWhere({
+    tenantId,
+    studentIds,
+    actorRole,
+    actorHierarchyNodeId
+  });
+
+  const scopedStudents = await prisma.student.findMany({
+    where: scopedWhere,
+    select: {
+      id: true,
+      isActive: true
+    }
+  });
+
+  const scopedStudentIds = new Set(scopedStudents.map((s) => s.id));
+  const inactiveStudentIds = scopedStudents.filter((s) => !s.isActive).map((s) => s.id);
 
   // Find active enrollments for these students
   const enrollments = await prisma.enrollment.findMany({
-    where: { tenantId, studentId: { in: studentIds }, status: 'ACTIVE' },
+    where: { tenantId, studentId: { in: Array.from(scopedStudentIds) }, status: 'ACTIVE' },
     select: {
       id: true,
       studentId: true,
@@ -107,12 +185,21 @@ export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId
   const batchTeacherIds = batch.teacherAssignments.map((assignment) => assignment.teacherUserId);
   const alreadyInBatch = enrollments.filter(e => e.batchId === targetBatchId).map(e => e.studentId);
   const invalid = enrollments.filter((enrollment) => enrollment.student?.hierarchyNodeId !== batch.hierarchyNodeId);
+  const noActiveEnrollmentIds = Array.from(scopedStudentIds).filter(
+    (id) => !enrollments.some((enrollment) => enrollment.studentId === id)
+  );
   const toTransfer = enrollments.filter((enrollment) => {
     if (enrollment.batchId === targetBatchId) return false;
     return enrollment.student?.hierarchyNodeId === batch.hierarchyNodeId;
   });
 
-  if (!toTransfer.length) return { transferred: 0, skipped: alreadyInBatch.length, invalid: invalid.length };
+  if (!toTransfer.length) {
+    return {
+      transferred: 0,
+      skipped: alreadyInBatch.length,
+      invalid: invalid.length + noActiveEnrollmentIds.length + inactiveStudentIds.length + (studentIds.length - scopedStudentIds.size)
+    };
+  }
 
   // Transaction: deactivate old enrollments + create new ones
   const results = await prisma.$transaction(async (tx) => {
@@ -157,15 +244,26 @@ export async function bulkTransferStudents({ tenantId, studentIds, targetBatchId
     return toTransfer.length;
   });
 
-  return { transferred: results, skipped: alreadyInBatch.length, invalid: invalid.length };
+  return {
+    transferred: results,
+    skipped: alreadyInBatch.length,
+    invalid: invalid.length + noActiveEnrollmentIds.length + inactiveStudentIds.length + (studentIds.length - scopedStudentIds.size)
+  };
 }
 
 // ─── Bulk Fee Update ────────────────────────────────────────
-export async function bulkUpdateFees({ tenantId, studentIds, totalFeeAmount, admissionFeeAmount, feeConcessionAmount, performedByUserId }) {
+export async function bulkUpdateFees({ tenantId, studentIds, totalFeeAmount, admissionFeeAmount, feeConcessionAmount, performedByUserId, actorRole, actorHierarchyNodeId }) {
   if (!studentIds?.length) return { updated: 0 };
 
+  const scopedWhere = buildScopedStudentWhere({
+    tenantId,
+    studentIds,
+    actorRole,
+    actorHierarchyNodeId
+  });
+
   const students = await prisma.student.findMany({
-    where: { tenantId, id: { in: studentIds } },
+    where: scopedWhere,
     select: { id: true },
   });
   const validIds = students.map(s => s.id);
@@ -173,11 +271,11 @@ export async function bulkUpdateFees({ tenantId, studentIds, totalFeeAmount, adm
   if (!validIds.length) return { updated: 0, invalid: studentIds.length };
 
   const data = {};
-  if (totalFeeAmount !== undefined) data.totalFeeAmount = totalFeeAmount;
-  if (admissionFeeAmount !== undefined) data.admissionFeeAmount = admissionFeeAmount;
-  if (feeConcessionAmount !== undefined) data.feeConcessionAmount = feeConcessionAmount;
+  if (totalFeeAmount !== undefined) data.totalFeeAmount = normalizeNumericFee(totalFeeAmount, 'totalFeeAmount');
+  if (admissionFeeAmount !== undefined) data.admissionFeeAmount = normalizeNumericFee(admissionFeeAmount, 'admissionFeeAmount');
+  if (feeConcessionAmount !== undefined) data.feeConcessionAmount = normalizeNumericFee(feeConcessionAmount, 'feeConcessionAmount');
 
-  if (!Object.keys(data).length) return { updated: 0, error: 'No fee fields provided' };
+  if (!Object.keys(data).length) throw makeBulkError('No fee fields provided', 400, 'NO_FEE_FIELDS_PROVIDED');
 
   const result = await prisma.student.updateMany({
     where: { tenantId, id: { in: validIds } },
@@ -188,14 +286,29 @@ export async function bulkUpdateFees({ tenantId, studentIds, totalFeeAmount, adm
 }
 
 // ─── Bulk Teacher Assignment ────────────────────────────────
-export async function bulkAssignTeacher({ tenantId, studentIds, teacherUserId, performedByUserId }) {
+export async function bulkAssignTeacher({ tenantId, studentIds, teacherUserId, performedByUserId, actorRole, actorHierarchyNodeId }) {
   if (!studentIds?.length) return { assigned: 0 };
 
-  const teacher = await prisma.authUser.findFirst({ where: { tenantId, id: teacherUserId, role: 'TEACHER' } });
-  if (!teacher) throw new Error('Teacher not found');
+  const teacher = await prisma.authUser.findFirst({
+    where: {
+      tenantId,
+      id: teacherUserId,
+      role: 'TEACHER',
+      isActive: true,
+      ...(actorRole !== 'SUPERADMIN' && actorHierarchyNodeId ? { hierarchyNodeId: actorHierarchyNodeId } : {})
+    }
+  });
+  if (!teacher) throw makeBulkError('Teacher not found', 404, 'TEACHER_NOT_FOUND');
+
+  const scopedWhere = buildScopedStudentWhere({
+    tenantId,
+    studentIds,
+    actorRole,
+    actorHierarchyNodeId
+  });
 
   const students = await prisma.student.findMany({
-    where: { tenantId, id: { in: studentIds } },
+    where: scopedWhere,
     select: { id: true },
   });
   const validIds = students.map(s => s.id);

@@ -22,11 +22,27 @@ export function BulkActionDialog({ open, onClose, action, selectedCount, onConfi
   async function handleConfirm() {
     setLoading(true);
     try {
-      await onConfirm();
-      toast.success(`Bulk ${action} completed`);
+      const result = await onConfirm();
+      const updatedCount = Number(result?.updated ?? result?.promoted ?? result?.transferred ?? result?.assigned ?? 0);
+      const skippedCount = Number(result?.skipped ?? 0);
+      const invalidCount = Number(result?.invalid ?? 0);
+
+      if (updatedCount > 0) {
+        toast.success(`Bulk ${action} completed for ${updatedCount} student${updatedCount === 1 ? '' : 's'}.`);
+      } else {
+        toast.success(`Bulk ${action} completed.`);
+      }
+
+      if (invalidCount > 0 || skippedCount > 0) {
+        const parts = [];
+        if (invalidCount > 0) parts.push(`${invalidCount} failed`);
+        if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
+        toast.error(`${action} partial result: ${parts.join(', ')}.`);
+      }
+
       onClose();
     } catch (err) {
-      toast.error(err?.response?.data?.error || err.message || 'Bulk operation failed');
+      toast.error(err?.response?.data?.error || err?.response?.data?.message || err.message || 'Bulk operation failed');
     } finally {
       setLoading(false);
     }

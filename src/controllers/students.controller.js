@@ -2715,15 +2715,86 @@ const assignLevelToStudent = asyncHandler(async (req, res) => {
   assertCanModifyOperational(req.auth.role);
 
   const { id } = req.params;
-  const { levelId } = req.body;
+  const { levelId, force } = req.body || {};
 
-  const result = await assignLevelWithIntegrity({
-    tenantId: req.auth.tenantId,
-    studentId: id,
-    targetLevelId: levelId,
-    actorUserId: req.auth.userId,
-    reason: "MANUAL_ASSIGNMENT"
-  });
+  const normalizedLevelId = String(levelId || "").trim();
+  if (!normalizedLevelId) {
+    return res.apiError(400, "levelId is required", "VALIDATION_ERROR");
+  }
+
+  const canImplicitForce = req.auth.role === "CENTER" || req.auth.role === "SUPERADMIN";
+  const shouldForceAssignment = Boolean(force) || canImplicitForce;
+
+  let result;
+  if (shouldForceAssignment) {
+    const forceResult = await prisma.$transaction(async (tx) => {
+      const student = await tx.student.findFirst({
+        where: {
+          id,
+          tenantId: req.auth.tenantId
+        },
+        select: {
+          id: true,
+          levelId: true
+        }
+      });
+
+      if (!student) {
+        throw makeApiError(404, "Student not found", "STUDENT_NOT_FOUND");
+      }
+
+      const targetLevel = await tx.level.findFirst({
+        where: {
+          id: normalizedLevelId,
+          tenantId: req.auth.tenantId
+        },
+        select: {
+          id: true
+        }
+      });
+
+      if (!targetLevel) {
+        throw makeApiError(404, "Target level not found", "LEVEL_NOT_FOUND");
+      }
+
+      if (student.levelId !== targetLevel.id) {
+        await tx.student.update({
+          where: { id: student.id },
+          data: {
+            levelId: targetLevel.id
+          }
+        });
+
+        await tx.enrollment.updateMany({
+          where: {
+            tenantId: req.auth.tenantId,
+            studentId: student.id,
+            status: "ACTIVE"
+          },
+          data: {
+            levelId: targetLevel.id
+          }
+        });
+      }
+
+      return {
+        studentId: student.id,
+        previousLevelId: student.levelId,
+        newLevelId: targetLevel.id,
+        changed: student.levelId !== targetLevel.id
+      };
+    });
+
+    result = forceResult;
+  } else {
+    result = await assignLevelWithIntegrity({
+      tenantId: req.auth.tenantId,
+      studentId: id,
+      targetLevelId: normalizedLevelId,
+      actorUserId: req.auth.userId,
+      reason: "MANUAL_ASSIGNMENT"
+    });
+  }
 
   const studentAfterAssignment = await prisma.student.findUniqueOrThrow({
     where: { id },
@@ -2734,7 +2805,7 @@ const assignLevelToStudent = asyncHandler(async (req, res) => {
     tx: prisma,
     tenantId: req.auth.tenantId,
     studentId: id,
-    levelId,
+    levelId: normalizedLevelId,
     feeConcessionAmount: Number(studentAfterAssignment.feeConcessionAmount || 0)
   });
 
@@ -2753,9 +2824,10 @@ const assignLevelToStudent = asyncHandler(async (req, res) => {
     entityType: "STUDENT",
     entityId: id,
     metadata: {
-      assignedLevelId: levelId,
+      assignedLevelId: normalizedLevelId,
       previousLevelId: result.previousLevelId,
-      changed: result.changed
+      changed: result.changed,
+      forced: shouldForceAssignment
     }
   });
 

@@ -118,7 +118,7 @@ describe("PROMOTION LIFECYCLE INTEGRITY", () => {
     });
   });
 
-  test("No-skip enforcement blocks direct assignment to Level 3", async () => {
+  test("Manual center assignment allows direct reassignment to Level 3", async () => {
     const student = await createStudentAtLevel({
       tenantId: tenant.id,
       hierarchyNodeId: school.id,
@@ -131,8 +131,31 @@ describe("PROMOTION LIFECYCLE INTEGRITY", () => {
       .set(authHeader(centerToken))
       .send({ levelId: level3.id });
 
-    expect(response.status).toBe(409);
-    expect(response.body.error_code).toBe("LEVEL_SKIP_NOT_ALLOWED");
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+
+    const updated = await prisma.student.findUniqueOrThrow({ where: { id: student.id } });
+    expect(updated.levelId).toBe(level3.id);
+  });
+
+  test("Forced manual assignment allows explicit level override", async () => {
+    const student = await createStudentAtLevel({
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      levelId: level1.id,
+      suffix: randomId("force")
+    });
+
+    const response = await http
+      .patch(`/api/students/${student.id}/assign-level`)
+      .set(authHeader(centerToken))
+      .send({ levelId: level3.id, force: true });
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+
+    const updated = await prisma.student.findUniqueOrThrow({ where: { id: student.id } });
+    expect(updated.levelId).toBe(level3.id);
   });
 
   test("Pass-threshold boundary: 84.99 fails, 85.00 passes", async () => {
@@ -226,7 +249,7 @@ describe("PROMOTION LIFECYCLE INTEGRITY", () => {
     expect(historyRows).toHaveLength(1);
   });
 
-  test("Transaction rollback on failure keeps level unchanged and no history", async () => {
+  test("Confirm promotion failure keeps level unchanged and no history", async () => {
     const student = await createStudentAtLevel({
       tenantId: tenant.id,
       hierarchyNodeId: school.id,
@@ -235,9 +258,8 @@ describe("PROMOTION LIFECYCLE INTEGRITY", () => {
     });
 
     const response = await http
-      .patch(`/api/students/${student.id}/assign-level`)
-      .set(authHeader(centerToken))
-      .send({ levelId: level2.id });
+      .post(`/api/students/${student.id}/confirm-promotion`)
+      .set(authHeader(centerToken));
 
     expect(response.status).toBe(409);
     expect(response.body.error_code).toBe("PROMOTION_NOT_ELIGIBLE");

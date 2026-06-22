@@ -4,13 +4,11 @@ import { MemoryRouter } from "react-router-dom";
 import { TeacherStudentsPage } from "../TeacherStudentsPage";
 
 const mocks = vi.hoisted(() => ({
-  listMyStudentsMock: vi.fn(),
-  overrideTeacherStudentPromotionMock: vi.fn()
+  listMyStudentsMock: vi.fn()
 }));
 
 vi.mock("../../../services/teacherPortalService", () => ({
-  listMyStudents: mocks.listMyStudentsMock,
-  overrideTeacherStudentPromotion: mocks.overrideTeacherStudentPromotionMock
+  listMyStudents: mocks.listMyStudentsMock
 }));
 
 describe("TeacherStudentsPage assignment entry points", () => {

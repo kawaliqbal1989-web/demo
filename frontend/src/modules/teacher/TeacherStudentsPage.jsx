@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { SkeletonLoader } from "../../components/SkeletonLoader";
-import { InputDialog } from "../../components/InputDialog";
 import { PageHeader } from "../../components/PageHeader";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
-import { listMyStudents, overrideTeacherStudentPromotion } from "../../services/teacherPortalService";
+import { listMyStudents } from "../../services/teacherPortalService";
 
 function formatDateTime(value) {
   if (!value) return "—";
@@ -46,7 +45,6 @@ function TeacherStudentsPage() {
   const [search, setSearch] = useState("");
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
-  const [overrideTarget, setOverrideTarget] = useState(null);
 
   const load = async (query = "") => {
     setLoading(true);
@@ -77,25 +75,6 @@ function TeacherStudentsPage() {
 
   const total = rows.length;
   const pageRows = rows.slice(offset, offset + limit);
-
-  const onOverridePromotion = async (value) => {
-    const row = overrideTarget;
-    setOverrideTarget(null);
-    if (!row) return;
-
-    const parsed = Number(String(value || "").trim());
-    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
-      setError("Level rank must be a positive number.");
-      return;
-    }
-
-    try {
-      await overrideTeacherStudentPromotion(row.studentId, { levelRank: parsed });
-      await load(search);
-    } catch (err) {
-      setError(getFriendlyErrorMessage(err) || "Failed to override promotion.");
-    }
-  };
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
@@ -194,9 +173,6 @@ function TeacherStudentsPage() {
                     <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/students/${r.studentId}/attendance`}>
                       Attendance
                     </Link>
-                    <button className="button secondary" style={{ width: "auto" }} type="button" onClick={() => setOverrideTarget(r)}>
-                      Override Promotion
-                    </button>
                   </div>
                 </details>
               </div>
@@ -215,17 +191,6 @@ function TeacherStudentsPage() {
         onChange={(next) => {
           setOffset(next.offset);
         }}
-      />
-
-      <InputDialog
-        open={!!overrideTarget}
-        title="Override Promotion"
-        message="Enter the target level rank number."
-        inputLabel="Level Rank"
-        defaultValue={overrideTarget?.level?.rank != null ? String(overrideTarget.level.rank) : "1"}
-        confirmLabel="Apply"
-        onConfirm={onOverridePromotion}
-        onCancel={() => setOverrideTarget(null)}
       />
     </section>
   );

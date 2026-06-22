@@ -208,6 +208,31 @@ describe("PROMOTION LIFECYCLE INTEGRITY", () => {
     expect(promoted.levelId).toBe(level2.id);
   });
 
+  test("Promotion status returns eligible=false when pass threshold is missing", async () => {
+    await prisma.levelRule.deleteMany({
+      where: {
+        tenantId: tenant.id,
+        levelId: level3.id
+      }
+    });
+
+    const student = await createStudentAtLevel({
+      tenantId: tenant.id,
+      hierarchyNodeId: school.id,
+      levelId: level3.id,
+      suffix: randomId("status-missing-threshold")
+    });
+
+    const response = await http
+      .get(`/api/students/${student.id}/promotion-status`)
+      .set(authHeader(centerToken));
+
+    expect(response.status).toBe(200);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data.eligible).toBe(false);
+    expect(response.body.data.errorCode).toBe("PASS_THRESHOLD_MISSING");
+  });
+
   test("Progression history created once and duplicate promotion blocked", async () => {
     const student = await createStudentAtLevel({
       tenantId: tenant.id,

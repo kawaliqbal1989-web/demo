@@ -2855,14 +2855,39 @@ const getPromotionStatus = asyncHandler(async (req, res) => {
   }
 
   const levelId = queryLevelId || student.levelId;
-  const passState = await prisma.$transaction(async (tx) =>
-    evaluatePassThreshold({
-      tx,
-      tenantId: req.auth.tenantId,
-      studentId: id,
-      levelId
-    })
-  );
+  let passState;
+  try {
+    passState = await prisma.$transaction(async (tx) =>
+      evaluatePassThreshold({
+        tx,
+        tenantId: req.auth.tenantId,
+        studentId: id,
+        levelId
+      })
+    );
+  } catch (error) {
+    const softEligibilityErrors = new Set([
+      "PASS_THRESHOLD_MISSING",
+      "CURRENT_LEVEL_NOT_FOUND",
+      "LEVEL_NOT_FOUND"
+    ]);
+
+    if (error?.statusCode === 409 && softEligibilityErrors.has(error?.errorCode)) {
+      return res.apiSuccess("Promotion eligibility calculated", {
+        studentId: id,
+        levelId,
+        eligible: false,
+        reasons: [error.message],
+        metrics: {
+          threshold: null,
+          score: null
+        },
+        errorCode: error.errorCode
+      });
+    }
+
+    throw error;
+  }
 
   const eligibility = {
     eligible: passState.passed,

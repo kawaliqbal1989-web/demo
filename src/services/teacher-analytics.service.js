@@ -45,7 +45,8 @@ function parseDate(value) {
 async function getAttendanceAnalytics({ tenantId, centerId, teacherUserId, batchId, studentId, from, to, limit, offset }) {
   const conditions = [
     Prisma.sql`s.tenantId = ${tenantId}`,
-    Prisma.sql`s.hierarchyNodeId = ${centerId}`
+    Prisma.sql`s.hierarchyNodeId = ${centerId}`,
+    Prisma.sql`s.isActive = 1`
   ];
   if (batchId) conditions.push(Prisma.sql`ses.batchId = ${batchId}`);
   { const d = parseDate(from); if (d) conditions.push(Prisma.sql`ses.date >= ${d}`); }
@@ -352,6 +353,7 @@ async function getExamAnalytics({ tenantId, centerId, teacherUserId, examCycleId
   const conditions = [
     Prisma.sql`s.tenantId = ${tenantId}`,
     Prisma.sql`s.hierarchyNodeId = ${centerId}`,
+    Prisma.sql`s.isActive = 1`,
     Prisma.sql`s.currentTeacherUserId = ${teacherUserId}`
   ];
   if (examCycleId) conditions.push(Prisma.sql`ee.examCycleId = ${examCycleId}`);
@@ -467,6 +469,7 @@ async function getCompetitionAnalytics({ tenantId, centerId, teacherUserId, comp
   const conditions = [
     Prisma.sql`s.tenantId = ${tenantId}`,
     Prisma.sql`s.hierarchyNodeId = ${centerId}`,
+    Prisma.sql`s.isActive = 1`,
     Prisma.sql`s.currentTeacherUserId = ${teacherUserId}`
   ];
   if (competitionId) conditions.push(Prisma.sql`ce.competitionId = ${competitionId}`);
@@ -635,6 +638,7 @@ async function getStudentProgressAnalytics({ tenantId, centerId, teacherUserId, 
     JOIN student s ON s.id = slph.studentId AND s.tenantId = slph.tenantId
     WHERE slph.tenantId = ${tenantId}
       AND s.hierarchyNodeId = ${centerId}
+      AND s.isActive = 1
       AND s.currentTeacherUserId = ${teacherUserId}
       AND slph.createdAt >= ${now30}
   `);

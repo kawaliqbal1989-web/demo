@@ -11,7 +11,7 @@ import { resolveEffectiveStudentLevel } from "../utils/student-level.js";
 async function getStudent360Data(studentId, tenantId, scopeNodeId) {
   // ── Step 1: Load student with relationships ──
   const student = await prisma.student.findFirst({
-    where: { id: studentId, tenantId, hierarchyNodeId: scopeNodeId },
+    where: { id: studentId, tenantId, hierarchyNodeId: scopeNodeId, isActive: true },
     select: {
       id: true,
       admissionNo: true,

@@ -155,7 +155,7 @@ function TeacherAttendancePage() {
       const response = await getBatchRoster(nextBatchId);
       const data = response?.data || response || [];
       const items = Array.isArray(data) ? data : [];
-      setQuickStudents(items);
+      setQuickStudents((items || []).filter((item) => item?.isActive !== false));
     } catch {
       setQuickStudents([]);
     } finally {

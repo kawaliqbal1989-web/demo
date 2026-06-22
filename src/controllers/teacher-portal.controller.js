@@ -390,7 +390,12 @@ const listTeacherBatches = asyncHandler(async (req, res) => {
       tenantId: req.auth.tenantId,
       hierarchyNodeId: teacher.hierarchyNodeId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: teacher.id,
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: { batchId: true },
     distinct: ["batchId"]
@@ -420,7 +425,12 @@ const listTeacherBatches = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       status: "ACTIVE",
       assignedTeacherUserId: teacher.id,
-      batchId: { in: batchIds }
+      batchId: { in: batchIds },
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     _count: { _all: true }
   });
@@ -464,6 +474,9 @@ const getTeacherBatchRoster = asyncHandler(async (req, res) => {
       status: true,
       level: { select: { id: true, name: true, rank: true } },
       student: {
+        where: {
+          isActive: true
+        },
         select: {
           id: true,
           admissionNo: true,
@@ -513,7 +526,12 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: String(batchId),
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: teacher.id,
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: {
       studentId: true,
@@ -666,7 +684,12 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: String(batchId),
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: teacher.id,
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: {
       studentId: true,
@@ -710,11 +733,8 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
         const baseCreate = {
           tenantId: req.auth.tenantId,
           worksheetId: worksheet.id,
-          studentId,
-          createdByUserId: req.auth.userId,
-          isActive: true,
-          assignedAt: now,
-          unassignedAt: null
+          student: {
+            select: {
         };
 
         // eslint-disable-next-line no-await-in-loop
@@ -852,7 +872,12 @@ const getTeacherMockTest = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: mockTest.batchId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: teacher.id,
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     include: {
       student: { select: { id: true, admissionNo: true, firstName: true, lastName: true } }
@@ -930,7 +955,12 @@ const upsertTeacherMockTestResults = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: mockTest.batchId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: teacher.id,
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: { studentId: true }
   });
@@ -996,11 +1026,15 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     hierarchyNodeId: teacher.hierarchyNodeId,
     status: "ACTIVE",
-    assignedTeacherUserId: teacher.id
+    assignedTeacherUserId: teacher.id,
+    student: {
+      isActive: true
+    }
   };
 
   if (q) {
     where.student = {
+      isActive: true,
       OR: [
         { admissionNo: { contains: q } },
         { firstName: { contains: q } },
@@ -1165,7 +1199,12 @@ async function ensureTeacherCanAccessStudent({ tenantId, centerId, teacherUserId
       hierarchyNodeId: centerId,
       studentId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacherUserId
+      assignedTeacherUserId: teacherUserId,
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: { id: true }
   });
@@ -1196,7 +1235,8 @@ const getTeacherAssignWorksheetsContext = asyncHandler(async (req, res) => {
     where: {
       id: studentId,
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,
@@ -1389,7 +1429,8 @@ const saveTeacherWorksheetAssignments = asyncHandler(async (req, res) => {
     where: {
       id: studentId,
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,
@@ -1502,7 +1543,7 @@ const getTeacherStudent = asyncHandler(async (req, res) => {
 
   const [student, enrollments, notes, practiceAssignments] = await Promise.all([
     prisma.student.findFirst({
-      where: { id: String(studentId), tenantId: req.auth.tenantId, hierarchyNodeId: teacher.hierarchyNodeId },
+      where: { id: String(studentId), tenantId: req.auth.tenantId, hierarchyNodeId: teacher.hierarchyNodeId, isActive: true },
       select: {
         id: true,
         admissionNo: true,
@@ -1623,7 +1664,8 @@ const listTeacherStudentMaterials = asyncHandler(async (req, res) => {
     where: {
       id: String(studentId),
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,
@@ -1747,7 +1789,8 @@ const getTeacherStudentPracticeReport = asyncHandler(async (req, res) => {
     where: {
       id: String(studentId),
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,
@@ -1842,7 +1885,8 @@ const listTeacherStudentAttempts = asyncHandler(async (req, res) => {
     where: {
       id: String(studentId),
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,
@@ -1954,7 +1998,8 @@ const exportTeacherStudentAttemptsCsv = asyncHandler(async (req, res) => {
     where: {
       id: String(studentId),
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,
@@ -2090,7 +2135,8 @@ const overrideTeacherStudentPromotion = asyncHandler(async (req, res) => {
     where: {
       id: String(studentId),
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: { id: true }
   });
@@ -2382,7 +2428,12 @@ const createTeacherAttendanceSession = asyncHandler(async (req, res) => {
         hierarchyNodeId: teacher.hierarchyNodeId,
         batchId: batch.id,
         status: "ACTIVE",
-        assignedTeacherUserId: teacher.id
+        assignedTeacherUserId: teacher.id,
+        student: {
+          is: {
+            isActive: true
+          }
+        }
       },
       select: { studentId: true }
     });
@@ -2751,6 +2802,13 @@ const getTeacherAttendanceSession = asyncHandler(async (req, res) => {
       status: true,
       version: true,
       entries: {
+        where: {
+          student: {
+            is: {
+              isActive: true
+            }
+          }
+        },
         select: {
           studentId: true,
           status: true,
@@ -3120,7 +3178,16 @@ const listTeacherReassignmentRequests = asyncHandler(async (req, res) => {
 
   // Get students assigned to this teacher
   const enrollments = await prisma.enrollment.findMany({
-    where: { tenantId, assignedTeacherUserId: teacher.id, status: "ACTIVE" },
+    where: {
+      tenantId,
+      assignedTeacherUserId: teacher.id,
+      status: "ACTIVE",
+      student: {
+        is: {
+          isActive: true
+        }
+      }
+    },
     select: { studentId: true },
   });
   const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
@@ -3193,8 +3260,16 @@ const bulkAssignWorksheetToStudents = asyncHandler(async (req, res) => {
   // Verify all students belong to this teacher
   const enrollments = await prisma.enrollment.findMany({
     where: {
-      tenantId, assignedTeacherUserId: teacher.id, status: "ACTIVE",
+      tenantId,
+      assignedTeacherUserId: teacher.id,
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      status: "ACTIVE",
       studentId: { in: studentIds.map((id) => String(id).trim()) },
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: { studentId: true },
   });
@@ -3291,7 +3366,12 @@ const assignTeacherBatchWorksheetToStudents = asyncHandler(async (req, res) => {
       batchId,
       assignedTeacherUserId: teacher.id,
       status: "ACTIVE",
-      studentId: { in: targetIds }
+      studentId: { in: targetIds },
+      student: {
+        is: {
+          isActive: true
+        }
+      }
     },
     select: {
       studentId: true,
@@ -3362,7 +3442,8 @@ const getTeacherStudentAttendanceHistory = asyncHandler(async (req, res) => {
     where: {
       id: studentId,
       tenantId,
-      hierarchyNodeId: teacher.hierarchyNodeId
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      isActive: true
     },
     select: {
       id: true,

@@ -51,7 +51,8 @@ function TeacherStudentsPage() {
     setError("");
     try {
       const data = await listMyStudents({ q: query });
-      setRows(data.data || []);
+      const items = Array.isArray(data?.data) ? data.data : [];
+      setRows(items.filter((item) => item?.isActive !== false));
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load students.");
     } finally {

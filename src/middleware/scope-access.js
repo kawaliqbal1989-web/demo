@@ -43,7 +43,7 @@ async function loadScopedEntity(entityType, entityId) {
     case "student":
       return prisma.student.findUnique({
         where: { id: entityId },
-        select: { id: true, tenantId: true, hierarchyNodeId: true }
+        select: { id: true, tenantId: true, hierarchyNodeId: true, isActive: true }
       });
     case "batch":
       return prisma.batch.findUnique({
@@ -120,6 +120,10 @@ function requireScopeAccess(entityType, entityIdParam = "id") {
       if (!allowed) {
         return sendError(res, 403, "Hierarchy scope denied", "HIERARCHY_SCOPE_DENIED");
       }
+    }
+
+    if (entityType === "student" && req.auth.role === "TEACHER" && entity?.isActive === false) {
+      return sendError(res, 403, "Inactive student is not accessible in teacher scope", "INACTIVE_STUDENT_FORBIDDEN");
     }
 
     req.scopeEntity = entity;

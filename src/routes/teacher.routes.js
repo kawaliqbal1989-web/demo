@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { prisma } from "../lib/prisma.js";
 import { requireRole } from "../middleware/rbac.js";
 import { auditAction } from "../middleware/audit-logger.js";
 import {
@@ -72,6 +73,63 @@ import {
 } from "../controllers/teacher-workflow.controller.js";
 
 const teacherRouter = Router();
+
+teacherRouter.use(async (req, res, next) => {
+  const candidateIds = new Set();
+
+  const paramIds = [req.params?.studentId, req.params?.id];
+  for (const value of paramIds) {
+    if (value) candidateIds.add(String(value));
+  }
+
+  const body = req.body || {};
+  const bodyStudentIds = [];
+  if (body.studentId) bodyStudentIds.push(body.studentId);
+  if (Array.isArray(body.studentIds)) bodyStudentIds.push(...body.studentIds);
+  if (Array.isArray(body.attendanceRows)) {
+    for (const row of body.attendanceRows) {
+      if (row?.studentId) bodyStudentIds.push(row.studentId);
+    }
+  }
+  if (Array.isArray(body.assignments)) {
+    for (const row of body.assignments) {
+      if (row?.studentId) bodyStudentIds.push(row.studentId);
+    }
+  }
+
+  for (const value of bodyStudentIds) {
+    if (value) candidateIds.add(String(value));
+  }
+
+  const ids = Array.from(candidateIds).filter(Boolean);
+  if (!ids.length) {
+    return next();
+  }
+
+  const rows = await prisma.student.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      id: { in: ids },
+      isActive: true,
+      ...(req.auth.role === "TEACHER" && req.auth.hierarchyNodeId
+        ? { hierarchyNodeId: req.auth.hierarchyNodeId }
+        : {})
+    },
+    select: { id: true }
+  });
+
+  const allowed = new Set(rows.map((row) => row.id));
+  const blocked = ids.filter((id) => !allowed.has(id));
+  if (blocked.length) {
+    return res.status(403).json({
+      error: "Inactive or out-of-scope students are not allowed in teacher operations",
+      error_code: "INACTIVE_STUDENT_FORBIDDEN",
+      blockedStudentIds: blocked
+    });
+  }
+
+  return next();
+});
 
 teacherRouter.use(requireRole("TEACHER"));
 

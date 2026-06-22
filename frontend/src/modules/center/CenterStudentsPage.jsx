@@ -635,7 +635,7 @@ function CenterStudentsPage() {
       });
 
       if (editLevelId && editLevelId !== editOriginalLevelId) {
-        await assignStudentLevel(editingStudentId, { levelId: editLevelId });
+        await assignStudentLevel(editingStudentId, { levelId: editLevelId, force: true });
       }
 
       if (editPhotoFile) {
@@ -992,7 +992,7 @@ function CenterStudentsPage() {
     }
 
     try {
-      await assignStudentLevel(row.id, { levelId: level.id });
+      await assignStudentLevel(row.id, { levelId: level.id, force: true });
       await refreshWithFilters(0);
       setOffset(0);
     } catch (err) {

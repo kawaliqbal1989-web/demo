@@ -151,7 +151,14 @@ async function getBatchHeatmap(teacherUserId, tenantId, centerId) {
       id: true,
       name: true,
       enrollments: {
-        where: { status: "ACTIVE" },
+        where: {
+          status: "ACTIVE",
+          student: {
+            is: {
+              isActive: true
+            }
+          }
+        },
         select: { studentId: true },
       },
     },
@@ -347,7 +354,7 @@ async function getInterventionSuggestions(teacherUserId, tenantId, centerId) {
     getAtRiskQueue(teacherUserId, tenantId, centerId),
     getTeacherStudentIds(teacherUserId, tenantId, centerId),
     prisma.worksheetReassignmentRequest.count({
-      where: { tenantId, status: "PENDING", student: { currentTeacherUserId: teacherUserId } },
+      where: { tenantId, status: "PENDING", student: { currentTeacherUserId: teacherUserId, isActive: true } },
     }).catch(() => 0),
   ]);
 

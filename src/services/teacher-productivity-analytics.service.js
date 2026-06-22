@@ -376,7 +376,12 @@ async function listTeacherAssignedBatches(scope, tx = prisma) {
         where: {
           tenantId: scope.tenantId,
           assignedTeacherUserId: scope.teacherUserId,
-          status: "ACTIVE"
+          status: "ACTIVE",
+          student: {
+            is: {
+              isActive: true
+            }
+          }
         },
         select: {
           studentId: true
@@ -421,7 +426,8 @@ async function getTeacherAttendanceProductivityAnalytics({ tenantId, authUserId,
             student: {
               tenantId: scope.tenantId,
               hierarchyNodeId: scope.hierarchyNodeId,
-              currentTeacherUserId: scope.teacherUserId
+              currentTeacherUserId: scope.teacherUserId,
+              isActive: true
             },
             session: {
               batchId: { in: batchIds },

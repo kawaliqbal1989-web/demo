@@ -116,6 +116,70 @@ async function ensureTeacherAssignedToBatch({ tenantId, teacherUserId, batchId }
   return Boolean(enrollment);
 }
 
+async function resolveTeacherBatchLevelRank({ tenantId, batchId, teacher }) {
+  const batch = await prisma.batch.findFirst({
+    where: {
+      id: String(batchId),
+      tenantId,
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      deletedAt: null
+    },
+    select: {
+      level: { select: { rank: true } }
+    }
+  });
+
+  const batchLevelRank = Number(batch?.level?.rank || 0);
+  if (Number.isFinite(batchLevelRank) && batchLevelRank > 0) {
+    return batchLevelRank;
+  }
+
+  const enrollments = await prisma.enrollment.findMany({
+    where: {
+      tenantId,
+      hierarchyNodeId: teacher.hierarchyNodeId,
+      batchId: String(batchId),
+      status: "ACTIVE",
+      assignedTeacherUserId: teacher.id
+    },
+    select: {
+      level: { select: { rank: true } },
+      student: { select: { level: { select: { rank: true } } } }
+    }
+  });
+
+  const ranks = enrollments
+    .map((row) => Number(row?.level?.rank || row?.student?.level?.rank || 0))
+    .filter((rank) => Number.isFinite(rank) && rank > 0);
+
+  if (!ranks.length) {
+    return null;
+  }
+
+  return Math.max(...ranks);
+}
+
+function buildTeacherAssignableWorksheetWhere({ tenantId, maxLevelRank }) {
+  return {
+    tenantId,
+    isPublished: true,
+    examCycleId: null,
+    OR: [
+      { templateId: null },
+      { template: { is: { isActive: true } } }
+    ],
+    ...(Number.isFinite(maxLevelRank) && maxLevelRank > 0
+      ? {
+          level: {
+            is: {
+              rank: { lte: maxLevelRank }
+            }
+          }
+        }
+      : {})
+  };
+}
+
 async function listTeacherAssignedBatchIds({ tenantId, teacherUserId, centerHierarchyNodeId }) {
   const [assignments, enrollments] = await Promise.all([
     prisma.batchTeacherAssignment.findMany({
@@ -464,11 +528,29 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
     auth: req.auth
   });
 
+  const batchLevelRank = await resolveTeacherBatchLevelRank({
+    tenantId: req.auth.tenantId,
+    batchId: String(batchId),
+    teacher
+  });
+
+  if (!Number.isFinite(batchLevelRank) || batchLevelRank <= 0) {
+    return res.apiSuccess("Batch worksheet context", {
+      batchId: String(batchId),
+      studentCount: enrollments.length,
+      worksheets: []
+    });
+  }
+
+  const effectiveMaxLevelRank = Number.isFinite(maxLevelRank)
+    ? Math.min(batchLevelRank, maxLevelRank)
+    : batchLevelRank;
+
   let scopedLevelIds = null;
-  if (Number.isFinite(maxLevelRank)) {
+  if (Number.isFinite(effectiveMaxLevelRank)) {
     scopedLevelIds = await resolveAllowedLevelIdsByRank({
       tenantId: req.auth.tenantId,
-      maxRank: maxLevelRank
+      maxRank: effectiveMaxLevelRank
     });
   }
 
@@ -482,7 +564,10 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
 
   const worksheets = await prisma.worksheet.findMany({
     where: {
-      tenantId: req.auth.tenantId,
+      ...buildTeacherAssignableWorksheetWhere({
+        tenantId: req.auth.tenantId,
+        maxLevelRank: effectiveMaxLevelRank
+      }),
       ...(Array.isArray(scopedLevelIds) ? { levelId: { in: scopedLevelIds } } : {})
     },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -534,10 +619,22 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
     return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
 
+  const batchLevelRank = await resolveTeacherBatchLevelRank({
+    tenantId: req.auth.tenantId,
+    batchId: String(batchId),
+    teacher
+  });
+  if (!Number.isFinite(batchLevelRank) || batchLevelRank <= 0) {
+    return res.apiError(400, "Batch level is not configured", "VALIDATION_ERROR");
+  }
+
   const worksheet = await prisma.worksheet.findFirst({
     where: {
-      id: worksheetId,
-      tenantId: req.auth.tenantId
+      ...buildTeacherAssignableWorksheetWhere({
+        tenantId: req.auth.tenantId,
+        maxLevelRank: null
+      }),
+      id: worksheetId
     },
     select: {
       id: true,
@@ -547,6 +644,11 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
   });
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const worksheetLevelRank = Number(worksheet?.level?.rank || 0);
+  if (worksheetLevelRank > batchLevelRank) {
+    return res.apiError(400, "Cannot assign a worksheet above the batch level.", "VALIDATION_ERROR");
   }
 
   const maxLevelRank = await resolveActorLevelCap({
@@ -569,13 +671,26 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
     select: {
       studentId: true,
       levelId: true,
-      student: { select: { levelId: true } }
+      level: { select: { rank: true } },
+      student: {
+        select: {
+          levelId: true,
+          level: { select: { rank: true } }
+        }
+      }
     }
   });
 
   const targetStudentIds = enrollments
-    .filter((e) => (e.levelId || e.student?.levelId || null) === worksheet.levelId)
+    .filter((e) => {
+      const studentLevelRank = Number(e?.level?.rank || e?.student?.level?.rank || 0);
+      return Number.isFinite(studentLevelRank) && studentLevelRank >= worksheetLevelRank;
+    })
     .map((e) => e.studentId);
+
+  if (!targetStudentIds.length) {
+    return res.apiError(400, "No eligible students in this batch for the selected worksheet level", "VALIDATION_ERROR");
+  }
 
   const now = new Date();
   let assignedCount = 0;
@@ -3119,6 +3234,15 @@ const assignTeacherBatchWorksheetToStudents = asyncHandler(async (req, res) => {
     return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
 
+  const batchLevelRank = await resolveTeacherBatchLevelRank({
+    tenantId,
+    batchId,
+    teacher
+  });
+  if (!Number.isFinite(batchLevelRank) || batchLevelRank <= 0) {
+    return res.apiError(400, "Batch level is not configured", "VALIDATION_ERROR");
+  }
+
   const { worksheetId, studentIds, dueDate } = req.body || {};
   if (!worksheetId) return res.apiError(400, "worksheetId is required", "VALIDATION_ERROR");
   if (!Array.isArray(studentIds) || !studentIds.length) {
@@ -3130,8 +3254,11 @@ const assignTeacherBatchWorksheetToStudents = asyncHandler(async (req, res) => {
 
   const worksheet = await prisma.worksheet.findFirst({
     where: {
-      id: String(worksheetId),
-      tenantId
+      ...buildTeacherAssignableWorksheetWhere({
+        tenantId,
+        maxLevelRank: null
+      }),
+      id: String(worksheetId)
     },
     select: {
       id: true,
@@ -3140,6 +3267,11 @@ const assignTeacherBatchWorksheetToStudents = asyncHandler(async (req, res) => {
   });
   if (!worksheet) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const worksheetLevelRank = Number(worksheet?.level?.rank || 0);
+  if (worksheetLevelRank > batchLevelRank) {
+    return res.apiError(400, "Cannot assign a worksheet above the batch level.", "VALIDATION_ERROR");
   }
 
   const maxLevelRank = await resolveActorLevelCap({
@@ -3161,11 +3293,26 @@ const assignTeacherBatchWorksheetToStudents = asyncHandler(async (req, res) => {
       status: "ACTIVE",
       studentId: { in: targetIds }
     },
-    select: { studentId: true }
+    select: {
+      studentId: true,
+      level: { select: { rank: true } },
+      student: { select: { level: { select: { rank: true } } } }
+    }
   });
-  const validStudentIds = [...new Set(enrollments.map((e) => e.studentId))];
+
+  const validStudentIds = [
+    ...new Set(
+      enrollments
+        .filter((row) => {
+          const studentLevelRank = Number(row?.level?.rank || row?.student?.level?.rank || 0);
+          return Number.isFinite(studentLevelRank) && studentLevelRank >= worksheetLevelRank;
+        })
+        .map((row) => row.studentId)
+    )
+  ];
+
   if (!validStudentIds.length) {
-    return res.apiError(400, "No valid students found", "NO_VALID_STUDENTS");
+    return res.apiError(400, "No eligible students in this batch for the selected worksheet level", "VALIDATION_ERROR");
   }
 
   const result = await svcBulkAssign({

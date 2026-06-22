@@ -25,6 +25,8 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
   let wsL4;
   let wsL5;
   let wsL6;
+  let wsDraft;
+  let wsExam;
   let studentL3Id;
 
   async function setCenterLicenseRank(rank) {
@@ -248,6 +250,57 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
       }
     });
 
+    wsDraft = await prisma.worksheet.create({
+      data: {
+        tenantId: tenant.id,
+        title: `${marker}-DRAFT-L3`,
+        description: marker,
+        levelId: levelByRank.get(3).id,
+        createdByUserId: superadmin.id,
+        isPublished: false
+      }
+    });
+
+    const businessPartner = await prisma.businessPartner.findFirst({
+      where: {
+        tenantId: tenant.id,
+        isActive: true
+      },
+      select: { id: true }
+    });
+
+    if (businessPartner?.id) {
+      const now = Date.now();
+      const examCycle = await prisma.examCycle.create({
+        data: {
+          tenantId: tenant.id,
+          businessPartnerId: businessPartner.id,
+          name: `Governance Exam ${randomId("cycle")}`,
+          code: `GEX-${randomId("code")}`.slice(0, 30),
+          enrollmentStartAt: new Date(now - 5 * 24 * 60 * 60 * 1000),
+          enrollmentEndAt: new Date(now + 5 * 24 * 60 * 60 * 1000),
+          practiceStartAt: new Date(now - 2 * 24 * 60 * 60 * 1000),
+          examStartsAt: new Date(now + 7 * 24 * 60 * 60 * 1000),
+          examEndsAt: new Date(now + 8 * 24 * 60 * 60 * 1000),
+          examDurationMinutes: 60,
+          createdByUserId: superadmin.id
+        },
+        select: { id: true }
+      });
+
+      wsExam = await prisma.worksheet.create({
+        data: {
+          tenantId: tenant.id,
+          title: `${marker}-EXAM-L3`,
+          description: marker,
+          levelId: levelByRank.get(3).id,
+          createdByUserId: superadmin.id,
+          isPublished: true,
+          examCycleId: examCycle.id
+        }
+      });
+    }
+
     testCourse = await prisma.course.create({
       data: {
         tenantId: tenant.id,
@@ -351,8 +404,72 @@ describe("WORKSHEET ACCESS GOVERNANCE", () => {
         dueDate: "2026-07-01"
       });
 
-    expect(assignRes.status).toBe(403);
-    expect(assignRes.body?.error_code).toBe("LEVEL_SCOPE_DENIED");
+    expect(assignRes.status).toBe(400);
+    expect(assignRes.body?.message).toContain("Cannot assign a worksheet above the batch level.");
+  });
+
+  test("Batch worksheet context only shows assignable worksheets for batch level", async () => {
+    await setCenterLicenseRank(8);
+
+    const login = await loginAs({ email: teacherLevel3.email });
+    expect(login.status).toBe(200);
+    const token = login.body?.data?.access_token;
+
+    const contextRes = await http
+      .get(`/api/teacher/batches/${batchL3.id}/worksheets/context`)
+      .set(authHeader(token));
+
+    expect(contextRes.status).toBe(200);
+    const worksheetIds = (contextRes.body?.data?.worksheets || []).map((row) => row.worksheetId);
+
+    expect(worksheetIds).toContain(wsL2.id);
+    expect(worksheetIds).toContain(wsL3.id);
+    expect(worksheetIds).not.toContain(wsL4.id);
+    expect(worksheetIds).not.toContain(wsL5.id);
+    expect(worksheetIds).not.toContain(wsL6.id);
+    expect(worksheetIds).not.toContain(wsDraft.id);
+    if (wsExam?.id) {
+      expect(worksheetIds).not.toContain(wsExam.id);
+    }
+  });
+
+  test("Teacher cannot assign worksheet above batch level even when level cap allows it", async () => {
+    await setCenterLicenseRank(8);
+
+    const login = await loginAs({ email: teacherLevel3.email });
+    expect(login.status).toBe(200);
+    const token = login.body?.data?.access_token;
+
+    const assignRes = await http
+      .post(`/api/teacher/batches/${batchL3.id}/worksheets/assign`)
+      .set(authHeader(token))
+      .send({
+        worksheetId: wsL4.id,
+        dueDate: "2026-07-01"
+      });
+
+    expect(assignRes.status).toBe(400);
+    expect(assignRes.body?.message).toContain("Cannot assign a worksheet above the batch level.");
+  });
+
+  test("Selected-student assignment enforces batch-level worksheet validation", async () => {
+    await setCenterLicenseRank(8);
+
+    const login = await loginAs({ email: teacherLevel3.email });
+    expect(login.status).toBe(200);
+    const token = login.body?.data?.access_token;
+
+    const assignRes = await http
+      .post(`/api/teacher/batches/${batchL3.id}/worksheets/assign-selected`)
+      .set(authHeader(token))
+      .send({
+        worksheetId: wsL4.id,
+        studentIds: [studentL3Id],
+        dueDate: "2026-07-01"
+      });
+
+    expect(assignRes.status).toBe(400);
+    expect(assignRes.body?.message).toContain("Cannot assign a worksheet above the batch level.");
   });
 
   test("Teacher cannot assign worksheet to a batch they are not assigned to", async () => {

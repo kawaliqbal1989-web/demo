@@ -56,7 +56,11 @@ function CenterStudentViewPage() {
       if (studentRes.status === "fulfilled") setData(studentRes.value?.data || null);
       else setError(getFriendlyErrorMessage(studentRes.reason) || "Failed to load student.");
       if (perfRes.status === "fulfilled") setPerf(perfRes.value?.data || null);
-      if (promoRes.status === "fulfilled") setPromotion(promoRes.value?.data || null);
+      if (promoRes.status === "fulfilled") {
+        setPromotion(promoRes.value?.data || null);
+      } else {
+        setError((prev) => prev || (getFriendlyErrorMessage(promoRes.reason) || "Failed to load promotion status."));
+      }
 
       // Load available courses for the center
       try {

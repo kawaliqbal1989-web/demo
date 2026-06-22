@@ -22,6 +22,7 @@ import { recordEnrollmentTransaction } from "../services/financial-ledger.servic
 import { toCsv } from "../utils/csv.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import { withEffectiveStudentLevel } from "../utils/student-level.js";
+import { logger } from "../lib/logger.js";
 import {
   assertCenterCapacityAvailable,
   isCapacityEnforcementError,
@@ -125,6 +126,17 @@ function normalizeMoney(value) {
     return { error: "Amount must be a non-negative number" };
   }
   return Number(num.toFixed(2));
+}
+
+function isStudentLevelDebugEnabled() {
+  return String(process.env.STUDENT_LEVEL_DEBUG || "").trim() === "1";
+}
+
+function emitStudentLevelDebug(message, metadata) {
+  if (!isStudentLevelDebugEnabled()) {
+    return;
+  }
+  logger.info(message, metadata);
 }
 
 function normalizeConcessionAmount(value) {
@@ -2725,6 +2737,14 @@ const assignLevelToStudent = asyncHandler(async (req, res) => {
   const canImplicitForce = req.auth.role === "CENTER" || req.auth.role === "SUPERADMIN";
   const shouldForceAssignment = Boolean(force) || canImplicitForce;
 
+  emitStudentLevelDebug("student_assign_level_attempt", {
+    studentId: id,
+    targetLevelId: normalizedLevelId,
+    role: req.auth.role,
+    effectiveForceAssignment: shouldForceAssignment,
+    ownershipValidationResult: req.scopeEntity ? "PASS" : "UNKNOWN"
+  });
+
   let result;
   if (shouldForceAssignment) {
     const forceResult = await prisma.$transaction(async (tx) => {
@@ -2831,6 +2851,16 @@ const assignLevelToStudent = asyncHandler(async (req, res) => {
     }
   });
 
+  emitStudentLevelDebug("student_assign_level_success", {
+    studentId: id,
+    targetLevelId: normalizedLevelId,
+    currentLevelId: result.previousLevelId,
+    changed: result.changed,
+    role: req.auth.role,
+    effectiveForceAssignment: shouldForceAssignment,
+    ownershipValidationResult: req.scopeEntity ? "PASS" : "UNKNOWN"
+  });
+
   return res.apiSuccess("Level assigned to student", updated);
 });
 
@@ -2855,6 +2885,15 @@ const getPromotionStatus = asyncHandler(async (req, res) => {
   }
 
   const levelId = queryLevelId || student.levelId;
+  emitStudentLevelDebug("student_promotion_status_attempt", {
+    studentId: id,
+    currentLevelId: student.levelId,
+    targetLevelId: levelId,
+    role: req.auth.role,
+    effectiveForceAssignment: null,
+    ownershipValidationResult: req.scopeEntity ? "PASS" : "UNKNOWN"
+  });
+
   let passState;
   try {
     passState = await prisma.$transaction(async (tx) =>
@@ -2873,6 +2912,16 @@ const getPromotionStatus = asyncHandler(async (req, res) => {
     ]);
 
     if (error?.statusCode === 409 && softEligibilityErrors.has(error?.errorCode)) {
+      emitStudentLevelDebug("student_promotion_status_soft_conflict", {
+        studentId: id,
+        currentLevelId: student.levelId,
+        targetLevelId: levelId,
+        role: req.auth.role,
+        promotionStatus: "INELIGIBLE",
+        promotionErrorCode: error?.errorCode,
+        ownershipValidationResult: req.scopeEntity ? "PASS" : "UNKNOWN"
+      });
+
       return res.apiSuccess("Promotion eligibility calculated", {
         studentId: id,
         levelId,
@@ -2899,6 +2948,15 @@ const getPromotionStatus = asyncHandler(async (req, res) => {
       score: passState.score
     }
   };
+
+  emitStudentLevelDebug("student_promotion_status_result", {
+    studentId: id,
+    currentLevelId: student.levelId,
+    targetLevelId: levelId,
+    role: req.auth.role,
+    promotionStatus: eligibility.eligible ? "ELIGIBLE" : "INELIGIBLE",
+    ownershipValidationResult: req.scopeEntity ? "PASS" : "UNKNOWN"
+  });
 
   if (eligibility.eligible) {
     void (async () => {

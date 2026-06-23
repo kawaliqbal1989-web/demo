@@ -34,6 +34,15 @@ function downloadBlob(blob, filename) {
 function renderExpression(question) {
   return formatWorksheetQuestionPrompt(question);
 }
+
+function normalizeCalculatedAnswer(value) {
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  const rounded = Number(value.toFixed(10));
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
 function computeCorrectAnswer(operation, terms, operators) {
   if (!Array.isArray(terms) || terms.length < 2) {
     return null;
@@ -58,18 +67,17 @@ function computeCorrectAnswer(operation, terms, operators) {
         total = total / normalized[i];
       } else return null;
     }
-    if (!Number.isFinite(total)) return null;
-    return total;
+    return normalizeCalculatedAnswer(total);
   }
 
   if (operation === "ADD") {
-    return normalized.reduce((total, value) => total + value, 0);
+    return normalizeCalculatedAnswer(normalized.reduce((total, value) => total + value, 0));
   }
   if (operation === "SUB") {
-    return normalized.slice(1).reduce((total, value) => total - value, normalized[0]);
+    return normalizeCalculatedAnswer(normalized.slice(1).reduce((total, value) => total - value, normalized[0]));
   }
   if (operation === "MUL") {
-    return normalized.slice(1).reduce((total, value) => total * value, normalized[0]);
+    return normalizeCalculatedAnswer(normalized.slice(1).reduce((total, value) => total * value, normalized[0]));
   }
   if (operation === "DIV") {
     let current = normalized[0];
@@ -82,9 +90,12 @@ function computeCorrectAnswer(operation, terms, operators) {
       if (!Number.isFinite(divided)) {
         return null;
       }
-      current = divided;
+      current = normalizeCalculatedAnswer(divided);
+      if (current === null) {
+        return null;
+      }
     }
-    return current;
+    return normalizeCalculatedAnswer(current);
   }
   return null;
 }

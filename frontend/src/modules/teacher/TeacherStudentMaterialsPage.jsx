@@ -43,7 +43,7 @@ function TeacherStudentMaterialsPage() {
     return <LoadingState label="Loading materials..." />;
   }
 
-           setStudents((studentRows || []).filter((student) => student?.isActive !== false));
+  return (
     <section style={{ display: "grid", gap: 12 }}>
       <div>
         <h2 style={{ margin: 0 }}>Learning Materials</h2>

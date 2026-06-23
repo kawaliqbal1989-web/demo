@@ -2066,6 +2066,22 @@ const updateStudent = asyncHandler(async (req, res) => {
       }
     });
 
+    // If the request explicitly deactivated the student, also mark active enrollments INACTIVE
+    if (isActive !== undefined && isActive === false) {
+      await tx.enrollment.updateMany({
+        where: { tenantId: req.auth.tenantId, studentId: id, status: 'ACTIVE' },
+        data: { status: 'INACTIVE' }
+      });
+    }
+
+    // If the request explicitly reactivated the student, also mark inactive enrollments ACTIVE
+    if (isActive !== undefined && isActive === true) {
+      await tx.enrollment.updateMany({
+        where: { tenantId: req.auth.tenantId, studentId: id, status: 'INACTIVE' },
+        data: { status: 'ACTIVE' }
+      });
+    }
+
     if (feeFieldsProvided) {
       await tx.teacherNote.create({
         data: {

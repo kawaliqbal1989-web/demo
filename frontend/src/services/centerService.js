@@ -10,6 +10,16 @@ async function getCenterDashboard() {
   return response.data;
 }
 
+async function getCenterTeacherOperationsDashboard(params = {}) {
+  const response = await apiClient.get("/center/dashboard/teacher-ops", { params });
+  return response.data;
+}
+
+async function getCenterBatchHealthDashboard(params = {}) {
+  const response = await apiClient.get("/center/dashboard/batch-health", { params });
+  return response.data;
+}
+
 async function listCenterAvailableCourses() {
   const response = await apiClient.get("/center/available-courses");
   return response.data;
@@ -256,6 +266,8 @@ async function reopenCenterWorkflow(id, payload = {}) {
 export {
   getCenterMe,
   getCenterDashboard,
+  getCenterTeacherOperationsDashboard,
+  getCenterBatchHealthDashboard,
   listCenterAvailableCourses,
   getAnalyticsAttendance,
   exportAnalyticsAttendanceCsv,

@@ -909,6 +909,47 @@ async function getOrCreateCenterCombinedList({ tenantId, examCycleId, centerNode
   }
 }
 
+async function allocateTemporaryStudentUsername({ tx, tenantId }) {
+  const maxAttempts = 40;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let username = null;
+
+    try {
+      username = await generateUsername({ tx, tenantId, role: "STUDENT" });
+    } catch (error) {
+      if (error?.errorCode !== "USERNAME_GENERATION_CONFLICT") {
+        throw error;
+      }
+
+      const randomSuffix = Math.random().toString(36).slice(2, 8).toUpperCase();
+      username = `ST${randomSuffix}`;
+    }
+
+    if (!username) continue;
+
+    const [existingUser, existingStudent] = await Promise.all([
+      tx.authUser.findFirst({
+        where: { tenantId, username },
+        select: { id: true }
+      }),
+      tx.student.findFirst({
+        where: { tenantId, admissionNo: username },
+        select: { id: true }
+      })
+    ]);
+
+    if (!existingUser && !existingStudent) {
+      return username;
+    }
+  }
+
+  const error = new Error("Unable to allocate unique username");
+  error.statusCode = 409;
+  error.errorCode = "USERNAME_GENERATION_CONFLICT";
+  throw error;
+}
+
 const centerPrepareCombinedList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
@@ -2191,65 +2232,85 @@ const centerCreateTemporaryStudents = asyncHandler(async (req, res) => {
         throw error;
       }
 
-      const username = await generateUsername({ tx, tenantId: req.auth.tenantId, role: "STUDENT" });
-      const admissionNo = username;
       const passwordHash = await hashPassword(password);
 
-      const student = await tx.student.create({
-        data: {
-          tenantId: req.auth.tenantId,
-          admissionNo,
-          firstName,
-          lastName,
-          email: null,
-          hierarchyNodeId: centerNodeId,
-          levelId,
-          isActive: true,
-          isTemporaryExam: true,
-          temporaryExpiresAt: expiresAt,
-          temporaryExamCycleId: examCycleId
-        },
-        select: { id: true, admissionNo: true, firstName: true, lastName: true, levelId: true }
-      });
+      let createdRecord = null;
 
-      const user = await tx.authUser.create({
-        data: {
-          tenantId: req.auth.tenantId,
-          username,
-          email: `${username.toLowerCase()}@temp.local`,
-          passwordHash,
-          role: "STUDENT",
-          isActive: true,
-          hierarchyNodeId: centerNodeId,
-          parentUserId: req.auth.userId,
-          studentId: student.id,
-          mustChangePassword: true
-        },
-        select: { id: true, username: true }
-      });
+      for (let usernameAttempt = 0; usernameAttempt < 40; usernameAttempt += 1) {
+        const username = await allocateTemporaryStudentUsername({ tx, tenantId: req.auth.tenantId });
 
-      const entry = await tx.examEnrollmentEntry.create({
-        data: {
-          tenantId: req.auth.tenantId,
-          examCycleId,
-          studentId: student.id,
-          enrolledLevelId: levelId,
-          isTemporary: true,
-          sourceTeacherUserId: null,
-          createdByUserId: req.auth.userId
-        },
-        select: { id: true }
-      });
+        try {
+          const student = await tx.student.create({
+            data: {
+              tenantId: req.auth.tenantId,
+              admissionNo: username,
+              firstName,
+              lastName,
+              email: null,
+              hierarchyNodeId: centerNodeId,
+              levelId,
+              isActive: true,
+              isTemporaryExam: true,
+              temporaryExpiresAt: expiresAt,
+              temporaryExamCycleId: examCycleId
+            },
+            select: { id: true, admissionNo: true, firstName: true, lastName: true, levelId: true }
+          });
 
-      await tx.examEnrollmentListItem.create({
-        data: {
-          tenantId: req.auth.tenantId,
-          listId: combined.id,
-          entryId: entry.id
+          const user = await tx.authUser.create({
+            data: {
+              tenantId: req.auth.tenantId,
+              username,
+              email: `${username.toLowerCase()}@temp.local`,
+              passwordHash,
+              role: "STUDENT",
+              isActive: true,
+              hierarchyNodeId: centerNodeId,
+              parentUserId: req.auth.userId,
+              studentId: student.id,
+              mustChangePassword: true
+            },
+            select: { id: true, username: true }
+          });
+
+          const entry = await tx.examEnrollmentEntry.create({
+            data: {
+              tenantId: req.auth.tenantId,
+              examCycleId,
+              studentId: student.id,
+              enrolledLevelId: levelId,
+              isTemporary: true,
+              sourceTeacherUserId: null,
+              createdByUserId: req.auth.userId
+            },
+            select: { id: true }
+          });
+
+          await tx.examEnrollmentListItem.create({
+            data: {
+              tenantId: req.auth.tenantId,
+              listId: combined.id,
+              entryId: entry.id
+            }
+          });
+
+          createdRecord = { student, user, entry, password };
+          break;
+        } catch (error) {
+          if (error?.code !== "P2002") {
+            throw error;
+          }
         }
-      });
+      }
 
-      out.push({ student, user, entry, password });
+      if (!createdRecord) {
+        const error = new Error("Unable to allocate unique username");
+        error.statusCode = 409;
+        error.errorCode = "USERNAME_GENERATION_CONFLICT";
+        throw error;
+      }
+
+      out.push(createdRecord);
     }
 
     return out;

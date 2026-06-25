@@ -733,8 +733,11 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
         const baseCreate = {
           tenantId: req.auth.tenantId,
           worksheetId: worksheet.id,
-          student: {
-            select: {
+          studentId,
+          createdByUserId: req.auth.userId,
+          isActive: true,
+          assignedAt: now,
+          unassignedAt: null
         };
 
         // eslint-disable-next-line no-await-in-loop
@@ -1021,16 +1024,28 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
   }
 
   const q = String(req.query.q || "").trim();
+  const batchId = String(req.query.batchId || "").trim();
+
+  const assignedBatchIds = await listTeacherAssignedBatchIds({
+    tenantId: req.auth.tenantId,
+    teacherUserId: teacher.id,
+    centerHierarchyNodeId: teacher.hierarchyNodeId
+  });
 
   const where = {
     tenantId: req.auth.tenantId,
     hierarchyNodeId: teacher.hierarchyNodeId,
     status: "ACTIVE",
     assignedTeacherUserId: teacher.id,
+    ...(assignedBatchIds.length ? { batchId: { in: assignedBatchIds } } : {}),
     student: {
       isActive: true
     }
   };
+
+  if (batchId) {
+    where.batchId = String(batchId);
+  }
 
   if (q) {
     where.student = {
@@ -1075,10 +1090,13 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
 
   const uniqueEnrollments = Array.from(studentMap.values());
   const studentIds = uniqueEnrollments.map((item) => item.student.id);
+  const enrollmentIds = uniqueEnrollments.map((item) => item.id);
 
   let assignmentCounts = [];
   let latestAttempts = [];
   let practiceAssignments = [];
+  let attendanceHistory = [];
+  let worksheetStatsRows = [];
 
   if (studentIds.length) {
     try {
@@ -1137,6 +1155,42 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
       }
       practiceAssignments = [];
     }
+
+    try {
+      attendanceHistory = await prisma.attendanceEntry.groupBy({
+        by: ["studentId", "status"],
+        where: {
+          tenantId: req.auth.tenantId,
+          studentId: { in: studentIds }
+        },
+        _count: { _all: true }
+      });
+    } catch (error) {
+      if (error?.code !== "P2021" && error?.code !== "P2022") {
+        throw error;
+      }
+      attendanceHistory = [];
+    }
+
+    try {
+      worksheetStatsRows = await prisma.worksheetSubmission.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          studentId: { in: studentIds }
+        },
+        select: {
+          studentId: true,
+          score: true,
+          finalSubmittedAt: true
+        },
+        orderBy: { submittedAt: "desc" }
+      });
+    } catch (error) {
+      if (error?.code !== "P2021" && error?.code !== "P2022") {
+        throw error;
+      }
+      worksheetStatsRows = [];
+    }
   }
 
   const assignmentCountByStudent = new Map(
@@ -1158,9 +1212,109 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
     practiceFeaturesByStudent.get(row.studentId).add(row.featureKey);
   }
 
+  const attendanceByStudent = new Map();
+  for (const row of attendanceHistory) {
+    const key = row.studentId;
+    if (!attendanceByStudent.has(key)) {
+      attendanceByStudent.set(key, {
+        PRESENT: 0,
+        ABSENT: 0,
+        LATE: 0,
+        EXCUSED: 0,
+        total: 0
+      });
+    }
+    const bucket = attendanceByStudent.get(key);
+    const status = String(row.status || "").toUpperCase();
+    const count = Number(row?._count?._all || 0);
+    if (["PRESENT", "ABSENT", "LATE", "EXCUSED"].includes(status)) {
+      bucket[status] = count;
+      bucket.total += count;
+    }
+  }
+
+  const worksheetByStudent = new Map();
+  for (const row of worksheetStatsRows) {
+    if (!worksheetByStudent.has(row.studentId)) {
+      worksheetByStudent.set(row.studentId, []);
+    }
+    worksheetByStudent.get(row.studentId).push(Number(row.score || 0));
+  }
+
+  const metricsRows = uniqueEnrollments.map((e) => {
+    const studentId = e.student.id;
+    const scores = worksheetByStudent.get(studentId) || [];
+    const averageScore = scores.length
+      ? Math.round((scores.reduce((sum, s) => sum + s, 0) / scores.length) * 100) / 100
+      : null;
+
+    let trend = "STABLE";
+    if (scores.length >= 2) {
+      const latest = Number(scores[0] || 0);
+      const previous = Number(scores[1] || 0);
+      if (latest > previous + 1) trend = "UP";
+      else if (latest < previous - 1) trend = "DOWN";
+    }
+
+    const attendance = attendanceByStudent.get(studentId) || { PRESENT: 0, LATE: 0, total: 0 };
+    const attendancePercent = attendance.total
+      ? Math.round((((attendance.PRESENT || 0) + (attendance.LATE || 0)) / attendance.total) * 10000) / 100
+      : null;
+
+    const assignedWorksheetCount = assignmentCountByStudent.get(studentId) || 0;
+    const completedWorksheetCount = scores.length;
+    const worksheetCompletionPercent = assignedWorksheetCount
+      ? Math.round((Math.min(completedWorksheetCount, assignedWorksheetCount) / assignedWorksheetCount) * 10000) / 100
+      : null;
+
+    const statusText = String(e.status || "").toUpperCase();
+    const hasInactive = statusText !== "ACTIVE";
+    const hasRisk =
+      (attendancePercent !== null && attendancePercent < 75) ||
+      (worksheetCompletionPercent !== null && worksheetCompletionPercent < 50) ||
+      (averageScore !== null && averageScore < 50);
+
+    return {
+      enrollment: e,
+      studentId,
+      averageScore,
+      trend,
+      attendancePercent,
+      worksheetCompletionPercent,
+      completedWorksheetCount,
+      hasRisk,
+      hasInactive
+    };
+  });
+
+  const totalStudents = metricsRows.length;
+  const avgScoreAgg = metricsRows.filter((m) => m.averageScore !== null).map((m) => m.averageScore);
+  const avgAttendanceAgg = metricsRows.filter((m) => m.attendancePercent !== null).map((m) => m.attendancePercent);
+  const avgCompletionAgg = metricsRows
+    .filter((m) => m.worksheetCompletionPercent !== null)
+    .map((m) => m.worksheetCompletionPercent);
+
+  const batchSummary = {
+    totalStudents,
+    averageScorePercent: avgScoreAgg.length
+      ? Math.round((avgScoreAgg.reduce((sum, v) => sum + v, 0) / avgScoreAgg.length) * 100) / 100
+      : null,
+    attendancePercent: avgAttendanceAgg.length
+      ? Math.round((avgAttendanceAgg.reduce((sum, v) => sum + v, 0) / avgAttendanceAgg.length) * 100) / 100
+      : null,
+    worksheetCompletionPercent: avgCompletionAgg.length
+      ? Math.round((avgCompletionAgg.reduce((sum, v) => sum + v, 0) / avgCompletionAgg.length) * 100) / 100
+      : null,
+    atRiskCount: metricsRows.filter((m) => m.hasRisk).length,
+    inactiveCount: metricsRows.filter((m) => m.hasInactive).length
+  };
+
   return res.apiSuccess(
     "Teacher students",
-    uniqueEnrollments.map((e) => {
+    {
+      batchSummary,
+      items: metricsRows.map((row) => {
+        const e = row.enrollment;
       const effectiveLevel = e.level || e.student.level || null;
       const assignedWorksheetCount = assignmentCountByStudent.get(e.student.id) || 0;
       const latestAttemptAt = latestAttemptByStudent.get(e.student.id) || null;
@@ -1184,11 +1338,18 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
           : null,
         status: e.status,
         assignedWorksheetCount,
+        completedWorksheetCount: row.completedWorksheetCount,
         latestAttemptAt,
         hasPractice: practiceFeatures.has("PRACTICE"),
-        hasAbacusPractice: practiceFeatures.has("ABACUS_PRACTICE")
+        hasAbacusPractice: practiceFeatures.has("ABACUS_PRACTICE"),
+        averageScore: row.averageScore,
+        trend: row.trend,
+        attendancePercent: row.attendancePercent,
+        worksheetCompletionPercent: row.worksheetCompletionPercent,
+        riskLevel: row.hasRisk ? "AT_RISK" : "HEALTHY"
       };
-    })
+      })
+    }
   );
 });
 

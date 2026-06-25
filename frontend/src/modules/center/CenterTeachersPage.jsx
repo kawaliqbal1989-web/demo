@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { CapacityInlineNotice, buildCapacityRequestHref } from "../../components/CapacityGovernance";
 import { DataTable } from "../../components/DataTable";
@@ -7,9 +7,12 @@ import { PageHeader } from "../../components/PageHeader";
 import { useCenterCapacitySnapshot } from "../../hooks/useCenterCapacitySnapshot";
 import { createTeacher, listTeachers, resetTeacherPassword, shiftTeacherStudents, updateTeacher, uploadTeacherPhoto } from "../../services/teachersService";
 import { listStudents } from "../../services/studentsService";
+import { getAnalyticsAttendance, getAnalyticsWorksheets, getCenterBatchHealthDashboard, getCenterTeacherOperationsDashboard, getStudent360 } from "../../services/centerService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { resolveAssetUrl } from "../../utils/assetUrls";
 import { buildCapacityLimitMessage, shouldDisableCapacityAction } from "../../utils/capacityGovernance";
+import { downloadBlob } from "../../utils/downloadBlob";
+import { generateLeaderboardPdf } from "../../utils/pdfExport";
 
 const photoFrameStyle = {
   display: "inline-flex",
@@ -30,6 +33,83 @@ const buildPhotoStyle = (size, objectFit = "cover") => ({
   border: "1px solid var(--color-border)",
   background: "var(--color-bg-card)"
 });
+
+function toNumberOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function clampPercent(value) {
+  const n = toNumberOrNull(value);
+  if (n === null) return null;
+  return Math.max(0, Math.min(100, n));
+}
+
+function asPercentText(value) {
+  const n = toNumberOrNull(value);
+  return n === null ? "--" : `${n.toFixed(1)}%`;
+}
+
+function asNumberText(value) {
+  const n = toNumberOrNull(value);
+  return n === null ? "--" : n.toFixed(1);
+}
+
+function csvEscape(value) {
+  const text = String(value ?? "");
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function getRatingLabel(score) {
+  const s = toNumberOrNull(score) ?? 0;
+  if (s >= 85) return { label: "Excellent", color: "#16a34a" };
+  if (s >= 70) return { label: "Good", color: "#ca8a04" };
+  if (s >= 55) return { label: "Needs Improvement", color: "#ea580c" };
+  return { label: "Critical", color: "#dc2626" };
+}
+
+function buildTeacherRating({ attendance, avgScore, worksheetCompletion, promotionReady, highRisk, students }) {
+  const att = clampPercent(attendance) ?? 0;
+  const score = clampPercent(avgScore) ?? 0;
+  const completion = clampPercent(worksheetCompletion) ?? 0;
+  const studentCount = Math.max(1, Number(students || 0));
+  const promotionRate = clampPercent((Number(promotionReady || 0) / studentCount) * 100) ?? 0;
+  const riskRate = clampPercent((Number(highRisk || 0) / studentCount) * 100) ?? 0;
+
+  const weighted = (att * 0.32) + (score * 0.32) + (completion * 0.2) + (promotionRate * 0.16) - (riskRate * 0.2);
+  return Math.max(0, Math.min(100, Number(weighted.toFixed(1))));
+}
+
+function buildTeacherDashboardText(summary, rows) {
+  const lines = [
+    "Teacher Performance Dashboard",
+    "",
+    `Total Teachers: ${summary.totalTeachers}`,
+    `Active Teachers: ${summary.activeTeachers}`,
+    `Average Student Score: ${summary.avgStudentScore.toFixed(1)}%`,
+    `Average Attendance: ${summary.avgAttendance.toFixed(1)}%`,
+    `Promotion Ready Students: ${summary.promotionReadyStudents}`,
+    `High Risk Students: ${summary.highRiskStudents}`,
+    "",
+    "Teacher Metrics:",
+    ...rows.map((row) => [
+      row.teacherName,
+      `Batches ${row.assignedBatches}`,
+      `Students ${row.students}`,
+      `Attendance ${asPercentText(row.attendancePercent)}`,
+      `Avg Score ${asPercentText(row.averageScore)}`,
+      `Worksheet ${asPercentText(row.worksheetCompletionPercent)}`,
+      `Promotion Ready ${row.promotionReady}`,
+      `High Risk ${row.highRisk}`,
+      `Inactive ${row.inactiveStudents}`,
+      `Rating ${row.rating.label}`
+    ].join(" | "))
+  ];
+
+  return lines.join("\n");
+}
 
 function CenterTeachersPage() {
   const {
@@ -92,6 +172,18 @@ function CenterTeachersPage() {
   const [shiftSaving, setShiftSaving] = useState(false);
   const [shiftError, setShiftError] = useState("");
 
+  const [teacherOpsItems, setTeacherOpsItems] = useState([]);
+  const [batchHealthItems, setBatchHealthItems] = useState([]);
+  const [attendanceItems, setAttendanceItems] = useState([]);
+  const [worksheetItems, setWorksheetItems] = useState([]);
+  const [student360Cache, setStudent360Cache] = useState({});
+  const [detailsLoadingByTeacherId, setDetailsLoadingByTeacherId] = useState({});
+  const [expandedByTeacherId, setExpandedByTeacherId] = useState({});
+  const [performanceFilter, setPerformanceFilter] = useState("all");
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardError, setDashboardError] = useState("");
+  const [copyState, setCopyState] = useState("");
+
   const toDateInputValue = (value) => {
     if (!value) return "";
     const asString = String(value);
@@ -146,9 +238,338 @@ function CenterTeachersPage() {
     }
   };
 
+  const loadPerformanceAnalytics = async () => {
+    setDashboardLoading(true);
+    setDashboardError("");
+    try {
+      const [teacherOpsRes, batchHealthRes, attendanceRes, worksheetRes, allStudentsRes] = await Promise.all([
+        getCenterTeacherOperationsDashboard({ limit: 500, offset: 0 }),
+        getCenterBatchHealthDashboard({ limit: 500, offset: 0 }),
+        getAnalyticsAttendance({ limit: 5000, offset: 0 }),
+        getAnalyticsWorksheets({ limit: 5000, offset: 0 }),
+        listStudents({ limit: 5000, offset: 0 })
+      ]);
+
+      setTeacherOpsItems(Array.isArray(teacherOpsRes?.data?.items) ? teacherOpsRes.data.items : []);
+
+      setBatchHealthItems(Array.isArray(batchHealthRes?.data?.items) ? batchHealthRes.data.items : []);
+      setAttendanceItems(Array.isArray(attendanceRes?.data?.items) ? attendanceRes.data.items : []);
+      setWorksheetItems(Array.isArray(worksheetRes?.data?.items) ? worksheetRes.data.items : []);
+
+      const studentItems = Array.isArray(allStudentsRes?.data?.items)
+        ? allStudentsRes.data.items
+        : Array.isArray(allStudentsRes?.data)
+          ? allStudentsRes.data
+          : [];
+
+      const nextCache = {};
+      for (const student of studentItems) {
+        if (!student?.id) continue;
+        const teacherUserId = student?.currentTeacher?.id || student?.currentTeacherUserId || student?.batchEnrollments?.[0]?.assignedTeacher?.id || null;
+        const batchIds = Array.from(
+          new Set(
+            (Array.isArray(student?.batchEnrollments) ? student.batchEnrollments : [])
+              .filter((enrollment) => {
+                const assignedTeacherId = enrollment?.assignedTeacher?.id || enrollment?.assignedTeacherId || null;
+                return String(assignedTeacherId || "") === String(teacherUserId || "");
+              })
+              .map((enrollment) => enrollment?.batchId || enrollment?.batch?.id || null)
+              .filter(Boolean)
+              .map((id) => String(id))
+          )
+        );
+        nextCache[student.id] = {
+          studentId: student.id,
+          teacherUserId,
+          teacherName: student?.currentTeacher?.teacherProfile?.fullName || student?.currentTeacher?.username || student?.batchEnrollments?.[0]?.assignedTeacher?.teacherProfile?.fullName || "",
+          fullName: `${student?.firstName || ""} ${student?.lastName || ""}`.trim(),
+          admissionNo: student?.admissionNo || "",
+          levelName: student?.effectiveLevel?.name || student?.level?.name || "",
+          riskLevel: String(student?.riskLevel || "").toUpperCase(),
+          isActive: Boolean(student?.isActive),
+          batchIds
+        };
+      }
+      setStudent360Cache(nextCache);
+    } catch (err) {
+      setDashboardError(getFriendlyErrorMessage(err) || "Failed to load teacher performance dashboard.");
+      setTeacherOpsItems([]);
+      setBatchHealthItems([]);
+      setAttendanceItems([]);
+      setWorksheetItems([]);
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
   useEffect(() => {
     void load();
   }, []);
+
+  useEffect(() => {
+    void loadPerformanceAnalytics();
+  }, []);
+
+  const studentByTeacher = useMemo(() => {
+    const map = new Map();
+    for (const item of Object.values(student360Cache)) {
+      const teacherUserId = item?.teacherUserId;
+      if (!teacherUserId) continue;
+      if (!map.has(teacherUserId)) map.set(teacherUserId, []);
+      map.get(teacherUserId).push(item);
+    }
+    return map;
+  }, [student360Cache]);
+
+  const teacherBatchIdsByTeacher = useMemo(() => {
+    const map = new Map();
+    for (const item of Object.values(student360Cache)) {
+      const teacherUserId = item?.teacherUserId;
+      if (!teacherUserId) continue;
+      if (!map.has(teacherUserId)) map.set(teacherUserId, new Set());
+      const set = map.get(teacherUserId);
+      for (const batchId of Array.isArray(item?.batchIds) ? item.batchIds : []) {
+        if (batchId) set.add(String(batchId));
+      }
+    }
+    return map;
+  }, [student360Cache]);
+
+  const attendanceByAdmissionNo = useMemo(() => {
+    const map = new Map();
+    for (const item of attendanceItems) {
+      if (item?.admissionNo) map.set(String(item.admissionNo), item);
+    }
+    return map;
+  }, [attendanceItems]);
+
+  const worksheetByAdmissionNo = useMemo(() => {
+    const map = new Map();
+    for (const item of worksheetItems) {
+      if (item?.admissionNo) map.set(String(item.admissionNo), item);
+    }
+    return map;
+  }, [worksheetItems]);
+
+  const teacherPerformanceRows = useMemo(() => {
+    return rows.map((teacherRow) => {
+      const teacherUserId = String(teacherRow?.id || "");
+      const teacherName = teacherRow?.teacherProfile?.fullName || teacherRow?.username || "Teacher";
+      const teacherOps = teacherOpsItems.find((x) => String(x?.teacherUserId || "") === teacherUserId) || null;
+      const students = studentByTeacher.get(teacherUserId) || [];
+
+      let totalAttendance = 0;
+      let attendanceCount = 0;
+      let totalScore = 0;
+      let scoreCount = 0;
+      let totalWorksheetCompletion = 0;
+      let completionCount = 0;
+      let promotionReady = 0;
+      let highRisk = 0;
+      let inactiveStudents = 0;
+
+      for (const student of students) {
+        const attendance = attendanceByAdmissionNo.get(String(student?.admissionNo || ""));
+        const worksheet = worksheetByAdmissionNo.get(String(student?.admissionNo || ""));
+
+        const attendanceRate = clampPercent(attendance?.attendanceRate);
+        if (attendanceRate !== null) {
+          totalAttendance += attendanceRate;
+          attendanceCount += 1;
+        }
+
+        const avgScore = clampPercent(worksheet?.avgScore);
+        if (avgScore !== null) {
+          totalScore += avgScore;
+          scoreCount += 1;
+        }
+
+        const assignedCount = Number(worksheet?.assignedCount || 0);
+        const completedCount = Number(worksheet?.completedCount || 0);
+        if (assignedCount > 0) {
+          totalWorksheetCompletion += (completedCount / assignedCount) * 100;
+          completionCount += 1;
+        }
+
+        if (student?.riskLevel === "HIGH" || student?.riskLevel === "CRITICAL") highRisk += 1;
+        if (!student?.isActive) inactiveStudents += 1;
+
+        if (
+          (attendanceRate !== null && attendanceRate >= 75)
+          && (avgScore !== null && avgScore >= 75)
+          && (assignedCount === 0 || completedCount / Math.max(1, assignedCount) >= 0.8)
+        ) {
+          promotionReady += 1;
+        }
+      }
+
+      const averageAttendance = attendanceCount ? Number((totalAttendance / attendanceCount).toFixed(1)) : null;
+      const averageScore = scoreCount ? Number((totalScore / scoreCount).toFixed(1)) : null;
+      const worksheetCompletionPercent = completionCount ? Number((totalWorksheetCompletion / completionCount).toFixed(1)) : null;
+
+      const ratingScore = buildTeacherRating({
+        attendance: averageAttendance,
+        avgScore: averageScore,
+        worksheetCompletion: worksheetCompletionPercent,
+        promotionReady,
+        highRisk,
+        students: students.length
+      });
+      const rating = getRatingLabel(ratingScore);
+
+      const assignedBatches = Number(teacherOps?.assignedBatches || 0);
+
+      return {
+        teacherUserId,
+        teacherName,
+        assignedBatches,
+        students: students.length,
+        attendancePercent: averageAttendance,
+        averageScore,
+        worksheetCompletionPercent,
+        promotionReady,
+        highRisk,
+        inactiveStudents,
+        ratingScore,
+        rating,
+        teacherOps,
+        studentsList: students
+      };
+    });
+  }, [rows, teacherOpsItems, studentByTeacher, attendanceByAdmissionNo, worksheetByAdmissionNo]);
+
+
+  const filteredPerformanceRows = useMemo(() => {
+    if (performanceFilter === "all") return teacherPerformanceRows;
+    if (performanceFilter === "excellent") return teacherPerformanceRows.filter((row) => row.rating.label === "Excellent");
+    if (performanceFilter === "good") return teacherPerformanceRows.filter((row) => row.rating.label === "Good");
+    if (performanceFilter === "needs-improvement") return teacherPerformanceRows.filter((row) => row.rating.label === "Needs Improvement");
+    if (performanceFilter === "critical") return teacherPerformanceRows.filter((row) => row.rating.label === "Critical");
+    if (performanceFilter === "low-attendance") return teacherPerformanceRows.filter((row) => (toNumberOrNull(row.attendancePercent) ?? 0) < 75);
+    if (performanceFilter === "low-score") return teacherPerformanceRows.filter((row) => (toNumberOrNull(row.averageScore) ?? 0) < 75);
+    if (performanceFilter === "high-risk") return teacherPerformanceRows.filter((row) => Number(row.highRisk || 0) > 0);
+    if (performanceFilter === "promotion-ready") return teacherPerformanceRows.filter((row) => Number(row.promotionReady || 0) > 0);
+    if (performanceFilter === "needs-review") return teacherPerformanceRows.filter((row) => Number(row.highRisk || 0) > 0 || (toNumberOrNull(row.attendancePercent) ?? 0) < 75 || (toNumberOrNull(row.averageScore) ?? 0) < 75 || Number(row.promotionReady || 0) === 0);
+    return teacherPerformanceRows;
+  }, [teacherPerformanceRows, performanceFilter]);
+
+  const dashboardSummary = useMemo(() => {
+    const totalTeachers = teacherPerformanceRows.length;
+    const activeTeachers = rows.filter((row) => Boolean(row?.isActive)).length;
+
+    const avgStudentScoreValues = teacherPerformanceRows
+      .map((row) => toNumberOrNull(row.averageScore))
+      .filter((value) => value !== null);
+    const avgAttendanceValues = teacherPerformanceRows
+      .map((row) => toNumberOrNull(row.attendancePercent))
+      .filter((value) => value !== null);
+
+    const avgStudentScore = avgStudentScoreValues.length
+      ? Number((avgStudentScoreValues.reduce((sum, v) => sum + v, 0) / avgStudentScoreValues.length).toFixed(1))
+      : 0;
+    const avgAttendance = avgAttendanceValues.length
+      ? Number((avgAttendanceValues.reduce((sum, v) => sum + v, 0) / avgAttendanceValues.length).toFixed(1))
+      : 0;
+
+    const promotionReadyStudents = teacherPerformanceRows.reduce((sum, row) => sum + Number(row.promotionReady || 0), 0);
+    const highRiskStudents = teacherPerformanceRows.reduce((sum, row) => sum + Number(row.highRisk || 0), 0);
+
+    return {
+      totalTeachers,
+      activeTeachers,
+      avgStudentScore,
+      avgAttendance,
+      promotionReadyStudents,
+      highRiskStudents
+    };
+  }, [teacherPerformanceRows, rows]);
+
+  const rankingData = useMemo(
+    () => [...filteredPerformanceRows].sort((a, b) => b.ratingScore - a.ratingScore || a.teacherName.localeCompare(b.teacherName)),
+    [filteredPerformanceRows]
+  );
+
+  const handleCopyPerformance = async () => {
+    const text = buildTeacherDashboardText(dashboardSummary, filteredPerformanceRows);
+    let copied = false;
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      }
+    } catch (_err) {
+      copied = false;
+    }
+    if (!copied) {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      copied = document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    setCopyState(copied ? "Copied" : "Copy failed");
+    setTimeout(() => setCopyState(""), 1400);
+  };
+
+  const handlePrintPerformance = () => {
+    const escaped = buildTeacherDashboardText(dashboardSummary, filteredPerformanceRows)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const popup = window.open("", "_blank", "noopener,noreferrer,width=1100,height=760");
+    if (!popup) return;
+    popup.document.write(`<!doctype html><html><head><title>Teacher Performance Dashboard</title><style>body{font-family:Arial,sans-serif;padding:20px;color:#111827}pre{white-space:pre-wrap;line-height:1.45;font-size:13px}</style></head><body><pre>${escaped}</pre></body></html>`);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+
+  const handleExportPerformanceCsv = () => {
+    const headers = [
+      "Teacher",
+      "Assigned Batches",
+      "Students",
+      "Attendance %",
+      "Average Score",
+      "Worksheet Completion %",
+      "Promotion Ready",
+      "High Risk",
+      "Inactive Students",
+      "Overall Rating"
+    ];
+    const lines = [headers.map(csvEscape).join(",")];
+    for (const row of filteredPerformanceRows) {
+      lines.push([
+        row.teacherName,
+        row.assignedBatches,
+        row.students,
+        row.attendancePercent === null ? "" : row.attendancePercent,
+        row.averageScore === null ? "" : row.averageScore,
+        row.worksheetCompletionPercent === null ? "" : row.worksheetCompletionPercent,
+        row.promotionReady,
+        row.highRisk,
+        row.inactiveStudents,
+        row.rating.label
+      ].map(csvEscape).join(","));
+    }
+    downloadBlob(new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" }), "teacher_performance_dashboard.csv");
+  };
+
+  const handleExportPerformancePdf = () => {
+    const doc = generateLeaderboardPdf({
+      title: "Teacher Performance Dashboard",
+      rows: rankingData.map((row, idx) => ({
+        rank: idx + 1,
+        studentName: row.teacherName,
+        avgScore: row.ratingScore,
+        totalWorksheets: row.rating.label
+      }))
+    });
+    doc.save("teacher_performance_dashboard.pdf");
+  };
 
   useEffect(() => {
     if (!photoFile) {
@@ -520,8 +941,335 @@ function CenterTeachersPage() {
     return <SkeletonLoader variant="table" rows={6} />;
   }
 
+  const teacherPerformanceColumns = [
+    { key: "teacher", header: "Teacher", render: (r) => r.teacherName },
+    { key: "assignedBatches", header: "Assigned Batches", render: (r) => String(r.assignedBatches) },
+    { key: "students", header: "Students", render: (r) => String(r.students) },
+    { key: "attendance", header: "Attendance %", render: (r) => asPercentText(r.attendancePercent) },
+    { key: "avgScore", header: "Average Score", render: (r) => asPercentText(r.averageScore) },
+    { key: "worksheetCompletion", header: "Worksheet Completion %", render: (r) => asPercentText(r.worksheetCompletionPercent) },
+    { key: "promotionReady", header: "Promotion Ready", render: (r) => String(r.promotionReady) },
+    { key: "highRisk", header: "High Risk", render: (r) => String(r.highRisk) },
+    { key: "inactiveStudents", header: "Inactive Students", render: (r) => String(r.inactiveStudents) },
+    {
+      key: "overallRating",
+      header: "Overall Rating",
+      render: (r) => (
+        <span style={{ padding: "2px 8px", borderRadius: 999, background: `${r.rating.color}22`, color: r.rating.color, fontSize: 12, fontWeight: 700 }}>
+          {r.rating.label}
+        </span>
+      )
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (r) => (
+        <button
+          className="button secondary"
+          style={{ width: "auto" }}
+          onClick={() => {
+            const teacherId = String(r.teacherUserId);
+            setExpandedByTeacherId((prev) => ({ ...prev, [teacherId]: !prev[teacherId] }));
+            if (!detailsLoadingByTeacherId[teacherId]) {
+              setDetailsLoadingByTeacherId((prev) => ({ ...prev, [teacherId]: true }));
+              const firstStudentId = r.studentsList?.[0]?.studentId;
+              if (firstStudentId && !student360Cache[firstStudentId]?.recentActivity) {
+                void getStudent360(firstStudentId)
+                  .then((resp) => {
+                    const data = resp?.data || resp || {};
+                    setStudent360Cache((prev) => ({
+                      ...prev,
+                      [firstStudentId]: {
+                        ...(prev[firstStudentId] || {}),
+                        recentActivity: Array.isArray(data?.recentActivity) ? data.recentActivity : [],
+                        weakTopics: Array.isArray(data?.engagement?.weakTopics?.items)
+                          ? data.engagement.weakTopics.items
+                          : Array.isArray(data?.weakTopics)
+                            ? data.weakTopics
+                            : []
+                      }
+                    }));
+                  })
+                  .catch(() => {})
+                  .finally(() => setDetailsLoadingByTeacherId((prev) => ({ ...prev, [teacherId]: false })));
+              } else {
+                setDetailsLoadingByTeacherId((prev) => ({ ...prev, [teacherId]: false }));
+              }
+            }
+          }}
+        >
+          {expandedByTeacherId[String(r.teacherUserId)] ? "Hide" : "Expand"}
+        </button>
+      )
+    }
+  ];
+
   return (
     <section style={{ display: "grid", gap: 12 }}>
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 800 }}>Teacher Performance Dashboard</div>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+              Center-wide performance overview using existing attendance, worksheet, promotion, and batch-health analytics.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="button secondary" style={{ width: "auto" }} onClick={() => void handleCopyPerformance()}>Copy</button>
+            <button className="button secondary" style={{ width: "auto" }} onClick={handlePrintPerformance}>Print</button>
+            <button className="button secondary" style={{ width: "auto" }} onClick={handleExportPerformanceCsv}>CSV</button>
+            <button className="button secondary" style={{ width: "auto" }} onClick={handleExportPerformancePdf}>PDF</button>
+            <button className="button secondary" style={{ width: "auto" }} onClick={() => void loadPerformanceAnalytics()} disabled={dashboardLoading}>Refresh</button>
+          </div>
+        </div>
+
+        {copyState ? <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>{copyState}</div> : null}
+        {dashboardError ? <div className="error" style={{ fontSize: 12 }}>{dashboardError}</div> : null}
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+          {[
+            { label: "Total Teachers", value: dashboardSummary.totalTeachers },
+            { label: "Active Teachers", value: dashboardSummary.activeTeachers },
+            { label: "Average Student Score", value: `${dashboardSummary.avgStudentScore.toFixed(1)}%` },
+            { label: "Average Attendance", value: `${dashboardSummary.avgAttendance.toFixed(1)}%` },
+            { label: "Promotion Ready Students", value: dashboardSummary.promotionReadyStudents },
+            { label: "High Risk Students", value: dashboardSummary.highRiskStudents }
+          ].map((item) => (
+            <div key={item.label} style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10 }}>
+              <div style={{ fontSize: 11, color: "var(--color-text-muted)", textTransform: "uppercase" }}>{item.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 800 }}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {[
+            { key: "all", label: "All Teachers" },
+            { key: "excellent", label: "Excellent" },
+            { key: "good", label: "Good" },
+            { key: "needs-improvement", label: "Needs Improvement" },
+            { key: "critical", label: "Critical" },
+            { key: "low-attendance", label: "Low Attendance" },
+            { key: "low-score", label: "Low Score" },
+            { key: "high-risk", label: "High Risk" }
+          ].map((f) => (
+            <button
+              key={f.key}
+              className="button secondary"
+              style={{
+                width: "auto",
+                background: performanceFilter === f.key ? "var(--color-bg-muted)" : "transparent",
+                borderColor: performanceFilter === f.key ? "var(--color-border-strong)" : "var(--color-border)"
+              }}
+              onClick={() => setPerformanceFilter(f.key)}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+          <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>Teacher Ranking</div>
+            {rankingData.slice(0, 5).length ? rankingData.slice(0, 5).map((row, idx) => (
+              <div key={`rank-${row.teacherUserId}`} style={{ display: "grid", gridTemplateColumns: "24px 1fr auto", gap: 8, fontSize: 12 }}>
+                <div>#{idx + 1}</div>
+                <div>{row.teacherName}</div>
+                <div>{asNumberText(row.ratingScore)}</div>
+              </div>
+            )) : <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No teacher ranking data.</div>}
+          </div>
+
+          <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>Promotion Readiness</div>
+            {rankingData.slice(0, 6).map((row) => {
+              const pct = row.students > 0 ? Number(((row.promotionReady / row.students) * 100).toFixed(1)) : 0;
+              return (
+                <div key={`promo-${row.teacherUserId}`} style={{ display: "grid", gap: 2 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}><span>{row.teacherName}</span><span>{pct.toFixed(1)}%</span></div>
+                  <div style={{ height: 6, background: "var(--color-bg-muted)", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: "#16a34a" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>Attendance Comparison</div>
+            {rankingData.slice(0, 6).map((row) => {
+              const pct = clampPercent(row.attendancePercent) ?? 0;
+              return (
+                <div key={`att-${row.teacherUserId}`} style={{ display: "grid", gap: 2 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}><span>{row.teacherName}</span><span>{pct.toFixed(1)}%</span></div>
+                  <div style={{ height: 6, background: "var(--color-bg-muted)", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: "#0ea5e9" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 700 }}>Average Score Comparison</div>
+            {rankingData.slice(0, 6).map((row) => {
+              const pct = clampPercent(row.averageScore) ?? 0;
+              return (
+                <div key={`score-${row.teacherUserId}`} style={{ display: "grid", gap: 2 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}><span>{row.teacherName}</span><span>{pct.toFixed(1)}%</span></div>
+                  <div style={{ height: 6, background: "var(--color-bg-muted)", borderRadius: 999, overflow: "hidden" }}>
+                    <div style={{ width: `${pct}%`, height: "100%", background: "#a855f7" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 6 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--color-text-muted)", textTransform: "uppercase" }}>Teacher Quick Filter</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { key: "all", label: "All" },
+              { key: "high-risk", label: "High Risk Students" },
+              { key: "low-attendance", label: "Low Attendance" },
+              { key: "low-score", label: "Low Average Score" },
+              { key: "promotion-ready", label: "Promotion Ready" },
+              { key: "needs-review", label: "Needs Review" }
+            ].map((f) => (
+              <button
+                key={`quick-${f.key}`}
+                className="button secondary"
+                style={{
+                  width: "auto",
+                  background: performanceFilter === f.key ? "var(--color-bg-muted)" : "transparent",
+                  borderColor: performanceFilter === f.key ? "var(--color-border-strong)" : "var(--color-border)"
+                }}
+                onClick={() => setPerformanceFilter(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {dashboardLoading ? (
+          <SkeletonLoader variant="table" rows={3} />
+        ) : filteredPerformanceRows.length === 0 ? (
+          <div style={{ border: "1px dashed var(--color-border)", borderRadius: 8, padding: 14, textAlign: "center", fontSize: 12, color: "var(--color-text-muted)" }}>
+            No teachers found for the selected filter.
+          </div>
+        ) : (
+          <DataTable columns={teacherPerformanceColumns} rows={filteredPerformanceRows} keyField="teacherUserId" />
+        )}
+
+        {filteredPerformanceRows.filter((row) => expandedByTeacherId[String(row.teacherUserId)]).map((row) => {
+          const teacherId = String(row.teacherUserId);
+          const teacherBatchIds = teacherBatchIdsByTeacher.get(teacherId) || new Set();
+          const teacherBatchRows = batchHealthItems.filter((batch) => teacherBatchIds.has(String(batch?.batchId || batch?.id || "")));
+
+          const weakTopicCounter = new Map();
+          const riskDistribution = { critical: 0, high: 0, normal: 0 };
+          const recentActivity = [];
+
+          for (const student of row.studentsList || []) {
+            const cached = student360Cache[student.studentId] || {};
+            const weakTopics = Array.isArray(cached?.weakTopics) ? cached.weakTopics : [];
+            for (const topic of weakTopics) {
+              const key = String(topic?.topic || topic?.name || topic || "").trim();
+              if (!key) continue;
+              weakTopicCounter.set(key, (weakTopicCounter.get(key) || 0) + 1);
+            }
+
+            const risk = String(student?.riskLevel || "").toUpperCase();
+            if (risk === "CRITICAL") riskDistribution.critical += 1;
+            else if (risk === "HIGH") riskDistribution.high += 1;
+            else riskDistribution.normal += 1;
+
+            const acts = Array.isArray(cached?.recentActivity) ? cached.recentActivity : [];
+            for (const act of acts.slice(0, 3)) {
+              recentActivity.push({
+                studentName: student.fullName,
+                date: act?.date || "",
+                title: act?.title || "Activity",
+                detail: act?.detail || ""
+              });
+            }
+          }
+
+          const topWeakTopics = Array.from(weakTopicCounter.entries())
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .slice(0, 6);
+
+          recentActivity.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+          return (
+            <div key={`expanded-dashboard-${teacherId}`} style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700 }}>{row.teacherName}</div>
+              {detailsLoadingByTeacherId[teacherId] ? (
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Loading expanded details...</div>
+              ) : (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 8 }}>
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>Batch Health Summary</div>
+                      <div style={{ fontSize: 12 }}>Batches: <strong>{row.assignedBatches}</strong></div>
+                      <div style={{ fontSize: 12 }}>Avg Attendance: <strong>{asPercentText(row.attendancePercent)}</strong></div>
+                      <div style={{ fontSize: 12 }}>Worksheet Completion: <strong>{asPercentText(row.worksheetCompletionPercent)}</strong></div>
+                      <div style={{ fontSize: 12 }}>At-risk Batches: <strong>{teacherBatchRows.filter((b) => Number(b?.operationalHealthScore || 0) < 65).length}</strong></div>
+                    </div>
+
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>Promotion Summary</div>
+                      <div style={{ fontSize: 12 }}>Promotion Ready: <strong>{row.promotionReady}</strong></div>
+                      <div style={{ fontSize: 12 }}>Students: <strong>{row.students}</strong></div>
+                      <div style={{ fontSize: 12 }}>Readiness Rate: <strong>{row.students ? ((row.promotionReady / row.students) * 100).toFixed(1) : "0.0"}%</strong></div>
+                    </div>
+
+                    <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700 }}>Student Risk Distribution</div>
+                      <div style={{ fontSize: 12 }}>Critical: <strong>{riskDistribution.critical}</strong></div>
+                      <div style={{ fontSize: 12 }}>High: <strong>{riskDistribution.high}</strong></div>
+                      <div style={{ fontSize: 12 }}>Normal: <strong>{riskDistribution.normal}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>Weak Topics Across Batches</div>
+                    {topWeakTopics.length ? (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {topWeakTopics.map(([topic, count]) => (
+                          <span key={`${teacherId}-${topic}`} style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "var(--color-bg-muted)", color: "var(--color-text-muted)" }}>
+                            {topic} ({count})
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No weak topic data available yet.</div>
+                    )}
+                  </div>
+
+                  <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 6 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700 }}>Recent Activity</div>
+                    {recentActivity.length ? recentActivity.slice(0, 8).map((item, idx) => (
+                      <div key={`${teacherId}-activity-${idx}`} style={{ display: "grid", gridTemplateColumns: "90px 1fr", gap: 8, borderBottom: "1px dashed var(--color-border)", paddingBottom: 6 }}>
+                        <div style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{item.date ? String(item.date).slice(0, 10) : "-"}</div>
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <div style={{ fontSize: 12, fontWeight: 700 }}>{item.title} • {item.studentName}</div>
+                          {item.detail ? <div style={{ fontSize: 12 }}>{item.detail}</div> : null}
+                        </div>
+                      </div>
+                    )) : (
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No recent activity captured.</div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
       <PageHeader title="Teachers" subtitle="Create and manage teachers for this center." />
 
       <CapacityInlineNotice

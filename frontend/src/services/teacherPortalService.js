@@ -50,13 +50,34 @@ async function saveTeacherMockTestResults(mockTestId, results) {
   return response.data;
 }
 
-async function listMyStudents({ q = "" } = {}) {
+async function listMyStudents({ q = "", batchId = "" } = {}) {
   const response = await apiClient.get("/teacher/students", {
     params: {
-      q: q || undefined
+      q: q || undefined,
+      batchId: batchId || undefined
     }
   });
-  return response.data;
+
+  const payload = response.data;
+  const raw = payload?.data;
+
+  if (Array.isArray(raw)) {
+    return {
+      ...payload,
+      data: raw,
+      batchSummary: null
+    };
+  }
+
+  if (raw && typeof raw === "object") {
+    return {
+      ...payload,
+      data: Array.isArray(raw.items) ? raw.items : [],
+      batchSummary: raw.batchSummary || null
+    };
+  }
+
+  return payload;
 }
 
 async function getTeacherFinancialOverview({ limit = 25, offset = 0 } = {}) {

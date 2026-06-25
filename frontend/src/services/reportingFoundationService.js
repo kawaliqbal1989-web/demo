@@ -30,31 +30,31 @@ async function requestReportBlob(path, params = {}, config = {}) {
 }
 
 function getBusinessPartnerFoundationReport(params = {}, config = {}) {
-  return requestReport("/reports/bp/foundation", params, config);
+  return requestReport("/reports/bp", params, config);
 }
 
 function getFranchiseFoundationReport(params = {}, config = {}) {
-  return requestReport("/reports/franchise/foundation", params, config);
+  return requestReport("/reports/franchise", params, config);
 }
 
 function getCenterFoundationReport(params = {}, config = {}) {
-  return requestReport("/reports/center/foundation", params, config);
+  return requestReport("/reports/center", params, config);
 }
 
 function getTeacherFoundationReport(params = {}, config = {}) {
-  return requestReport("/reports/teacher/foundation", params, config);
+  return requestReport("/reports/teacher", params, config);
 }
 
 function getStudentFoundationReport(params = {}, config = {}) {
-  return requestReport("/reports/student/foundation", params, config);
+  return requestReport("/reports/student", params, config);
 }
 
 function getParentFoundationReport(params = {}, config = {}) {
-  return requestReport("/reports/parent/foundation", params, config);
+  return requestReport("/reports/parent", params, config);
 }
 
 function getGovernanceAuditSummaryReport(params = {}, config = {}) {
-  return requestReport("/reports/audit/governance-summary", params, config);
+  return requestReport("/reports/audit", params, config);
 }
 
 function getWorkflowLifecycleSummaryReport(params = {}, config = {}) {
@@ -66,11 +66,11 @@ function getPrintableReport(reportKey, params = {}, config = {}) {
 }
 
 function exportReportPdf(reportKey, params = {}, config = {}) {
-  return requestReport(`/reports/exports/pdf/${reportKey}`, params, config);
+  return requestReport("/reports/export/pdf", { ...params, reportKey }, config);
 }
 
 function exportReportExcel(reportKey, params = {}, config = {}) {
-  return requestReport(`/reports/exports/excel/${reportKey}`, params, config);
+  return requestReport("/reports/export/excel", { ...params, reportKey }, config);
 }
 
 function getReportExportJobs(params = {}, config = {}) {

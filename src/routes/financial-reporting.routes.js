@@ -59,6 +59,34 @@ import { requireRole } from "../middleware/rbac.js";
 
 const financialReportingRouter = Router();
 
+const REPORT_ROUTE_KEY_BY_ALIAS = Object.freeze({
+  bp: "bp-operational",
+  franchise: "franchise-operational",
+  center: "center-operational",
+  teacher: "teacher-productivity",
+  student: "student-engagement",
+  parent: "parent-visibility",
+  audit: "governance-audit",
+  workflow: "workflow-lifecycle"
+});
+
+function resolveReportKeyFromRequest(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+  return REPORT_ROUTE_KEY_BY_ALIAS[normalized] || normalized;
+}
+
+function attachReportKeyFromQuery(req, res, next) {
+  const reportKey = resolveReportKeyFromRequest(req.query.reportKey || req.query.report);
+  if (!reportKey) {
+    return res.apiError(400, "reportKey query parameter is required", "VALIDATION_ERROR");
+  }
+  req.params.reportKey = reportKey;
+  return next();
+}
+
 function prepareReportContext(req, res, next) {
   const reportKey = String(req.params.reportKey || "").trim().toLowerCase();
 
@@ -178,7 +206,23 @@ financialReportingRouter.get(
 );
 
 financialReportingRouter.get(
+  "/bp",
+  requireRole("BP"),
+  requireBusinessPartnerScope,
+  auditAction("BP_VIEW_REPORT_FOUNDATION", "REPORT", () => "bp-operational"),
+  getBusinessPartnerFoundationReport
+);
+
+financialReportingRouter.get(
   "/franchise/foundation",
+  requireRole("FRANCHISE"),
+  requireFranchiseScope,
+  auditAction("FRANCHISE_VIEW_REPORT_FOUNDATION", "REPORT", () => "franchise-operational"),
+  getFranchiseFoundationReport
+);
+
+financialReportingRouter.get(
+  "/franchise",
   requireRole("FRANCHISE"),
   requireFranchiseScope,
   auditAction("FRANCHISE_VIEW_REPORT_FOUNDATION", "REPORT", () => "franchise-operational"),
@@ -193,7 +237,21 @@ financialReportingRouter.get(
 );
 
 financialReportingRouter.get(
+  "/center",
+  requireRole("CENTER"),
+  auditAction("CENTER_VIEW_REPORT_FOUNDATION", "REPORT", () => "center-operational"),
+  getCenterFoundationReport
+);
+
+financialReportingRouter.get(
   "/teacher/foundation",
+  requireRole("TEACHER"),
+  auditAction("TEACHER_VIEW_REPORT_FOUNDATION", "REPORT", () => "teacher-productivity"),
+  getTeacherFoundationReport
+);
+
+financialReportingRouter.get(
+  "/teacher",
   requireRole("TEACHER"),
   auditAction("TEACHER_VIEW_REPORT_FOUNDATION", "REPORT", () => "teacher-productivity"),
   getTeacherFoundationReport
@@ -207,6 +265,13 @@ financialReportingRouter.get(
 );
 
 financialReportingRouter.get(
+  "/student",
+  requireStudent,
+  auditAction("STUDENT_VIEW_REPORT_FOUNDATION", "REPORT", () => "student-engagement"),
+  getStudentFoundationReport
+);
+
+financialReportingRouter.get(
   "/parent/foundation",
   requireParent,
   auditAction("PARENT_VIEW_REPORT_FOUNDATION", "REPORT", () => "parent-visibility"),
@@ -214,7 +279,21 @@ financialReportingRouter.get(
 );
 
 financialReportingRouter.get(
+  "/parent",
+  requireParent,
+  auditAction("PARENT_VIEW_REPORT_FOUNDATION", "REPORT", () => "parent-visibility"),
+  getParentFoundationReport
+);
+
+financialReportingRouter.get(
   "/audit/governance-summary",
+  requireRole("SUPERADMIN"),
+  auditAction("SUPERADMIN_VIEW_GOVERNANCE_AUDIT_REPORT", "REPORT", () => "governance-audit"),
+  getGovernanceAuditSummaryReport
+);
+
+financialReportingRouter.get(
+  "/audit",
   requireRole("SUPERADMIN"),
   auditAction("SUPERADMIN_VIEW_GOVERNANCE_AUDIT_REPORT", "REPORT", () => "governance-audit"),
   getGovernanceAuditSummaryReport
@@ -402,7 +481,23 @@ financialReportingRouter.get(
 );
 
 financialReportingRouter.get(
+  "/export/pdf",
+  attachReportKeyFromQuery,
+  prepareReportContext,
+  auditAction("EXPORT_REPORT_PDF", "REPORT", (req) => req.params.reportKey),
+  exportPdfReport
+);
+
+financialReportingRouter.get(
   "/exports/excel/:reportKey",
+  prepareReportContext,
+  auditAction("EXPORT_REPORT_EXCEL", "REPORT", (req) => req.params.reportKey),
+  exportExcelReport
+);
+
+financialReportingRouter.get(
+  "/export/excel",
+  attachReportKeyFromQuery,
   prepareReportContext,
   auditAction("EXPORT_REPORT_EXCEL", "REPORT", (req) => req.params.reportKey),
   exportExcelReport

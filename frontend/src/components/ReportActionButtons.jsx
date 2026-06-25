@@ -12,6 +12,7 @@ import {
   getReportExportOperationsSummary,
   retryReportExportJob
 } from "../services/reportingFoundationService";
+import { ReportExportButton } from "./ReportExportButton";
 
 function extractFilenameFromDisposition(disposition, fallback) {
   const match = String(disposition || "").match(/filename="?([^";]+)"?/i);
@@ -194,17 +195,13 @@ function ReportActionButtons({ reportKey, params = {}, hidePrint = false }) {
   return (
     <div style={{ display: "grid", gap: 10 }}>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {!hidePrint ? (
-          <button className="button secondary" style={{ width: "auto" }} type="button" onClick={handlePrint}>
-            Printable view
-          </button>
-        ) : null}
-        <button className="button secondary" style={{ width: "auto" }} type="button" disabled={isSubmitting} onClick={() => handleExport("pdf")}>
-          {isSubmitting ? "Queueing..." : "Export PDF"}
-        </button>
-        <button className="button secondary" style={{ width: "auto" }} type="button" disabled={isSubmitting} onClick={() => handleExport("excel")}>
-          {isSubmitting ? "Queueing..." : "Export Excel"}
-        </button>
+        <ReportExportButton
+          hidePrint={hidePrint}
+          busy={isSubmitting}
+          onPrint={handlePrint}
+          onExportPdf={() => handleExport("pdf")}
+          onExportExcel={() => handleExport("excel")}
+        />
       </div>
 
       <div style={panelStyle}>

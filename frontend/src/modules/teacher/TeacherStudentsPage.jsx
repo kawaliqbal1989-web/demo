@@ -710,20 +710,41 @@ function TeacherStudentsPage() {
   const loadStudents = async ({ query = "", batchId = "" } = {}) => {
     setLoading(true);
     setError("");
+
     try {
-      const data = await listMyStudents({ q: query, batchId });
-      const items = Array.isArray(data?.data) ? data.data : [];
-      const activeItems = items.filter((item) => item?.isActive !== false);
+      const response = await listMyStudents({ q: query, batchId });
+
+      // Backend response:
+      // {
+      //   success: true,
+      //   data: {
+      //     items: [...],
+      //     batchSummary: {...}
+      //   }
+      // }
+      const responsePayload = response?.data ?? response ?? {};
+      const normalizedItems = Array.isArray(responsePayload)
+        ? responsePayload
+        : Array.isArray(responsePayload?.items)
+          ? responsePayload.items
+          : Array.isArray(responsePayload?.data)
+            ? responsePayload.data
+            : [];
+      const normalizedBatchSummary = responsePayload?.batchSummary ?? response?.batchSummary ?? null;
+
+      const activeItems = normalizedItems.filter((item) => item?.isActive !== false);
+
       setRows(activeItems);
-      setBatchSummary(data?.batchSummary || null);
+      setBatchSummary(normalizedBatchSummary);
 
       const snapshotKey = batchId || "__all__";
+
       if (!String(query || "").trim()) {
         setBatchHealthSnapshotByBatchId((prev) => ({
           ...prev,
           [snapshotKey]: {
             rows: activeItems,
-            batchSummary: data?.batchSummary || null,
+            batchSummary: normalizedBatchSummary,
             capturedAt: new Date().toISOString()
           }
         }));
@@ -768,12 +789,7 @@ function TeacherStudentsPage() {
     return hit?.name || "Selected Batch";
   }, [selectedBatchId, batches]);
 
-  if (loading && batchesLoading) {
-    return <SkeletonLoader variant="table" rows={6} />;
-  }
-
   const total = rows.length;
-  const pageRows = rows.slice(offset, offset + limit);
 
   const summaryCards = [
     { label: "Total Students", value: String(batchSummary?.totalStudents ?? total) },
@@ -1004,6 +1020,8 @@ function TeacherStudentsPage() {
       isEmpty: totalStudents === 0
     };
   }, [batchHealthSource, student360ById, weakTopicAnalysisById]);
+
+  const pageRows = rows.slice(offset, offset + limit);
 
   const ensureWeakTopicAnalysis = async (studentId, student360Payload) => {
     if (weakTopicAnalysisById[studentId] || weakTopicLoadingById[studentId]) return;

@@ -252,6 +252,60 @@ describe("TEACHER PORTAL (acceptance)", () => {
     );
   });
 
+  test("Teacher sees students from batches assigned by batch-level assignment", async () => {
+    const batch3 = await prisma.batch.create({
+      data: {
+        tenantId: tenant.id,
+        hierarchyNodeId: centerUser.hierarchyNodeId,
+        name: `BATCH-${randomId("c")}`
+      }
+    });
+
+    await prisma.batchTeacherAssignment.create({
+      data: {
+        tenantId: tenant.id,
+        batchId: batch3.id,
+        teacherUserId: teacher1.id
+      }
+    });
+
+    const student3 = await prisma.student.create({
+      data: {
+        tenantId: tenant.id,
+        admissionNo: `ST-${randomId("3")}`,
+        firstName: "Batch",
+        lastName: "Assigned",
+        hierarchyNodeId: centerUser.hierarchyNodeId,
+        levelId: level1.id,
+        isActive: true
+      }
+    });
+
+    await prisma.enrollment.create({
+      data: {
+        tenantId: tenant.id,
+        hierarchyNodeId: centerUser.hierarchyNodeId,
+        studentId: student3.id,
+        batchId: batch3.id,
+        assignedTeacherUserId: null,
+        levelId: level1.id,
+        status: "ACTIVE"
+      }
+    });
+
+    const teacherLogin = await loginAs({ email: "teacher.one@abacusweb.local" });
+    const token = teacherLogin.body?.data?.access_token;
+
+    const res = await http.get("/api/teacher/students").set(authHeader(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body?.data?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ studentId: student3.id, fullName: "Batch Assigned" })
+      ])
+    );
+  });
+
   test("/api/teacher/login returns token for teacher", async () => {
     const res = await http.post("/api/teacher/login").send({
       tenantCode: "DEFAULT",

@@ -1037,11 +1037,14 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     hierarchyNodeId: teacher.hierarchyNodeId,
     status: "ACTIVE",
-    assignedTeacherUserId: teacher.id,
     ...(assignedBatchIds.length ? { batchId: { in: assignedBatchIds } } : {}),
     student: {
       isActive: true
-    }
+    },
+    OR: [
+      { assignedTeacherUserId: teacher.id },
+      { batch: { teacherAssignments: { some: { teacherUserId: teacher.id } } } }
+    ]
   };
 
   if (batchId) {
@@ -1361,12 +1364,15 @@ async function ensureTeacherCanAccessStudent({ tenantId, centerId, teacherUserId
       hierarchyNodeId: centerId,
       studentId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacherUserId,
       student: {
         is: {
           isActive: true
         }
-      }
+      },
+      OR: [
+        { assignedTeacherUserId: teacherUserId },
+        { batch: { teacherAssignments: { some: { teacherUserId } } } }
+      ]
     },
     select: { id: true }
   });

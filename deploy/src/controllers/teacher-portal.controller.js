@@ -77,6 +77,10 @@ function isMissingMockTestSchemaError(error) {
   );
 }
 
+function getTeacherAuthUserId(teacher) {
+  return teacher?.authUserId ?? teacher?.id ?? null;
+}
+
 async function loadTeacherContext({ tenantId, teacherUserId }) {
   const teacher = await prisma.authUser.findFirst({
     where: { id: teacherUserId, tenantId, role: "TEACHER", isActive: true },
@@ -316,7 +320,7 @@ const listTeacherBatches = asyncHandler(async (req, res) => {
   }
 
   const assignments = await prisma.batchTeacherAssignment.findMany({
-    where: { tenantId: req.auth.tenantId, teacherUserId: teacher.id },
+    where: { tenantId: req.auth.tenantId, teacherUserId: getTeacherAuthUserId(teacher) },
     select: { batchId: true }
   });
 
@@ -325,7 +329,7 @@ const listTeacherBatches = asyncHandler(async (req, res) => {
       tenantId: req.auth.tenantId,
       hierarchyNodeId: teacher.hierarchyNodeId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     select: { batchId: true },
     distinct: ["batchId"]
@@ -354,7 +358,7 @@ const listTeacherBatches = asyncHandler(async (req, res) => {
       tenantId: req.auth.tenantId,
       hierarchyNodeId: teacher.hierarchyNodeId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id,
+      assignedTeacherUserId: getTeacherAuthUserId(teacher),
       batchId: { in: batchIds }
     },
     _count: { _all: true }
@@ -381,7 +385,7 @@ const getTeacherBatchRoster = asyncHandler(async (req, res) => {
     return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
   }
 
-  const allowed = await ensureTeacherAssignedToBatch({ tenantId: req.auth.tenantId, teacherUserId: teacher.id, batchId: String(batchId) });
+  const allowed = await ensureTeacherAssignedToBatch({ tenantId: req.auth.tenantId, teacherUserId: getTeacherAuthUserId(teacher), batchId: String(batchId) });
   if (!allowed) {
     return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
@@ -392,7 +396,7 @@ const getTeacherBatchRoster = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: String(batchId),
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id,
+      assignedTeacherUserId: getTeacherAuthUserId(teacher),
       student: { isActive: true }
     },
     select: {
@@ -439,7 +443,7 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: String(batchId)
   });
   if (!allowed) {
@@ -452,7 +456,7 @@ const getTeacherBatchWorksheetsContext = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: String(batchId),
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     select: {
       studentId: true,
@@ -525,7 +529,7 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: String(batchId)
   });
   if (!allowed) {
@@ -549,7 +553,7 @@ const assignTeacherBatchWorksheet = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: String(batchId),
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     select: {
       studentId: true,
@@ -636,7 +640,7 @@ const listTeacherBatchMockTests = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: String(batchId)
   });
   if (!allowed) {
@@ -709,7 +713,7 @@ const getTeacherMockTest = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: String(mockTest.batchId)
   });
   if (!allowed) {
@@ -722,7 +726,7 @@ const getTeacherMockTest = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: mockTest.batchId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     include: {
       student: { select: { id: true, admissionNo: true, firstName: true, lastName: true } }
@@ -787,7 +791,7 @@ const upsertTeacherMockTestResults = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: String(mockTest.batchId)
   });
   if (!allowed) {
@@ -800,7 +804,7 @@ const upsertTeacherMockTestResults = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: mockTest.batchId,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     select: { studentId: true }
   });
@@ -870,8 +874,8 @@ const listTeacherStudents = asyncHandler(async (req, res) => {
       isActive: true
     },
     OR: [
-      { assignedTeacherUserId: teacher.id },
-      { batch: { teacherAssignments: { some: { teacherUserId: teacher.id } } } }
+      { assignedTeacherUserId: getTeacherAuthUserId(teacher) },
+      { batch: { teacherAssignments: { some: { teacherUserId: getTeacherAuthUserId(teacher) } } } }
     ]
   };
 
@@ -1067,7 +1071,7 @@ const getTeacherAssignWorksheetsContext = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId
   });
   if (!allowed) {
@@ -1111,7 +1115,7 @@ const getTeacherAssignWorksheetsContext = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       studentId: student.id,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     orderBy: { createdAt: "desc" },
     include: {
@@ -1250,7 +1254,7 @@ const saveTeacherWorksheetAssignments = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId
   });
   if (!allowed) {
@@ -1289,7 +1293,7 @@ const saveTeacherWorksheetAssignments = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       studentId: student.id,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     orderBy: { createdAt: "desc" },
     select: { id: true, levelId: true }
@@ -1374,7 +1378,7 @@ const getTeacherStudent = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId: req.auth.tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -1402,7 +1406,7 @@ const getTeacherStudent = asyncHandler(async (req, res) => {
         hierarchyNodeId: teacher.hierarchyNodeId,
         studentId: String(studentId),
         status: "ACTIVE",
-        assignedTeacherUserId: teacher.id
+        assignedTeacherUserId: getTeacherAuthUserId(teacher)
       },
       orderBy: { createdAt: "desc" },
       include: {
@@ -1414,7 +1418,7 @@ const getTeacherStudent = asyncHandler(async (req, res) => {
       where: {
         tenantId: req.auth.tenantId,
         hierarchyNodeId: teacher.hierarchyNodeId,
-        teacherUserId: teacher.id,
+        teacherUserId: getTeacherAuthUserId(teacher),
         studentId: String(studentId),
         isDeleted: false
       },
@@ -1493,7 +1497,7 @@ const listTeacherStudentMaterials = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -1528,7 +1532,7 @@ const listTeacherStudentMaterials = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       studentId: student.id,
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: getTeacherAuthUserId(teacher)
     },
     orderBy: { createdAt: "desc" },
     select: {
@@ -1617,7 +1621,7 @@ const getTeacherStudentPracticeReport = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -1712,7 +1716,7 @@ const listTeacherStudentAttempts = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -1824,7 +1828,7 @@ const exportTeacherStudentAttemptsCsv = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -1932,7 +1936,7 @@ const overrideTeacherStudentPromotion = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -2025,7 +2029,7 @@ const listTeacherNotesForStudent = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId: req.auth.tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -2039,7 +2043,7 @@ const listTeacherNotesForStudent = asyncHandler(async (req, res) => {
   const where = {
     tenantId: req.auth.tenantId,
     hierarchyNodeId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId),
     isDeleted: false,
     ...(from || to
@@ -2082,7 +2086,7 @@ const createTeacherNoteForStudent = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId: req.auth.tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId: String(studentId)
   });
 
@@ -2094,7 +2098,7 @@ const createTeacherNoteForStudent = asyncHandler(async (req, res) => {
     data: {
       tenantId: req.auth.tenantId,
       hierarchyNodeId: teacher.hierarchyNodeId,
-      teacherUserId: teacher.id,
+      teacherUserId: getTeacherAuthUserId(teacher),
       studentId: String(studentId),
       note: String(note).trim(),
       tags: Array.isArray(tags) ? tags : tags && typeof tags === "object" ? tags : undefined
@@ -2129,7 +2133,7 @@ const updateTeacherNote = asyncHandler(async (req, res) => {
       id: String(noteId),
       tenantId: req.auth.tenantId,
       hierarchyNodeId: teacher.hierarchyNodeId,
-      teacherUserId: teacher.id,
+      teacherUserId: getTeacherAuthUserId(teacher),
       isDeleted: false
     }
   });
@@ -2171,7 +2175,7 @@ const deleteTeacherNote = asyncHandler(async (req, res) => {
       id: String(noteId),
       tenantId: req.auth.tenantId,
       hierarchyNodeId: teacher.hierarchyNodeId,
-      teacherUserId: teacher.id,
+      teacherUserId: getTeacherAuthUserId(teacher),
       isDeleted: false
     },
     select: { id: true }
@@ -2218,7 +2222,7 @@ const createTeacherAttendanceSession = asyncHandler(async (req, res) => {
     return res.apiError(400, "Teacher center scope missing", "CENTER_SCOPE_REQUIRED");
   }
 
-  const allowed = await ensureTeacherAssignedToBatch({ tenantId: req.auth.tenantId, teacherUserId: teacher.id, batchId: String(batchId) });
+  const allowed = await ensureTeacherAssignedToBatch({ tenantId: req.auth.tenantId, teacherUserId: getTeacherAuthUserId(teacher), batchId: String(batchId) });
   if (!allowed) {
     return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
   }
@@ -2264,7 +2268,7 @@ const createTeacherAttendanceSession = asyncHandler(async (req, res) => {
         hierarchyNodeId: teacher.hierarchyNodeId,
         batchId: batch.id,
         status: "ACTIVE",
-        assignedTeacherUserId: teacher.id
+        assignedTeacherUserId: getTeacherAuthUserId(teacher)
       },
       select: { studentId: true }
     });
@@ -2312,7 +2316,7 @@ const listTeacherAttendanceSessions = asyncHandler(async (req, res) => {
 
   const batchId = req.query.batchId ? String(req.query.batchId) : "";
   if (batchId) {
-    const allowed = await ensureTeacherAssignedToBatch({ tenantId: req.auth.tenantId, teacherUserId: teacher.id, batchId });
+    const allowed = await ensureTeacherAssignedToBatch({ tenantId: req.auth.tenantId, teacherUserId: getTeacherAuthUserId(teacher), batchId });
     if (!allowed) {
       return res.apiError(403, "Teacher not assigned to batch", "TEACHER_BATCH_FORBIDDEN");
     }
@@ -2320,7 +2324,7 @@ const listTeacherAttendanceSessions = asyncHandler(async (req, res) => {
   } else {
     const assignedBatchIds = await listTeacherAssignedBatchIds({
       tenantId: req.auth.tenantId,
-      teacherUserId: teacher.id,
+      teacherUserId: getTeacherAuthUserId(teacher),
       centerHierarchyNodeId: teacher.hierarchyNodeId
     });
 
@@ -2390,7 +2394,7 @@ const listTeacherBatchAttendanceHistory = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId
   });
   if (!allowed) {
@@ -2508,7 +2512,7 @@ const exportTeacherBatchAttendanceHistoryCsv = asyncHandler(async (req, res) => 
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId
   });
   if (!allowed) {
@@ -2650,7 +2654,7 @@ const getTeacherAttendanceSession = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: session.batchId
   });
   if (!allowed) {
@@ -2750,7 +2754,7 @@ const updateTeacherAttendanceEntries = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: session.batchId
   });
   if (!allowed) {
@@ -2877,7 +2881,7 @@ const publishTeacherAttendanceSession = asyncHandler(async (req, res) => {
 
   const allowed = await ensureTeacherAssignedToBatch({
     tenantId: req.auth.tenantId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     batchId: session.batchId
   });
   if (!allowed) {
@@ -2970,7 +2974,7 @@ const teacherDirectReassign = asyncHandler(async (req, res) => {
   }
 
   const allowed = await ensureTeacherCanAccessStudent({
-    tenantId, centerId: teacher.hierarchyNodeId, teacherUserId: teacher.id, studentId
+    tenantId, centerId: teacher.hierarchyNodeId, teacherUserId: getTeacherAuthUserId(teacher), studentId
   });
   if (!allowed) {
     return res.apiError(403, "Forbidden", "TEACHER_STUDENT_FORBIDDEN");
@@ -3002,7 +3006,7 @@ const listTeacherReassignmentRequests = asyncHandler(async (req, res) => {
 
   // Get students assigned to this teacher
   const enrollments = await prisma.enrollment.findMany({
-    where: { tenantId, assignedTeacherUserId: teacher.id, status: "ACTIVE" },
+    where: { tenantId, assignedTeacherUserId: getTeacherAuthUserId(teacher), status: "ACTIVE" },
     select: { studentId: true },
   });
   const studentIds = [...new Set(enrollments.map((e) => e.studentId))];
@@ -3042,7 +3046,7 @@ const reviewTeacherReassignmentRequest = asyncHandler(async (req, res) => {
   if (!request) return res.apiError(404, "Request not found or not pending", "REQUEST_NOT_FOUND");
 
   const allowed = await ensureTeacherCanAccessStudent({
-    tenantId, centerId: teacher.hierarchyNodeId, teacherUserId: teacher.id, studentId: request.studentId
+    tenantId, centerId: teacher.hierarchyNodeId, teacherUserId: getTeacherAuthUserId(teacher), studentId: request.studentId
   });
   if (!allowed) return res.apiError(403, "Forbidden", "TEACHER_STUDENT_FORBIDDEN");
 
@@ -3075,7 +3079,7 @@ const bulkAssignWorksheetToStudents = asyncHandler(async (req, res) => {
   // Verify all students belong to this teacher
   const enrollments = await prisma.enrollment.findMany({
     where: {
-      tenantId, assignedTeacherUserId: teacher.id, status: "ACTIVE",
+      tenantId, assignedTeacherUserId: getTeacherAuthUserId(teacher), status: "ACTIVE",
       studentId: { in: studentIds.map((id) => String(id).trim()) },
     },
     select: { studentId: true },
@@ -3110,7 +3114,7 @@ const getTeacherStudentAttendanceHistory = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId
   });
   if (!allowed) {
@@ -3137,7 +3141,7 @@ const getTeacherStudentAttendanceHistory = asyncHandler(async (req, res) => {
       batchEnrollments: {
         where: {
           status: "ACTIVE",
-          assignedTeacherUserId: teacher.id
+          assignedTeacherUserId: getTeacherAuthUserId(teacher)
         },
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -3264,7 +3268,7 @@ const getTeacherStudent360 = asyncHandler(async (req, res) => {
   const allowed = await ensureTeacherCanAccessStudent({
     tenantId,
     centerId: teacher.hierarchyNodeId,
-    teacherUserId: teacher.id,
+    teacherUserId: getTeacherAuthUserId(teacher),
     studentId
   });
   if (!allowed) {

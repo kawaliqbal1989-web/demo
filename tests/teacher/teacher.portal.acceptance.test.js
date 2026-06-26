@@ -140,7 +140,9 @@ describe("TEACHER PORTAL (acceptance)", () => {
     const res = await http.get("/api/teacher/students").set(authHeader(token));
     expect(res.status).toBe(200);
 
-    const ids = (res.body?.data || []).map((r) => r.studentId);
+    const payload = res.body?.data;
+    const items = Array.isArray(payload) ? payload : payload?.items || [];
+    const ids = items.map((r) => r.studentId);
     expect(ids).toContain(student1.id);
     expect(ids).not.toContain(student2.id);
   });
@@ -230,6 +232,24 @@ describe("TEACHER PORTAL (acceptance)", () => {
 
     expect(res.status).toBe(403);
     expect(res.body?.error_code).toBe("TEACHER_STUDENT_FORBIDDEN");
+  });
+
+  test("Teacher can load the roster for an assigned batch", async () => {
+    const teacherLogin = await loginAs({ email: "teacher.one@abacusweb.local" });
+    const token = teacherLogin.body?.data?.access_token;
+
+    const res = await http.get(`/api/teacher/batches/${batch1.id}/roster`).set(authHeader(token));
+
+    expect(res.status).toBe(200);
+    expect(res.body?.data).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          studentId: student1.id,
+          enrollmentId: expect.any(String),
+          fullName: "Seed Student1"
+        })
+      ])
+    );
   });
 
   test("/api/teacher/login returns token for teacher", async () => {

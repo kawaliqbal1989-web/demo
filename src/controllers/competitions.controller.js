@@ -12,6 +12,7 @@ import {
 import { parsePagination } from "../utils/pagination.js";
 import { recordCompetitionTransaction } from "../services/financial-ledger.service.js";
 import { toCsv } from "../utils/csv.js";
+import { resolveBusinessPartnerForUser } from "../services/bp-scope.service.js";
 
 function isCompetitionResultStatusSchemaMissing(error) {
   const msg = String(error?.message || "").toLowerCase();
@@ -128,10 +129,91 @@ async function findCompetitionDetailWithResultFallback(where) {
   }
 }
 
-async function getCompetitionResultMeta({ competitionId, tenantId }) {
+async function resolveActorBusinessPartnerId({ auth, tx = prisma } = {}) {
+  if (!auth?.tenantId || !auth?.userId) {
+    return null;
+  }
+
+  if (auth.role === "BP") {
+    const partner = await resolveBusinessPartnerForUser({ tenantId: auth.tenantId, userId: auth.userId, tx });
+    return partner?.id || null;
+  }
+
+  if (auth.role === "FRANCHISE") {
+    const profile = await tx.franchiseProfile.findFirst({
+      where: { tenantId: auth.tenantId, authUserId: auth.userId },
+      select: { businessPartnerId: true }
+    });
+    return profile?.businessPartnerId || null;
+  }
+
+  if (auth.role === "CENTER") {
+    const profile = await tx.centerProfile.findFirst({
+      where: { tenantId: auth.tenantId, authUserId: auth.userId },
+      select: { franchiseProfile: { select: { businessPartnerId: true } } }
+    });
+    return profile?.franchiseProfile?.businessPartnerId || null;
+  }
+
+  return null;
+}
+
+async function buildCompetitionVisibilityWhere({ auth, extraWhere = {} } = {}) {
+  const tenantWhere = { tenantId: auth.tenantId, ...extraWhere };
+
+  if (!auth || auth.role === "SUPERADMIN") {
+    return tenantWhere;
+  }
+
+  if (auth.role === "BP") {
+    const businessPartnerId = await resolveActorBusinessPartnerId({ auth });
+    if (!businessPartnerId) {
+      return { ...tenantWhere, id: { in: [] } };
+    }
+
+    return {
+      ...tenantWhere,
+      businessPartnerMappings: {
+        some: {
+          businessPartnerId,
+          status: "APPROVED"
+        }
+      }
+    };
+  }
+
+  if (auth.role === "FRANCHISE" || auth.role === "CENTER") {
+    const businessPartnerId = await resolveActorBusinessPartnerId({ auth });
+
+    if (businessPartnerId && auth.hierarchyNodeId) {
+      return {
+        ...tenantWhere,
+        OR: [
+          { hierarchyNodeId: auth.hierarchyNodeId },
+          {
+            businessPartnerMappings: {
+              some: {
+                businessPartnerId,
+                status: "APPROVED"
+              }
+            }
+          }
+        ]
+      };
+    }
+  }
+
+  if (auth.hierarchyNodeId) {
+    return { ...tenantWhere, hierarchyNodeId: auth.hierarchyNodeId };
+  }
+
+  return tenantWhere;
+}
+
+async function getCompetitionResultMeta({ competitionId, tenantId, auth = null }) {
   try {
     const row = await prisma.competition.findFirst({
-      where: { id: competitionId, tenantId },
+      where: auth ? await buildCompetitionVisibilityWhere({ auth, extraWhere: { id: competitionId, tenantId } }) : { id: competitionId, tenantId },
       select: { id: true, title: true, resultStatus: true, resultPublishedAt: true }
     });
     if (!row) return null;
@@ -142,7 +224,7 @@ async function getCompetitionResultMeta({ competitionId, tenantId }) {
     }
 
     const legacy = await prisma.competition.findFirst({
-      where: { id: competitionId, tenantId },
+      where: auth ? await buildCompetitionVisibilityWhere({ auth, extraWhere: { id: competitionId, tenantId } }) : { id: competitionId, tenantId },
       select: { id: true, title: true }
     });
     if (!legacy) return null;
@@ -159,13 +241,7 @@ async function getCompetitionResultMeta({ competitionId, tenantId }) {
 const listCompetitions = asyncHandler(async (req, res) => {
   const { take, skip, orderBy, limit, offset } = parsePagination(req.query);
 
-  const where = {
-    tenantId: req.auth.tenantId
-  };
-
-  if (req.auth.role !== "SUPERADMIN" && req.auth.hierarchyNodeId) {
-    where.hierarchyNodeId = req.auth.hierarchyNodeId;
-  }
+  const where = await buildCompetitionVisibilityWhere({ auth: req.auth });
 
   const [{ items, legacyResultStatus }, total] = await Promise.all([
     findCompetitionsWithResultFallback({ where, orderBy, skip, take }),
@@ -183,14 +259,7 @@ const listCompetitions = asyncHandler(async (req, res) => {
 const getCompetitionDetail = asyncHandler(async (req, res) => {
   const { id } = req.params;
 
-  const where = {
-    id,
-    tenantId: req.auth.tenantId
-  };
-
-  if (req.auth.role !== "SUPERADMIN" && req.auth.hierarchyNodeId) {
-    where.hierarchyNodeId = req.auth.hierarchyNodeId;
-  }
+  const where = await buildCompetitionVisibilityWhere({ auth: req.auth, extraWhere: { id } });
 
   const item = await findCompetitionDetailWithResultFallback(where);
 
@@ -253,19 +322,44 @@ const createCompetition = asyncHandler(async (req, res) => {
     return res.apiError(400, "hierarchyNodeId is required", "HIERARCHY_NODE_REQUIRED");
   }
 
-  const created = await prisma.competition.create({
-    data: {
-      tenantId: req.auth.tenantId,
-      title: trimmedTitle,
-      description: description ? String(description).trim() : null,
-      status: "DRAFT",
-      workflowStage,
-      startsAt: parsedStart,
-      endsAt: parsedEnd,
-      hierarchyNodeId: resolvedHierarchyNodeId,
-      levelId: String(levelId).trim(),
-      createdByUserId: req.auth.userId
+  const created = await prisma.$transaction(async (tx) => {
+    const competition = await tx.competition.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        title: trimmedTitle,
+        description: description ? String(description).trim() : null,
+        status: "DRAFT",
+        workflowStage,
+        startsAt: parsedStart,
+        endsAt: parsedEnd,
+        hierarchyNodeId: resolvedHierarchyNodeId,
+        levelId: String(levelId).trim(),
+        createdByUserId: req.auth.userId
+      }
+    });
+
+    const actorBusinessPartnerId = await resolveActorBusinessPartnerId({ auth: req.auth, tx });
+    if (actorBusinessPartnerId) {
+      await tx.competitionBusinessPartner.upsert({
+        where: {
+          competitionId_businessPartnerId: {
+            competitionId: competition.id,
+            businessPartnerId: actorBusinessPartnerId
+          }
+        },
+        update: {
+          status: "APPROVED"
+        },
+        create: {
+          competitionId: competition.id,
+          businessPartnerId: actorBusinessPartnerId,
+          tenantId: req.auth.tenantId,
+          status: "APPROVED"
+        }
+      });
     }
+
+    return competition;
   });
 
   res.locals.entityId = created.id;
@@ -373,7 +467,7 @@ const getLeaderboard = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { limit } = req.query;
 
-  const competition = await getCompetitionResultMeta({ competitionId: id, tenantId: req.auth.tenantId });
+  const competition = await getCompetitionResultMeta({ competitionId: id, tenantId: req.auth.tenantId, auth: req.auth });
 
   if (!competition) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
@@ -402,7 +496,7 @@ const getCompetitionResults = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { limit } = req.query;
 
-  const competition = await getCompetitionResultMeta({ competitionId: id, tenantId: req.auth.tenantId });
+  const competition = await getCompetitionResultMeta({ competitionId: id, tenantId: req.auth.tenantId, auth: req.auth });
 
   if (!competition) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
@@ -433,7 +527,7 @@ const getCompetitionResults = asyncHandler(async (req, res) => {
 const publishCompetitionResults = asyncHandler(async (req, res) => {
   const competitionId = String(req.params.id);
 
-  const competition = await getCompetitionResultMeta({ competitionId, tenantId: req.auth.tenantId });
+  const competition = await getCompetitionResultMeta({ competitionId, tenantId: req.auth.tenantId, auth: req.auth });
 
   if (!competition) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
@@ -466,7 +560,7 @@ const publishCompetitionResults = asyncHandler(async (req, res) => {
 const unpublishCompetitionResults = asyncHandler(async (req, res) => {
   const competitionId = String(req.params.id);
 
-  const competition = await getCompetitionResultMeta({ competitionId, tenantId: req.auth.tenantId });
+  const competition = await getCompetitionResultMeta({ competitionId, tenantId: req.auth.tenantId, auth: req.auth });
 
   if (!competition) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
@@ -499,7 +593,7 @@ const unpublishCompetitionResults = asyncHandler(async (req, res) => {
 const exportCompetitionResultsCsv = asyncHandler(async (req, res) => {
   const { id: competitionId } = req.params;
 
-  const competition = await getCompetitionResultMeta({ competitionId, tenantId: req.auth.tenantId });
+  const competition = await getCompetitionResultMeta({ competitionId, tenantId: req.auth.tenantId, auth: req.auth });
 
   if (!competition) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");

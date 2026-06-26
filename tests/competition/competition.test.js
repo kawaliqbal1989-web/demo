@@ -1,3 +1,4 @@
+import bcrypt from "bcryptjs";
 import {
   authHeader,
   http,
@@ -88,6 +89,123 @@ describe("COMPETITION", () => {
 
     expect(secondForward.status).toBe(409);
     expect(secondForward.body.error_code).toBe("WORKFLOW_STAGE_CONFLICT");
+  });
+
+  test("BP sees only competitions mapped to its business partner", async () => {
+    const bpUser = await prisma.authUser.create({
+      data: {
+        tenantId: tenant.id,
+        username: `bp${randomId("scope")}`,
+        email: `bp${randomId("scope")}@abacusweb.local`,
+        passwordHash: await bcrypt.hash("Pass@123", 10),
+        role: "BP",
+        isActive: true,
+        hierarchyNodeId: school.id
+      }
+    });
+
+    const otherBpUser = await prisma.authUser.create({
+      data: {
+        tenantId: tenant.id,
+        username: `bp2${randomId("scope")}`,
+        email: `bp2${randomId("scope")}@abacusweb.local`,
+        passwordHash: await bcrypt.hash("Pass@123", 10),
+        role: "BP",
+        isActive: true,
+        hierarchyNodeId: school.id
+      }
+    });
+
+    const bpPartner = await prisma.businessPartner.create({
+      data: {
+        tenantId: tenant.id,
+        name: `BP Scope ${randomId("bp")}`,
+        code: bpUser.username,
+        displayName: `BP Scope ${randomId("bp")}`,
+        status: "ACTIVE",
+        isActive: true,
+        contactEmail: bpUser.email,
+        hierarchyNodeId: school.id,
+        subscriptionStatus: "ACTIVE",
+        subscriptionExpiresAt: null,
+        gracePeriodUntil: null,
+        createdByUserId: bpUser.id
+      }
+    });
+
+    const otherBpPartner = await prisma.businessPartner.create({
+      data: {
+        tenantId: tenant.id,
+        name: `BP Scope ${randomId("bp")}`,
+        code: otherBpUser.username,
+        displayName: `BP Scope ${randomId("bp")}`,
+        status: "ACTIVE",
+        isActive: true,
+        contactEmail: otherBpUser.email,
+        hierarchyNodeId: school.id,
+        subscriptionStatus: "ACTIVE",
+        subscriptionExpiresAt: null,
+        gracePeriodUntil: null,
+        createdByUserId: otherBpUser.id
+      }
+    });
+
+    const bpTokenResponse = await http.post("/api/auth/login").send({
+      tenantCode: tenant.code,
+      username: bpUser.username,
+      password: "Pass@123"
+    });
+
+    const otherBpTokenResponse = await http.post("/api/auth/login").send({
+      tenantCode: tenant.code,
+      username: otherBpUser.username,
+      password: "Pass@123"
+    });
+
+    const bpToken = bpTokenResponse.body.data.access_token;
+    const otherBpToken = otherBpTokenResponse.body.data.access_token;
+
+    const firstCompetition = await http
+      .post("/api/competitions")
+      .set(authHeader(bpToken))
+      .send({
+        title: `Comp ${randomId("bpvisible")}`,
+        description: "bp visibility test",
+        startsAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        endsAt: new Date(Date.now() + 7200 * 1000).toISOString(),
+        hierarchyNodeId: school.id,
+        levelId: level1.id
+      });
+
+    expect(firstCompetition.status).toBe(201);
+
+    const secondCompetition = await http
+      .post("/api/competitions")
+      .set(authHeader(otherBpToken))
+      .send({
+        title: `Comp ${randomId("bpvisible")}`,
+        description: "bp visibility test",
+        startsAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        endsAt: new Date(Date.now() + 7200 * 1000).toISOString(),
+        hierarchyNodeId: school.id,
+        levelId: level1.id
+      });
+
+    expect(secondCompetition.status).toBe(201);
+
+    const listResponse = await http
+      .get("/api/competitions")
+      .set(authHeader(bpToken));
+
+    expect(listResponse.status).toBe(200);
+    expect(listResponse.body.data.some((item) => item.id === firstCompetition.body.data.id)).toBe(true);
+    expect(listResponse.body.data.some((item) => item.id === secondCompetition.body.data.id)).toBe(false);
+
+    await prisma.businessPartner.delete({ where: { id: bpPartner.id } });
+    await prisma.businessPartner.delete({ where: { id: otherBpPartner.id } });
+
+    await prisma.competition.deleteMany({ where: { createdByUserId: { in: [bpUser.id, otherBpUser.id] } } });
+    await prisma.authUser.deleteMany({ where: { id: { in: [bpUser.id, otherBpUser.id] } } });
   });
 
   test("Leaderboard sorted correctly", async () => {

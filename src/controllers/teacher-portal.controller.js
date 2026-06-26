@@ -467,16 +467,14 @@ const getTeacherBatchRoster = asyncHandler(async (req, res) => {
       hierarchyNodeId: teacher.hierarchyNodeId,
       batchId: String(batchId),
       status: "ACTIVE",
-      assignedTeacherUserId: teacher.id
+      assignedTeacherUserId: teacher.id,
+      student: { isActive: true }
     },
     select: {
       id: true,
       status: true,
       level: { select: { id: true, name: true, rank: true } },
       student: {
-        where: {
-          isActive: true
-        },
         select: {
           id: true,
           admissionNo: true,
@@ -492,14 +490,17 @@ const getTeacherBatchRoster = asyncHandler(async (req, res) => {
 
   return res.apiSuccess(
     "Batch roster",
-    enrollments.map((e) => ({
-      studentId: e.student.id,
-      fullName: `${e.student.firstName} ${e.student.lastName}`.trim(),
-      enrollmentId: e.id,
-      level: e.level ? { id: e.level.id, name: e.level.name, rank: e.level.rank } : null,
-      status: e.status,
-      guardianPhone: e.student.guardianPhone || null
-    }))
+    enrollments.map((e) => {
+      const student = e.student;
+      return {
+        studentId: student?.id || null,
+        fullName: [student?.firstName, student?.lastName].filter(Boolean).join(" ").trim(),
+        enrollmentId: e.id,
+        level: e.level ? { id: e.level.id, name: e.level.name, rank: e.level.rank } : null,
+        status: e.status,
+        guardianPhone: student?.guardianPhone || null
+      };
+    })
   );
 });
 

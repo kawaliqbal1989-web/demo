@@ -40,6 +40,43 @@ function toCsv({ headers, rows }) {
   return `${lines.join("\n")}\n`;
 }
 
+function normalizeExamCompletionTime(completionTimeSeconds, timeLimitSeconds) {
+  if (
+    completionTimeSeconds === null ||
+    completionTimeSeconds === undefined ||
+    completionTimeSeconds === ""
+  ) {
+    return null;
+  }
+
+  const completionTime = Number(completionTimeSeconds);
+
+  if (!Number.isFinite(completionTime) || completionTime < 0) {
+    return null;
+  }
+
+  const normalizedCompletionTime = Math.floor(completionTime);
+
+  if (
+    timeLimitSeconds === null ||
+    timeLimitSeconds === undefined ||
+    timeLimitSeconds === ""
+  ) {
+    return normalizedCompletionTime;
+  }
+
+  const timeLimit = Number(timeLimitSeconds);
+
+  if (!Number.isFinite(timeLimit) || timeLimit <= 0) {
+    return normalizedCompletionTime;
+  }
+
+  return Math.min(
+    normalizedCompletionTime,
+    Math.floor(timeLimit)
+  );
+}
+
 function parseDateTime(value, field) {
   if (!value) return null;
   const d = new Date(value);
@@ -1489,7 +1526,12 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
           totalQuestions: true,
           completionTimeSeconds: true,
           finalSubmittedAt: true,
-          worksheet: { select: { id: true } }
+          worksheet: {
+            select: {
+              id: true,
+              timeLimitSeconds: true
+            }
+          }
         }
       })
     : [];
@@ -1509,7 +1551,12 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
       score: sub?.score ?? null,
       correctCount: sub?.correctCount ?? null,
       totalQuestions: sub?.totalQuestions ?? null,
-      completionTimeSeconds: sub?.completionTimeSeconds ?? null,
+      completionTimeSeconds: sub
+        ? normalizeExamCompletionTime(
+            sub.completionTimeSeconds,
+            sub.worksheet?.timeLimitSeconds
+          )
+        : null,
       submittedAt: sub?.finalSubmittedAt ?? null,
       worksheetId: sub?.worksheet?.id ?? null
     };

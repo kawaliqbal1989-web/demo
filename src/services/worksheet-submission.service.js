@@ -101,12 +101,26 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
 
     const now = new Date();
     const startedAt = existingSubmission?.submittedAt || worksheet.generatedAt || worksheet.createdAt;
-    const completionTime = Math.max(
+    const rawCompletionTimeSeconds = Math.max(
       0,
       Math.floor((now.getTime() - new Date(startedAt).getTime()) / 1000)
     );
+    const worksheetTimeLimitSeconds = Number(worksheet.timeLimitSeconds);
+    const effectiveCompletionTimeSeconds =
+      worksheet.generationMode === "EXAM" &&
+      Number.isFinite(worksheetTimeLimitSeconds) &&
+      worksheetTimeLimitSeconds > 0
+        ? Math.min(
+            rawCompletionTimeSeconds,
+            Math.floor(worksheetTimeLimitSeconds)
+          )
+        : rawCompletionTimeSeconds;
 
-    if (!allowExpired && worksheet.timeLimitSeconds && completionTime > worksheet.timeLimitSeconds) {
+    if (
+      !allowExpired &&
+      worksheet.timeLimitSeconds &&
+      rawCompletionTimeSeconds > worksheet.timeLimitSeconds
+    ) {
       const error = new Error("Time limit exceeded");
       error.statusCode = 409;
       error.errorCode = "TIME_LIMIT_EXCEEDED";
@@ -170,7 +184,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
           finalSubmittedAt: now,
           correctCount,
           totalQuestions,
-          completionTimeSeconds: completionTime,
+          completionTimeSeconds: effectiveCompletionTimeSeconds,
           submittedAnswers,
           passed,
           evaluationHash,
@@ -189,7 +203,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
           finalSubmittedAt: now,
           correctCount,
           totalQuestions,
-          completionTimeSeconds: completionTime,
+          completionTimeSeconds: effectiveCompletionTimeSeconds,
           submittedAnswers,
           passed,
           evaluationHash,
@@ -204,7 +218,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
       studentId,
       worksheetId,
       submissionTime: now,
-      completionTimeSeconds: completionTime,
+      completionTimeSeconds: effectiveCompletionTimeSeconds,
       score: accuracy,
       totalQuestions
     });
@@ -213,7 +227,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
       accuracy,
       correctCount,
       totalQuestions,
-      completionTime,
+      completionTime: effectiveCompletionTimeSeconds,
       passed,
       passThreshold,
       abuseFlags: abuseDetection.createdFlags || []

@@ -569,11 +569,15 @@ function StudentWorksheetAttemptPage() {
 
   const attemptStatus = attempt?.status ? String(attempt.status) : "NOT_STARTED";
   const isLocked = Boolean(result) || multiTabLocked || attemptStatus === "SUBMITTED" || attemptStatus === "TIMED_OUT";
-  const attemptTimerMode = String(attempt?.timerMode || worksheet?.attemptTimerMode || "ELAPSED").trim().toUpperCase();
-  const isCountdownMode = attemptTimerMode === "COUNTDOWN";
   const timeLimitSeconds = Number.isFinite(Number(worksheet?.timeLimitSeconds)) && Number(worksheet.timeLimitSeconds) > 0
     ? Number(worksheet.timeLimitSeconds)
     : null;
+  const configuredTimerMode = String(attempt?.timerMode || worksheet?.attemptTimerMode || "").trim().toUpperCase();
+  // A hard time limit must count down; elapsed mode otherwise locks at expiry without auto-submitting.
+  const attemptTimerMode = timeLimitSeconds || configuredTimerMode === "COUNTDOWN"
+    ? "COUNTDOWN"
+    : "ELAPSED";
+  const isCountdownMode = attemptTimerMode === "COUNTDOWN";
 
   const endsAtMs = useMemo(() => {
     const d = attempt?.endsAt ? new Date(attempt.endsAt) : null;

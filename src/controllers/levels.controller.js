@@ -64,6 +64,55 @@ const createLevel = asyncHandler(async (req, res) => {
   return res.apiSuccess("Level created", created, 201);
 });
 
+const updateLevel = asyncHandler(async (req, res) => {
+  assertCanModifyAcademic(req.auth.role);
+
+  const levelId = String(req.params.id || "").trim();
+  if (!levelId) {
+    return res.apiError(400, "levelId is required", "VALIDATION_ERROR");
+  }
+
+  const { name, rank, description } = req.body || {};
+  const data = {};
+
+  if (name !== undefined) {
+    data.name = String(name).trim();
+  }
+
+  if (rank !== undefined) {
+    const parsedRank = Number(rank);
+    if (!Number.isInteger(parsedRank) || parsedRank <= 0) {
+      return res.apiError(400, "rank must be a positive integer", "VALIDATION_ERROR");
+    }
+    data.rank = parsedRank;
+  }
+
+  if (description !== undefined) {
+    data.description = String(description).trim();
+  }
+
+  if (!Object.keys(data).length) {
+    return res.apiError(400, "No update fields provided", "VALIDATION_ERROR");
+  }
+
+  const existing = await prisma.level.findFirst({
+    where: { id: levelId, tenantId: req.auth.tenantId },
+    select: { id: true }
+  });
+
+  if (!existing) {
+    return res.apiError(404, "Level not found", "LEVEL_NOT_FOUND");
+  }
+
+  const updated = await prisma.level.update({
+    where: { id: levelId },
+    data
+  });
+
+  res.locals.entityId = updated.id;
+  return res.apiSuccess("Level updated", updated);
+});
+
 const updateLevelFeeDefaults = asyncHandler(async (req, res) => {
   assertCanModifyOperational(req.auth.role);
 
@@ -204,4 +253,4 @@ const generateLevelWorksheet = asyncHandler(async (req, res) => {
   }, 201);
 });
 
-export { listLevels, createLevel, updateLevelFeeDefaults, generateLevelWorksheet };
+export { listLevels, createLevel, updateLevel, updateLevelFeeDefaults, generateLevelWorksheet };

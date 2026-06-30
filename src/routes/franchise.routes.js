@@ -46,6 +46,13 @@ import {
   updateCenter,
   updateFranchiseProfile
 } from "../controllers/franchise.controller.js";
+import {
+  listFranchiseCompetitionCenters,
+  getFranchiseCompetitionCenterDetail,
+  returnFranchiseCompetitionCenter,
+  approveFranchiseCompetitionCenter,
+  submitFranchiseCompetition
+} from "../controllers/franchise-competition.controller.js";
 
 const franchiseRouter = Router();
 
@@ -264,6 +271,42 @@ franchiseRouter.post(
   requireScopeAccess("competition", "id"),
   auditAction("FRANCHISE_REJECT_COMPETITION_REQUEST", "COMPETITION", (req) => req.params.id),
   rejectFranchiseCompetitionRequest
+);
+
+/* Competition center review endpoints */
+franchiseRouter.get(
+  "/competitions/:competitionId/centers",
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("FRANCHISE_LIST_COMPETITION_CENTERS", "COMPETITION"),
+  listFranchiseCompetitionCenters
+);
+
+franchiseRouter.get(
+  "/competitions/:competitionId/centers/:centerId",
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("FRANCHISE_VIEW_COMPETITION_CENTER", "COMPETITION", (req) => req.params.competitionId),
+  getFranchiseCompetitionCenterDetail
+);
+
+franchiseRouter.post(
+  "/competitions/:competitionId/centers/:centerId/return",
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("FRANCHISE_RETURN_COMPETITION_CENTER", "COMPETITION", (req) => req.params.competitionId),
+  returnFranchiseCompetitionCenter
+);
+
+franchiseRouter.post(
+  "/competitions/:competitionId/centers/:centerId/approve",
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("FRANCHISE_APPROVE_COMPETITION_CENTER", "COMPETITION", (req) => req.params.competitionId),
+  approveFranchiseCompetitionCenter
+);
+
+franchiseRouter.post(
+  "/competitions/:competitionId/submit",
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("FRANCHISE_SUBMIT_COMPETITION", "COMPETITION", (req) => req.params.competitionId),
+  submitFranchiseCompetition
 );
 
 franchiseRouter.get(

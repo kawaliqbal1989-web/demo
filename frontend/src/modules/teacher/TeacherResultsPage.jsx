@@ -336,10 +336,6 @@ function TeacherResultsPage() {
     }
   };
 
-  if (loading) {
-    return <LoadingState label="Loading student results..." />;
-  }
-
   const promotionRows = useMemo(
     () => rows.map((row) => buildPromotionRow(row, student360ById[row.studentId] || null)),
     [rows, student360ById]
@@ -392,6 +388,10 @@ function TeacherResultsPage() {
   }, [promotionRows]);
 
   const exportRows = filteredRows;
+
+  if (loading) {
+    return <LoadingState label="Loading student results..." />;
+  }
 
   const handleCopy = async () => {
     const text = buildDashboardText(summaryCards, exportRows);

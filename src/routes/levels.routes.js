@@ -3,6 +3,7 @@ import {
 	createLevel,
 	generateLevelWorksheet,
 	listLevels,
+	updateLevel,
 	updateLevelFeeDefaults
 } from "../controllers/levels.controller.js";
 import {
@@ -21,6 +22,13 @@ levelsRouter.post(
 	requireRole("SUPERADMIN"),
 	auditAction("CREATE_LEVEL", "LEVEL"),
 	createLevel
+);
+
+levelsRouter.patch(
+	"/:id",
+	requireRole("SUPERADMIN"),
+	auditAction("UPDATE_LEVEL", "LEVEL", (req) => req.params.id),
+	updateLevel
 );
 
 levelsRouter.patch(

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { ErrorState } from "../../components/ErrorState";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -8,6 +8,20 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { formatWorksheetQuestionPrompt } from "../../utils/worksheetQuestions";
 import { getCourse } from "../../services/coursesService";
 import { listCourseLevels } from "../../services/courseLevelsService";
+import {
+  archiveCompetitionCoursePaper,
+  archiveCompetitionCoursePaperBlueprint,
+  createCompetitionCoursePaper,
+  createCompetitionCoursePaperBlueprint,
+  generateCompetitionCoursePaperWorksheet,
+  getCompetitionCourse,
+  listCompetitionCourseLevelQuestionBank,
+  listCompetitionCourseLevels,
+  listCompetitionCoursePaperBlueprints,
+  listCompetitionCoursePapers,
+  updateCompetitionCoursePaperBlueprint,
+  updateCompetitionCoursePaper
+} from "../../services/competitionCoursesService";
 import { listLevels } from "../../services/levelsService";
 import { getWorksheetTemplate, upsertWorksheetTemplate } from "../../services/worksheetTemplatesService";
 import { listQuestionBank } from "../../services/questionBankService";
@@ -31,7 +45,9 @@ function displayQuestion(question) {
 }
 function SuperadminCourseLevelWorksheetsPage() {
   const navigate = useNavigate();
-  const { courseId, levelNumber } = useParams();
+  const location = useLocation();
+  const { courseId, levelNumber, levelId } = useParams();
+  const isCompetitionCourseMode = location.pathname.startsWith("/superadmin/competition/courses/");
   const levelNumberInt = Number(levelNumber);
 
   const [course, setCourse] = useState(null);
@@ -55,6 +71,49 @@ function SuperadminCourseLevelWorksheetsPage() {
 
   const [bankItems, setBankItems] = useState([]);
   const [bankLoading, setBankLoading] = useState(false);
+
+  const [papers, setPapers] = useState([]);
+  const [papersLoading, setPapersLoading] = useState(false);
+  const [papersError, setPapersError] = useState("");
+  const [selectedPaperId, setSelectedPaperId] = useState("");
+  const [paperForm, setPaperForm] = useState({
+    title: "",
+    code: "",
+    description: "",
+    sortOrder: "0",
+    status: "DRAFT"
+  });
+  const [paperSaving, setPaperSaving] = useState(false);
+  const [paperEditingId, setPaperEditingId] = useState("");
+  const [blueprints, setBlueprints] = useState([]);
+  const [blueprintsLoading, setBlueprintsLoading] = useState(false);
+  const [blueprintsError, setBlueprintsError] = useState("");
+  const [blueprintForm, setBlueprintForm] = useState({
+    title: "",
+    version: "1",
+    status: "DRAFT",
+    totalQuestions: "",
+    totalMarks: "",
+    durationMinutes: "",
+    difficultyDistribution: "{}",
+    categoryDistribution: "{}",
+    operationDistribution: "{}",
+    mandatoryQuestionIds: "[]",
+    randomizeQuestions: false,
+    randomizeOptions: false,
+    instructions: "",
+    sortOrder: "0"
+  });
+  const [blueprintEditingId, setBlueprintEditingId] = useState("");
+  const [blueprintSaving, setBlueprintSaving] = useState(false);
+  const [worksheetGenerationForm, setWorksheetGenerationForm] = useState({
+    paperId: "",
+    blueprintId: "",
+    title: "",
+    version: "",
+    seed: ""
+  });
+  const [worksheetGenerating, setWorksheetGenerating] = useState(false);
 
   const [worksheets, setWorksheets] = useState([]);
   const [worksheetsLoading, setWorksheetsLoading] = useState(false);
@@ -95,26 +154,63 @@ function SuperadminCourseLevelWorksheetsPage() {
   const dragIdRef = useRef(null);
 
   const courseLevel = useMemo(() => {
+    if (isCompetitionCourseMode) {
+      return courseLevels.find((item) => item.id === levelId) || null;
+    }
     return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
-  }, [courseLevels, levelNumberInt]);
+  }, [courseLevels, isCompetitionCourseMode, levelId, levelNumberInt]);
 
   const academicLevel = useMemo(() => {
+    if (isCompetitionCourseMode) {
+      return null;
+    }
     return resolveAcademicLevelForCourseLevel({
       courseLevel,
       academicLevels,
       levelNumber: levelNumberInt
     });
-  }, [academicLevels, courseLevel, levelNumberInt]);
+  }, [academicLevels, courseLevel, isCompetitionCourseMode, levelNumberInt]);
+
+  const worksheetScopeId = isCompetitionCourseMode ? courseLevel?.id : academicLevel?.id;
+
+  const worksheetScopeParams = useMemo(() => (
+    isCompetitionCourseMode
+      ? (selectedPaperId
+        ? { competitionCoursePaperId: selectedPaperId }
+        : { competitionCourseLevelId: worksheetScopeId })
+      : { levelId: worksheetScopeId }
+  ), [isCompetitionCourseMode, selectedPaperId, worksheetScopeId]);
+
+  const selectedPaper = useMemo(
+    () => papers.find((paper) => paper.id === selectedPaperId) || null,
+    [papers, selectedPaperId]
+  );
+
+  const selectedBlueprint = useMemo(
+    () => blueprints.find((blueprint) => blueprint.id === blueprintEditingId) || null,
+    [blueprints, blueprintEditingId]
+  );
+
+  const activeBlueprints = useMemo(
+    () => blueprints.filter((blueprint) => blueprint.status === "ACTIVE"),
+    [blueprints]
+  );
 
   const load = async () => {
     setLoading(true);
     setError("");
     try {
-      const [courseResp, courseLevelsResp, academicLevelsResp] = await Promise.all([
-        getCourse(courseId),
-        listCourseLevels({ courseId, limit: 100, offset: 0 }),
-        listLevels()
-      ]);
+      const [courseResp, courseLevelsResp, academicLevelsResp] = isCompetitionCourseMode
+        ? await Promise.all([
+            getCompetitionCourse(courseId),
+            listCompetitionCourseLevels({ courseId, limit: 100, offset: 0 }),
+            Promise.resolve({ data: [] })
+          ])
+        : await Promise.all([
+            getCourse(courseId),
+            listCourseLevels({ courseId, limit: 100, offset: 0 }),
+            listLevels()
+          ]);
       setCourse(courseResp?.data || null);
       setCourseLevels(courseLevelsResp?.data?.items || []);
       setAcademicLevels(academicLevelsResp?.data || []);
@@ -150,12 +246,63 @@ function SuperadminCourseLevelWorksheetsPage() {
   const loadBank = async (levelId) => {
     setBankLoading(true);
     try {
-      const resp = await listQuestionBank({ levelId });
+      const resp = isCompetitionCourseMode
+        ? await listCompetitionCourseLevelQuestionBank({ courseId, levelId })
+        : await listQuestionBank({ levelId });
       setBankItems(resp?.data?.items || []);
     } catch {
       setBankItems([]);
     } finally {
       setBankLoading(false);
+    }
+  };
+
+  const loadPapers = async (levelId) => {
+    if (!isCompetitionCourseMode) {
+      setPapers([]);
+      setSelectedPaperId("");
+      return;
+    }
+
+    setPapersLoading(true);
+    setPapersError("");
+    try {
+      const resp = await listCompetitionCoursePapers({ courseId, levelId });
+      const items = resp?.data?.items || [];
+      setPapers(items);
+      setPaperEditingId("");
+
+      if (selectedPaperId && !items.some((item) => item.id === selectedPaperId)) {
+        setSelectedPaperId("");
+      }
+    } catch (err) {
+      setPapersError(getFriendlyErrorMessage(err) || "Failed to load papers.");
+      setPapers([]);
+    } finally {
+      setPapersLoading(false);
+    }
+  };
+
+  const loadBlueprints = async (paperId) => {
+    if (!isCompetitionCourseMode || !paperId) {
+      setBlueprints([]);
+      setBlueprintEditingId("");
+      return;
+    }
+
+    setBlueprintsLoading(true);
+    setBlueprintsError("");
+    try {
+      const resp = await listCompetitionCoursePaperBlueprints({ courseId, levelId: courseLevel.id, paperId });
+      setBlueprints(resp?.data?.items || []);
+      if (blueprintEditingId && !(resp?.data?.items || []).some((item) => item.id === blueprintEditingId)) {
+        setBlueprintEditingId("");
+      }
+    } catch (err) {
+      setBlueprintsError(getFriendlyErrorMessage(err) || "Failed to load blueprints.");
+      setBlueprints([]);
+    } finally {
+      setBlueprintsLoading(false);
     }
   };
 
@@ -172,7 +319,7 @@ function SuperadminCourseLevelWorksheetsPage() {
     setWorksheetsError("");
     try {
       const resp = await listWorksheets({
-        levelId,
+        ...worksheetScopeParams,
         limit: next.limit,
         offset: next.offset,
         published: next.published || undefined,
@@ -211,16 +358,49 @@ function SuperadminCourseLevelWorksheetsPage() {
 
   useEffect(() => {
     void load();
-  }, [courseId, levelNumber]);
+  }, [courseId, levelId, levelNumber]);
 
   useEffect(() => {
-    if (!academicLevel?.id) {
+    if (!worksheetScopeId) {
       return;
     }
-    void loadTemplate(academicLevel.id);
-    void loadBank(academicLevel.id);
-    void loadWorksheets(academicLevel.id, { offset: 0 });
-  }, [academicLevel?.id]);
+
+    if (!isCompetitionCourseMode) {
+      void loadTemplate(worksheetScopeId);
+    }
+
+    // Load the scoped question bank for both normal course levels and competition course levels.
+    void loadBank(worksheetScopeId);
+    void loadPapers(worksheetScopeId);
+    void loadBlueprints(selectedPaperId);
+
+    void loadWorksheets(worksheetScopeId, { offset: 0 });
+  }, [worksheetScopeId, isCompetitionCourseMode, selectedPaperId]);
+
+  useEffect(() => {
+    if (!isCompetitionCourseMode) {
+      return;
+    }
+
+    setWorksheetGenerationForm((prev) => {
+      const nextPaperId = selectedPaperId || "";
+      const nextBlueprintId = selectedPaperId
+        ? (activeBlueprints.some((blueprint) => blueprint.id === prev.blueprintId)
+          ? prev.blueprintId
+          : (activeBlueprints[0]?.id || ""))
+        : "";
+
+      if (prev.paperId === nextPaperId && prev.blueprintId === nextBlueprintId) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        paperId: nextPaperId,
+        blueprintId: nextBlueprintId
+      };
+    });
+  }, [activeBlueprints, isCompetitionCourseMode, selectedPaperId]);
 
   useEffect(() => {
     if (!selectedWorksheetId) {
@@ -255,7 +435,7 @@ function SuperadminCourseLevelWorksheetsPage() {
     return <ErrorState title="Level not found" message="The course level could not be resolved." />;
   }
 
-  if (!academicLevel) {
+  if (!isCompetitionCourseMode && !academicLevel) {
     return <ErrorState title="Level mapping missing" message="No academic level exists for this level number." />;
   }
 
@@ -300,16 +480,254 @@ function SuperadminCourseLevelWorksheetsPage() {
         title: worksheetCreateForm.title.trim(),
         description: worksheetCreateForm.description.trim() || null,
         difficulty: worksheetCreateForm.difficulty,
-        levelId: academicLevel.id,
+        ...(isCompetitionCourseMode && selectedPaperId
+          ? { competitionCourseLevelId: courseLevel.id, competitionCoursePaperId: selectedPaperId }
+          : worksheetScopeParams),
         isPublished: false
       });
 
       setWorksheetCreateForm({ title: "", description: "", difficulty: "MEDIUM", isPublished: false });
-  await loadWorksheets(academicLevel.id, { offset: 0 });
+      await loadWorksheets(worksheetScopeId, { offset: 0 });
     } catch (err) {
       setWorksheetsError(getFriendlyErrorMessage(err) || "Failed to create worksheet.");
     } finally {
       setWorksheetCreating(false);
+    }
+  };
+
+  const onSavePaper = async (event) => {
+    event.preventDefault();
+    if (!isCompetitionCourseMode) {
+      return;
+    }
+
+    setPaperSaving(true);
+    setPapersError("");
+    try {
+      const title = String(paperForm.title || "").trim();
+      if (!title) {
+        setPapersError("Paper title is required.");
+        return;
+      }
+
+      const payload = {
+        title,
+        code: String(paperForm.code || "").trim() || null,
+        description: String(paperForm.description || "").trim() || null,
+        sortOrder: Number(paperForm.sortOrder || 0),
+        status: paperForm.status
+      };
+
+      if (paperEditingId) {
+        await updateCompetitionCoursePaper({
+          courseId,
+          levelId: courseLevel.id,
+          paperId: paperEditingId,
+          ...payload
+        });
+      } else {
+        const resp = await createCompetitionCoursePaper({
+          courseId,
+          levelId: courseLevel.id,
+          ...payload
+        });
+        const createdId = resp?.data?.id || null;
+        if (createdId) {
+          setSelectedPaperId(createdId);
+        }
+      }
+
+      setPaperForm({ title: "", code: "", description: "", sortOrder: "0", status: "DRAFT" });
+      setPaperEditingId("");
+      await loadPapers(courseLevel.id);
+      await loadWorksheets(worksheetScopeId, { offset: 0 });
+    } catch (err) {
+      setPapersError(getFriendlyErrorMessage(err) || "Failed to save paper.");
+    } finally {
+      setPaperSaving(false);
+    }
+  };
+
+  const onSaveBlueprint = async (event) => {
+    event.preventDefault();
+    if (!isCompetitionCourseMode || !selectedPaperId) {
+      return;
+    }
+
+    setBlueprintSaving(true);
+    setBlueprintsError("");
+    try {
+      const title = String(blueprintEditingId ? blueprintForm.title : blueprintForm.title || "").trim();
+      if (!title) {
+        setBlueprintsError("Blueprint title is required.");
+        return;
+      }
+
+      const payload = {
+        title,
+        version: Number(blueprintForm.version || 1),
+        status: blueprintForm.status,
+        totalQuestions: blueprintForm.totalQuestions === "" ? null : Number(blueprintForm.totalQuestions),
+        totalMarks: blueprintForm.totalMarks === "" ? null : Number(blueprintForm.totalMarks),
+        durationMinutes: blueprintForm.durationMinutes === "" ? null : Number(blueprintForm.durationMinutes),
+        difficultyDistribution: blueprintForm.difficultyDistribution ? JSON.parse(blueprintForm.difficultyDistribution) : null,
+        categoryDistribution: blueprintForm.categoryDistribution ? JSON.parse(blueprintForm.categoryDistribution) : null,
+        operationDistribution: blueprintForm.operationDistribution ? JSON.parse(blueprintForm.operationDistribution) : null,
+        mandatoryQuestionIds: blueprintForm.mandatoryQuestionIds ? JSON.parse(blueprintForm.mandatoryQuestionIds) : null,
+        randomizeQuestions: Boolean(blueprintForm.randomizeQuestions),
+        randomizeOptions: Boolean(blueprintForm.randomizeOptions),
+        instructions: blueprintForm.instructions.trim() || null,
+        sortOrder: Number(blueprintForm.sortOrder || 0)
+      };
+
+      if (blueprintEditingId) {
+        await updateCompetitionCoursePaperBlueprint({
+          courseId,
+          levelId: courseLevel.id,
+          paperId: selectedPaperId,
+          blueprintId: blueprintEditingId,
+          payload
+        });
+      } else {
+        await createCompetitionCoursePaperBlueprint({
+          courseId,
+          levelId: courseLevel.id,
+          paperId: selectedPaperId,
+          payload
+        });
+      }
+
+      setBlueprintForm({
+        title: "",
+        version: "1",
+        status: "DRAFT",
+        totalQuestions: "",
+        totalMarks: "",
+        durationMinutes: "",
+        difficultyDistribution: "{}",
+        categoryDistribution: "{}",
+        operationDistribution: "{}",
+        mandatoryQuestionIds: "[]",
+        randomizeQuestions: false,
+        randomizeOptions: false,
+        instructions: "",
+        sortOrder: "0"
+      });
+      setBlueprintEditingId("");
+      await loadBlueprints(selectedPaperId);
+    } catch (err) {
+      setBlueprintsError(getFriendlyErrorMessage(err) || "Failed to save blueprint.");
+    } finally {
+      setBlueprintSaving(false);
+    }
+  };
+
+  const onEditBlueprint = (blueprint) => {
+    setBlueprintEditingId(blueprint.id);
+    setBlueprintForm({
+      title: blueprint.title || "",
+      version: String(blueprint.version ?? 1),
+      status: blueprint.status || "DRAFT",
+      totalQuestions: blueprint.totalQuestions ?? "",
+      totalMarks: blueprint.totalMarks ?? "",
+      durationMinutes: blueprint.durationMinutes ?? "",
+      difficultyDistribution: JSON.stringify(blueprint.difficultyDistribution ?? {}, null, 2),
+      categoryDistribution: JSON.stringify(blueprint.categoryDistribution ?? {}, null, 2),
+      operationDistribution: JSON.stringify(blueprint.operationDistribution ?? {}, null, 2),
+      mandatoryQuestionIds: JSON.stringify(blueprint.mandatoryQuestionIds ?? [], null, 2),
+      randomizeQuestions: Boolean(blueprint.randomizeQuestions),
+      randomizeOptions: Boolean(blueprint.randomizeOptions),
+      instructions: blueprint.instructions || "",
+      sortOrder: String(blueprint.sortOrder ?? 0)
+    });
+  };
+
+  const onArchiveBlueprint = async (blueprint) => {
+    setBlueprintsError("");
+    try {
+      await archiveCompetitionCoursePaperBlueprint({
+        courseId,
+        levelId: courseLevel.id,
+        paperId: selectedPaperId,
+        blueprintId: blueprint.id
+      });
+      await loadBlueprints(selectedPaperId);
+    } catch (err) {
+      setBlueprintsError(getFriendlyErrorMessage(err) || "Failed to archive blueprint.");
+    }
+  };
+
+  const onGenerateWorksheetFromBlueprint = async (event) => {
+    event.preventDefault();
+    if (!isCompetitionCourseMode || !selectedPaperId || !worksheetGenerationForm.blueprintId) {
+      return;
+    }
+
+    const title = String(worksheetGenerationForm.title || "").trim();
+    if (!title) {
+      setWorksheetsError("Worksheet title is required.");
+      return;
+    }
+
+    setWorksheetGenerating(true);
+    setWorksheetsError("");
+    try {
+      const resp = await generateCompetitionCoursePaperWorksheet({
+        courseId,
+        levelId: courseLevel.id,
+        paperId: selectedPaperId,
+        blueprintId: worksheetGenerationForm.blueprintId,
+        payload: {
+          title,
+          version: String(worksheetGenerationForm.version || "").trim() || undefined,
+          seed: String(worksheetGenerationForm.seed || "").trim() || undefined
+        }
+      });
+
+      const createdId = resp?.data?.id || null;
+      setWorksheetGenerationForm((prev) => ({
+        ...prev,
+        title: "",
+        version: "",
+        seed: ""
+      }));
+      await loadWorksheets(worksheetScopeId, { offset: 0 });
+      if (createdId) {
+        setSelectedWorksheetId(createdId);
+      }
+    } catch (err) {
+      setWorksheetsError(getFriendlyErrorMessage(err) || "Failed to generate worksheet.");
+    } finally {
+      setWorksheetGenerating(false);
+    }
+  };
+
+  const onEditPaper = (paper) => {
+    setPaperEditingId(paper.id);
+    setPaperForm({
+      title: paper.title || "",
+      code: paper.code || "",
+      description: paper.description || "",
+      sortOrder: String(paper.sortOrder ?? 0),
+      status: paper.status || "DRAFT"
+    });
+  };
+
+  const onArchivePaper = async (paper) => {
+    setPapersError("");
+    try {
+      await archiveCompetitionCoursePaper({
+        courseId,
+        levelId: courseLevel.id,
+        paperId: paper.id
+      });
+      if (selectedPaperId === paper.id) {
+        setSelectedPaperId("");
+      }
+      await loadPapers(courseLevel.id);
+      await loadWorksheets(worksheetScopeId, { offset: 0 });
+    } catch (err) {
+      setPapersError(getFriendlyErrorMessage(err) || "Failed to archive paper.");
     }
   };
 
@@ -324,7 +742,7 @@ function SuperadminCourseLevelWorksheetsPage() {
       await addWorksheetQuestion(selectedWorksheet.id, { questionBankId: questionAddBankId });
       setQuestionAddBankId("");
       await loadWorksheet(selectedWorksheet.id);
-      await loadWorksheets(academicLevel.id);
+      await loadWorksheets(worksheetScopeId);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to add question.");
     } finally {
@@ -388,7 +806,7 @@ function SuperadminCourseLevelWorksheetsPage() {
       });
 
       await loadWorksheet(selectedWorksheet.id);
-      await loadWorksheets(academicLevel.id);
+      await loadWorksheets(worksheetScopeId);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to update worksheet.");
     } finally {
@@ -407,7 +825,7 @@ function SuperadminCourseLevelWorksheetsPage() {
     try {
       const resp = await duplicateWorksheet(target.id);
       const createdId = resp?.data?.id || null;
-      await loadWorksheets(academicLevel.id, { offset: 0 });
+      await loadWorksheets(worksheetScopeId, { offset: 0 });
       if (createdId) {
         setSelectedWorksheetId(createdId);
       }
@@ -427,7 +845,7 @@ function SuperadminCourseLevelWorksheetsPage() {
       await addWorksheetQuestionsBulk(selectedWorksheet.id, bulkQuestionIds);
       setBulkQuestionIds([]);
       await loadWorksheet(selectedWorksheet.id);
-      await loadWorksheets(academicLevel.id);
+      await loadWorksheets(worksheetScopeId);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to add selected questions.");
     } finally {
@@ -439,7 +857,7 @@ function SuperadminCourseLevelWorksheetsPage() {
     <section style={{ display: "grid", gap: 14 }}>
       <div>
         <h2 style={{ margin: 0 }}>
-          Worksheets: {course.name} · Level {levelNumberInt}
+          Worksheets: {course.name} · Level {isCompetitionCourseMode ? courseLevel.levelNumber : levelNumberInt}
         </h2>
         <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
           Manage worksheet template, create worksheets, and build worksheet questions.
@@ -451,21 +869,420 @@ function SuperadminCourseLevelWorksheetsPage() {
           className="button secondary"
           type="button"
           style={{ width: "auto" }}
-          onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}`)}
+          onClick={() => navigate(isCompetitionCourseMode ? `/superadmin/competition/courses/${courseId}/levels` : `/superadmin/courses/${courseId}/levels/${levelNumber}`)}
         >
           Back
         </button>
-        <button
+        {!isCompetitionCourseMode ? <button
           className="button"
           type="button"
           style={{ width: "auto" }}
           onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}/question-bank`)}
         >
           Open Question Bank
-        </button>
+        </button> : null}
       </div>
 
-      <div className="card" style={{ display: "grid", gap: 10 }}>
+      {isCompetitionCourseMode ? (
+        <div className="card" style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Competition Papers</h3>
+              <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
+                Select a paper to scope worksheets, or keep the level view for legacy worksheets.
+              </p>
+            </div>
+            <button
+              className="button secondary"
+              type="button"
+              style={{ width: "auto" }}
+              onClick={() => setSelectedPaperId("")}
+            >
+              Level Worksheets
+            </button>
+          </div>
+
+          {papersError ? <div className="error">{papersError}</div> : null}
+
+          <form onSubmit={onSavePaper} style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+              <label>
+                Title
+                <input
+                  className="input"
+                  value={paperForm.title}
+                  onChange={(event) => setPaperForm((prev) => ({ ...prev, title: event.target.value }))}
+                  placeholder="Paper A"
+                />
+              </label>
+              <label>
+                Code
+                <input
+                  className="input"
+                  value={paperForm.code}
+                  onChange={(event) => setPaperForm((prev) => ({ ...prev, code: event.target.value }))}
+                  placeholder="PAPER-A"
+                />
+              </label>
+              <label>
+                Sort Order
+                <input
+                  className="input"
+                  inputMode="numeric"
+                  value={paperForm.sortOrder}
+                  onChange={(event) => setPaperForm((prev) => ({ ...prev, sortOrder: event.target.value }))}
+                />
+              </label>
+              <label>
+                Status
+                <select
+                  className="select"
+                  value={paperForm.status}
+                  onChange={(event) => setPaperForm((prev) => ({ ...prev, status: event.target.value }))}
+                >
+                  <option value="DRAFT">Draft</option>
+                  <option value="PUBLISHED">Published</option>
+                  <option value="ARCHIVED">Archived</option>
+                </select>
+              </label>
+              <label style={{ gridColumn: "1 / -1" }}>
+                Description
+                <textarea
+                  className="input"
+                  style={{ minHeight: 88, resize: "vertical" }}
+                  rows={3}
+                  value={paperForm.description}
+                  onChange={(event) => setPaperForm((prev) => ({ ...prev, description: event.target.value }))}
+                  placeholder="Optional paper notes"
+                />
+              </label>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="button" type="submit" style={{ width: "auto" }} disabled={paperSaving}>
+                {paperSaving ? (paperEditingId ? "Saving..." : "Creating...") : (paperEditingId ? "Save Paper" : "Add Paper")}
+              </button>
+              {paperEditingId ? (
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ width: "auto" }}
+                  onClick={() => {
+                    setPaperEditingId("");
+                    setPaperForm({ title: "", code: "", description: "", sortOrder: "0", status: "DRAFT" });
+                    setPapersError("");
+                  }}
+                >
+                  Cancel
+                </button>
+              ) : null}
+            </div>
+          </form>
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {papersLoading ? <div style={{ fontSize: 13, opacity: 0.75 }}>Loading papers...</div> : null}
+            {!papersLoading && !papers.length ? (
+              <div style={{ fontSize: 13, opacity: 0.75 }}>No papers yet. Add one to start grouping worksheets.</div>
+            ) : null}
+            {papers.map((paper) => (
+              <div key={paper.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", border: "1px solid var(--color-border)", borderRadius: 8, padding: 10 }}>
+                <div style={{ display: "grid", gap: 3 }}>
+                  <div style={{ fontWeight: 700 }}>
+                    {paper.title}
+                    {paper.code ? ` · ${paper.code}` : ""}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                    {paper.status} · Sort {paper.sortOrder}
+                    {paper.id === selectedPaperId ? " · Selected" : ""}
+                  </div>
+                  {paper.description ? <div style={{ fontSize: 12 }}>{paper.description}</div> : null}
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    onClick={() => setSelectedPaperId(paper.id)}
+                  >
+                    Select
+                  </button>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    onClick={() => onEditPaper(paper)}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    onClick={() => void onArchivePaper(paper)}
+                  >
+                    Archive
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {isCompetitionCourseMode ? (
+        <div className="card" style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Blueprints</h3>
+              <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
+                Manage generation rules for the selected paper.
+              </p>
+            </div>
+            <button
+              className="button secondary"
+              type="button"
+              style={{ width: "auto" }}
+              disabled={!selectedPaperId}
+              onClick={() => {
+                setBlueprintEditingId("");
+                setBlueprintForm({
+                  title: "",
+                  version: "1",
+                  status: "DRAFT",
+                  totalQuestions: "",
+                  totalMarks: "",
+                  durationMinutes: "",
+                  difficultyDistribution: "{}",
+                  categoryDistribution: "{}",
+                  operationDistribution: "{}",
+                  mandatoryQuestionIds: "[]",
+                  randomizeQuestions: false,
+                  randomizeOptions: false,
+                  instructions: "",
+                  sortOrder: "0"
+                });
+              }}
+            >
+              New Blueprint
+            </button>
+          </div>
+
+          {!selectedPaperId ? (
+            <div style={{ fontSize: 13, opacity: 0.75 }}>Select a paper to manage blueprints.</div>
+          ) : null}
+
+          {blueprintsError ? <div className="error">{blueprintsError}</div> : null}
+
+          {selectedPaperId ? (
+            <form onSubmit={onSaveBlueprint} style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 120px 160px 120px" }}>
+                <label>
+                  Title
+                  <input className="input" value={blueprintForm.title} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, title: event.target.value }))} />
+                </label>
+                <label>
+                  Version
+                  <input className="input" inputMode="numeric" value={blueprintForm.version} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, version: event.target.value }))} />
+                </label>
+                <label>
+                  Status
+                  <select className="select" value={blueprintForm.status} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, status: event.target.value }))}>
+                    <option value="DRAFT">Draft</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="ARCHIVED">Archived</option>
+                  </select>
+                </label>
+                <label>
+                  Sort Order
+                  <input className="input" inputMode="numeric" value={blueprintForm.sortOrder} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, sortOrder: event.target.value }))} />
+                </label>
+                <label>
+                  Total Questions
+                  <input className="input" inputMode="numeric" value={blueprintForm.totalQuestions} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, totalQuestions: event.target.value }))} />
+                </label>
+                <label>
+                  Total Marks
+                  <input className="input" inputMode="numeric" value={blueprintForm.totalMarks} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, totalMarks: event.target.value }))} />
+                </label>
+                <label>
+                  Duration Minutes
+                  <input className="input" inputMode="numeric" value={blueprintForm.durationMinutes} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, durationMinutes: event.target.value }))} />
+                </label>
+                <label>
+                  Randomize Questions
+                  <select className="select" value={blueprintForm.randomizeQuestions ? "true" : "false"} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, randomizeQuestions: event.target.value === "true" }))}>
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </label>
+                <label>
+                  Randomize Options
+                  <select className="select" value={blueprintForm.randomizeOptions ? "true" : "false"} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, randomizeOptions: event.target.value === "true" }))}>
+                    <option value="false">No</option>
+                    <option value="true">Yes</option>
+                  </select>
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Instructions
+                  <textarea className="input" style={{ minHeight: 88, resize: "vertical" }} value={blueprintForm.instructions} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, instructions: event.target.value }))} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Difficulty Distribution JSON
+                  <textarea className="input" style={{ minHeight: 88, resize: "vertical" }} value={blueprintForm.difficultyDistribution} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, difficultyDistribution: event.target.value }))} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Category Distribution JSON
+                  <textarea className="input" style={{ minHeight: 88, resize: "vertical" }} value={blueprintForm.categoryDistribution} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, categoryDistribution: event.target.value }))} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Operation Distribution JSON
+                  <textarea className="input" style={{ minHeight: 88, resize: "vertical" }} value={blueprintForm.operationDistribution} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, operationDistribution: event.target.value }))} />
+                </label>
+                <label style={{ gridColumn: "1 / -1" }}>
+                  Mandatory Question IDs JSON
+                  <textarea className="input" style={{ minHeight: 88, resize: "vertical" }} value={blueprintForm.mandatoryQuestionIds} onChange={(event) => setBlueprintForm((prev) => ({ ...prev, mandatoryQuestionIds: event.target.value }))} />
+                </label>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button className="button" type="submit" style={{ width: "auto" }} disabled={blueprintSaving}>
+                  {blueprintSaving ? (blueprintEditingId ? "Saving..." : "Creating...") : (blueprintEditingId ? "Save Blueprint" : "Add Blueprint")}
+                </button>
+                {blueprintEditingId ? (
+                  <button
+                    type="button"
+                    className="button secondary"
+                    style={{ width: "auto" }}
+                    onClick={() => {
+                      setBlueprintEditingId("");
+                      setBlueprintForm({
+                        title: "",
+                        version: "1",
+                        status: "DRAFT",
+                        totalQuestions: "",
+                        totalMarks: "",
+                        durationMinutes: "",
+                        difficultyDistribution: "{}",
+                        categoryDistribution: "{}",
+                        operationDistribution: "{}",
+                        mandatoryQuestionIds: "[]",
+                        randomizeQuestions: false,
+                        randomizeOptions: false,
+                        instructions: "",
+                        sortOrder: "0"
+                      });
+                    }}
+                  >
+                    Cancel
+                  </button>
+                ) : null}
+              </div>
+            </form>
+          ) : null}
+
+          <div style={{ display: "grid", gap: 8 }}>
+            {blueprintsLoading ? <div style={{ fontSize: 13, opacity: 0.75 }}>Loading blueprints...</div> : null}
+            {!blueprintsLoading && selectedPaperId && !blueprints.length ? (
+              <div style={{ fontSize: 13, opacity: 0.75 }}>No blueprints yet. Add one for the selected paper.</div>
+            ) : null}
+            {blueprints.map((blueprint) => (
+              <div key={blueprint.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", border: "1px solid var(--color-border)", borderRadius: 8, padding: 10 }}>
+                <div style={{ display: "grid", gap: 3 }}>
+                  <div style={{ fontWeight: 700 }}>
+                    {blueprint.title} · v{blueprint.version}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                    {blueprint.status} · Sort {blueprint.sortOrder}
+                  </div>
+                  <div style={{ fontSize: 12 }}>
+                    Q: {blueprint.totalQuestions ?? "-"} · Marks: {blueprint.totalMarks ?? "-"} · Minutes: {blueprint.durationMinutes ?? "-"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => onEditBlueprint(blueprint)}>
+                    Edit
+                  </button>
+                  <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void onArchiveBlueprint(blueprint)}>
+                    Archive
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {isCompetitionCourseMode ? (
+        <div className="card" style={{ display: "grid", gap: 12 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Generate Worksheet</h3>
+            <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
+              Generate a draft worksheet from the selected paper's active blueprint.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1.2fr 1.2fr 1fr 1fr" }}>
+            <label>
+              Paper
+              <input className="input" value={selectedPaper?.title || selectedPaper?.code || "Select a paper above"} readOnly />
+            </label>
+            <label>
+              Active Blueprint
+              <select
+                className="select"
+                value={worksheetGenerationForm.blueprintId}
+                onChange={(event) => setWorksheetGenerationForm((prev) => ({ ...prev, blueprintId: event.target.value }))}
+                disabled={!selectedPaperId || !activeBlueprints.length}
+              >
+                <option value="">Select blueprint</option>
+                {activeBlueprints.map((blueprint) => (
+                  <option key={blueprint.id} value={blueprint.id}>
+                    {blueprint.title} · v{blueprint.version}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Version
+              <input
+                className="input"
+                value={worksheetGenerationForm.version}
+                onChange={(event) => setWorksheetGenerationForm((prev) => ({ ...prev, version: event.target.value }))}
+                placeholder="Optional"
+              />
+            </label>
+            <label>
+              Seed
+              <input
+                className="input"
+                value={worksheetGenerationForm.seed}
+                onChange={(event) => setWorksheetGenerationForm((prev) => ({ ...prev, seed: event.target.value }))}
+                placeholder="Optional"
+              />
+            </label>
+            <label style={{ gridColumn: "1 / -1" }}>
+              Worksheet Title
+              <input
+                className="input"
+                value={worksheetGenerationForm.title}
+                onChange={(event) => setWorksheetGenerationForm((prev) => ({ ...prev, title: event.target.value }))}
+                placeholder="Draft worksheet title"
+              />
+            </label>
+          </div>
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="button" type="button" style={{ width: "auto" }} disabled={worksheetGenerating || !selectedPaperId || !worksheetGenerationForm.blueprintId} onClick={onGenerateWorksheetFromBlueprint}>
+              {worksheetGenerating ? "Generating..." : "Generate Worksheet"}
+            </button>
+            <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+              Uses the level question bank only and creates a fresh draft worksheet.
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {!isCompetitionCourseMode ? <div className="card" style={{ display: "grid", gap: 10 }}>
         <h3 style={{ margin: 0 }}>Worksheet Template</h3>
         {templateError ? <div className="error">{templateError}</div> : null}
         <form onSubmit={onSaveTemplate} style={{ display: "grid", gap: 10 }}>
@@ -521,10 +1338,17 @@ function SuperadminCourseLevelWorksheetsPage() {
             {templateSaving ? "Saving..." : template ? "Update Template" : "Create Template"}
           </button>
         </form>
-      </div>
+      </div> : null}
 
       <div className="card" style={{ display: "grid", gap: 12 }}>
-        <h3 style={{ margin: 0 }}>Worksheets</h3>
+        <h3 style={{ margin: 0 }}>
+          Worksheets{isCompetitionCourseMode ? ` · ${selectedPaper ? selectedPaper.title : "Level Scope"}` : ""}
+        </h3>
+        {isCompetitionCourseMode ? (
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)" }}>
+            {selectedPaper ? "Paper-scoped worksheets." : "Legacy level-scoped worksheets."}
+          </div>
+        ) : null}
         {worksheetsError ? <div className="error">{worksheetsError}</div> : null}
 
         <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 160px 160px 130px" }}>
@@ -561,7 +1385,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               value={String(worksheetsLimit)}
               onChange={(event) => {
                 const nextLimit = Number(event.target.value);
-                void loadWorksheets(academicLevel.id, { limit: nextLimit, offset: 0 });
+                void loadWorksheets(worksheetScopeId, { limit: nextLimit, offset: 0 });
               }}
             >
               <option value="10">10</option>
@@ -578,7 +1402,7 @@ function SuperadminCourseLevelWorksheetsPage() {
             className="button secondary"
             type="button"
             style={{ width: "auto" }}
-            onClick={() => void loadWorksheets(academicLevel.id, { offset: 0 })}
+            onClick={() => void loadWorksheets(worksheetScopeId, { offset: 0 })}
             disabled={worksheetsLoading}
           >
             {worksheetsLoading ? "Loading..." : "Apply Filters"}
@@ -591,7 +1415,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               setWorksheetsQ("");
               setWorksheetsPublished("");
               setWorksheetsDifficulty("");
-              void loadWorksheets(academicLevel.id, { q: "", published: "", difficulty: "", offset: 0 });
+              void loadWorksheets(worksheetScopeId, { q: "", published: "", difficulty: "", offset: 0 });
             }}
           >
             Reset Filters
@@ -655,7 +1479,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               offset={worksheetsOffset}
               count={worksheets.length}
               onChange={(next) => {
-                void loadWorksheets(academicLevel.id, next);
+                void loadWorksheets(worksheetScopeId, next);
               }}
             />
           </div>
@@ -684,7 +1508,7 @@ function SuperadminCourseLevelWorksheetsPage() {
                       style={{ width: "auto" }}
                       onClick={() => setDuplicateWorksheetTarget(selectedWorksheet)}
                     >
-                      Duplicate as Draft
+                      Regenerate as New Draft
                     </button>
                     <button
                       className="button secondary"
@@ -755,7 +1579,7 @@ function SuperadminCourseLevelWorksheetsPage() {
                       <select className="select" value={questionAddBankId} onChange={(event) => setQuestionAddBankId(event.target.value)}>
                         <option value="">Select question…</option>
                         {bankItems.map((question) => (
-                          <option key={question.id} value={question.id}>
+                          <option key={question.id} value={question.questionBankId || question.id}>
                             {question.difficulty}: {question.prompt}
                           </option>
                         ))}
@@ -770,7 +1594,8 @@ function SuperadminCourseLevelWorksheetsPage() {
                     <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Bulk Add from Question Bank</div>
                     <div style={{ maxHeight: 180, overflow: "auto", border: "1px solid var(--color-border)", borderRadius: 8, padding: 8 }}>
                       {bankItems.map((question) => {
-                        const checked = bulkQuestionIds.includes(question.id);
+                        const sourceQuestionBankId = question.questionBankId || question.id;
+                        const checked = bulkQuestionIds.includes(sourceQuestionBankId);
                         return (
                           <label key={question.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
                             <input
@@ -780,12 +1605,12 @@ function SuperadminCourseLevelWorksheetsPage() {
                                 const nextChecked = event.target.checked;
                                 setBulkQuestionIds((prev) => {
                                   if (nextChecked) {
-                                    if (prev.includes(question.id)) {
+                                    if (prev.includes(sourceQuestionBankId)) {
                                       return prev;
                                     }
-                                    return [...prev, question.id];
+                                    return [...prev, sourceQuestionBankId];
                                   }
-                                  return prev.filter((id) => id !== question.id);
+                                  return prev.filter((id) => id !== sourceQuestionBankId);
                                 });
                               }}
                             />
@@ -901,7 +1726,7 @@ function SuperadminCourseLevelWorksheetsPage() {
               setSelectedWorksheetId(null);
               setSelectedWorksheet(null);
             }
-            await loadWorksheets(academicLevel.id);
+            await loadWorksheets(worksheetScopeId);
           } catch (err) {
             setWorksheetError(getFriendlyErrorMessage(err) || "Failed to delete worksheet.");
           }
@@ -924,7 +1749,7 @@ function SuperadminCourseLevelWorksheetsPage() {
           try {
             await deleteWorksheetQuestion(selectedWorksheet.id, target.id);
             await loadWorksheet(selectedWorksheet.id);
-            await loadWorksheets(academicLevel.id);
+            await loadWorksheets(worksheetScopeId);
           } catch (err) {
             setWorksheetError(getFriendlyErrorMessage(err) || "Failed to remove question.");
           }

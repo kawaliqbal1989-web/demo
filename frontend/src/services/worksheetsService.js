@@ -1,11 +1,13 @@
 import { apiClient } from "./apiClient";
 
-async function listWorksheets({ levelId, limit = 50, offset = 0, published, difficulty, q } = {}) {
+async function listWorksheets({ levelId, competitionCourseLevelId, competitionCoursePaperId, limit = 50, offset = 0, published, difficulty, q } = {}) {
   const response = await apiClient.get("/worksheets", {
     params: {
       limit,
       offset,
       ...(levelId ? { levelId } : {}),
+      ...(competitionCourseLevelId ? { competitionCourseLevelId } : {}),
+      ...(competitionCoursePaperId ? { competitionCoursePaperId } : {}),
       ...(published === undefined ? {} : { published }),
       ...(difficulty ? { difficulty } : {}),
       ...(q ? { q } : {})

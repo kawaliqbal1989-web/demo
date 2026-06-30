@@ -46,6 +46,8 @@ const LABEL_MAP = {
   certificates: "Certificates",
   hierarchy: "Hierarchy",
   competition: "Competition",
+  foundation: "Foundation",
+  templates: "Templates",
   "competition-requests": "Competition Requests",
   franchises: "Franchises",
   centers: "Centers",

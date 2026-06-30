@@ -82,9 +82,13 @@ async function exportFranchiseReportsCsv() {
   return res;
 }
 
-async function listFranchiseCompetitionRequests({ limit = 50, offset = 0 } = {}) {
+async function listFranchiseCompetitionRequests({ limit = 50, offset = 0, stage } = {}) {
   const res = await apiClient.get("/franchise/competition_requests", {
-    params: { limit, offset }
+    params: {
+      limit,
+      offset,
+      stage: stage || undefined
+    }
   });
   return res.data;
 }
@@ -260,6 +264,35 @@ async function reopenFranchiseWorkflow(id, payload = {}) {
   return postFranchiseWorkflowAction(id, "reopen", payload);
 }
 
+// Competition review endpoints for franchise
+async function listFranchiseCompetitionCenters(competitionId, { limit = 200, offset = 0 } = {}, config = {}) {
+  const res = await apiClient.get(`/franchise/competitions/${competitionId}/centers`, {
+    ...config,
+    params: { limit, offset }
+  });
+  return res.data;
+}
+
+async function getFranchiseCompetitionCenterDetail(competitionId, centerId, config = {}) {
+  const res = await apiClient.get(`/franchise/competitions/${competitionId}/centers/${centerId}`, config);
+  return res.data;
+}
+
+async function returnFranchiseCompetitionCenter(competitionId, centerId, payload = {}) {
+  const res = await apiClient.post(`/franchise/competitions/${competitionId}/centers/${centerId}/return`, payload);
+  return res.data;
+}
+
+async function approveFranchiseCompetitionCenter(competitionId, centerId) {
+  const res = await apiClient.post(`/franchise/competitions/${competitionId}/centers/${centerId}/approve`);
+  return res.data;
+}
+
+async function submitFranchiseCompetition(competitionId) {
+  const res = await apiClient.post(`/franchise/competitions/${competitionId}/submit`);
+  return res.data;
+}
+
 export {
   getMyFranchise,
   getFranchiseDashboard,
@@ -293,4 +326,10 @@ export {
   forwardFranchiseEscalation,
   resolveFranchiseWorkflow,
   reopenFranchiseWorkflow
+  ,
+  listFranchiseCompetitionCenters,
+  getFranchiseCompetitionCenterDetail,
+  returnFranchiseCompetitionCenter,
+  approveFranchiseCompetitionCenter,
+  submitFranchiseCompetition
 };

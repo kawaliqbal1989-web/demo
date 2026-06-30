@@ -78,10 +78,10 @@ function drawStampBlock({ doc, template, stampEl }) {
 
 /**
  * Generate a beautiful certificate PDF.
- * @param {{ studentName: string, levelName: string, certificateNumber: string, issuedAt: string, template?: object, qrDataUrl?: string }} cert
+ * @param {{ studentName: string, levelName: string, certificateNumber: string, issuedAt: string, details?: Array<{label: string, value: string}>, template?: object, qrDataUrl?: string }} cert
  * @returns {jsPDF}
  */
-export function generateCertificatePdf({ studentName, levelName, certificateNumber, issuedAt, template, qrDataUrl }) {
+export function generateCertificatePdf({ studentName, levelName, certificateNumber, issuedAt, details = [], template, qrDataUrl }) {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const w = doc.internal.pageSize.getWidth();
   const h = doc.internal.pageSize.getHeight();
@@ -110,6 +110,7 @@ export function generateCertificatePdf({ studentName, levelName, certificateNumb
   const nameEl = el("studentName", { x: w / 2, y: 88, fontSize: 24, visible: true });
   const completionEl = el("completionText", { x: w / 2, y: 106, fontSize: 14, visible: true });
   const levelEl = el("levelName", { x: w / 2, y: 120, fontSize: 20, visible: true });
+  const detailsEl = el("details", { x: w / 2, y: 126, fontSize: 10, visible: true });
   const metaEl = el("certMeta", { x: w / 2, y: 145, fontSize: 10, visible: true });
   const sigEl = el("signature", { x: 55, y: 155, w: 40, h: 15, showDate: false, visible: true });
   const sigInfoEl = el("signatoryInfo", { x: 75, y: 175, fontSize: 9, visible: true });
@@ -202,6 +203,21 @@ export function generateCertificatePdf({ studentName, levelName, certificateNumb
     doc.setFont("helvetica", "bold");
     doc.setTextColor(37, 99, 235);
     doc.text(levelName, levelEl.x, levelEl.y, { align: "center" });
+  }
+
+  if (detailsEl.visible !== false && Array.isArray(details) && details.length) {
+    const lineGap = 5.5;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(detailsEl.fontSize || 10);
+    doc.setTextColor(55, 65, 81);
+    details.slice(0, 6).forEach((entry, index) => {
+      const label = String(entry?.label || "").trim();
+      const value = String(entry?.value || "").trim();
+      if (!label && !value) {
+        return;
+      }
+      doc.text(`${label ? `${label}: ` : ""}${value || "—"}`, detailsEl.x, detailsEl.y + (index * lineGap), { align: "center" });
+    });
   }
 
   // Meta info

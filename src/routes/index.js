@@ -26,8 +26,10 @@ import { marginsRouter } from "./margins.routes.js";
 import { settlementsRouter } from "./settlements.routes.js";
 import { partnersRouter } from "./partners.routes.js";
 import { coursesRouter } from "./courses.routes.js";
+import { competitionCourseAssignmentRouter, competitionCoursesRouter } from "./competition-courses.routes.js";
 import { catalogRouter } from "./catalog.routes.js";
 import { questionBankRouter } from "./question-bank.routes.js";
+import { competitionQuestionBankRouter } from "./competition-question-bank.routes.js";
 import { partnerRouter } from "./partner.routes.js";
 import { franchiseRouter } from "./franchise.routes.js";
 import { franchisesRouter } from "./franchises.routes.js";
@@ -51,6 +53,7 @@ import { uploadsRouter } from "./uploads.routes.js";
 import bulkRouter from "./bulk-operations.routes.js";
 import { assessmentMigrationInternalRouter } from "./assessment-migration-internal.routes.js";
 import { examPlatformRouter } from "./exam-platform.routes.js";
+import { competitionFoundationRouter } from "./competition-foundation.routes.js";
 
 const apiRouter = Router();
 
@@ -72,9 +75,12 @@ apiRouter.use("/levels", levelsRouter);
 apiRouter.use("/students", studentsRouter);
 apiRouter.use("/worksheets", worksheetsRouter);
 apiRouter.use("/competitions", competitionsRouter);
+apiRouter.use("/competitions", competitionCourseAssignmentRouter);
+apiRouter.use("/competition-courses", competitionCoursesRouter);
 apiRouter.use("/courses", coursesRouter);
 apiRouter.use("/catalog", catalogRouter);
 apiRouter.use("/question-bank", questionBankRouter);
+apiRouter.use("/competition-question-bank", competitionQuestionBankRouter);
 apiRouter.use("/business-partners", businessPartnersRouter);
 apiRouter.use("/exam-textbook", examTextbookRouter);
 apiRouter.use("/centers", centersRouter);
@@ -109,5 +115,6 @@ apiRouter.use("/insights", insightsRouter);
 apiRouter.use("/bulk", bulkRouter);
 apiRouter.use("/internal/assessment-migrations", assessmentMigrationInternalRouter);
 apiRouter.use("/exam-platform", examPlatformRouter);
+apiRouter.use("/competitions/foundation", competitionFoundationRouter);
 
 export { apiRouter };

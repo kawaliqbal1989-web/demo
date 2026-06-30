@@ -924,31 +924,159 @@ const exportFranchiseReportsCsv = asyncHandler(async (req, res) => {
 
 const listFranchiseCompetitionRequests = asyncHandler(async (req, res) => {
   const { take, skip, orderBy } = parsePagination(req.query);
-  const nodeIds = req.franchiseScope.hierarchyNodeIds;
+  const franchise = req.franchiseScope?.franchise || null;
+  const businessPartnerId = franchise?.businessPartnerId || null;
+  const franchiseId = franchise?.id || null;
+  const stageFilter = normalizeString(req.query.stage)?.toUpperCase() || null;
 
-  const where = {
-    tenantId: req.auth.tenantId,
-    workflowStage: "FRANCHISE_REVIEW",
-    ...(nodeIds.length ? { hierarchyNodeId: { in: nodeIds } } : {})
-  };
+  if (!businessPartnerId || !franchiseId) {
+    return res.apiSuccess("Franchise competition requests fetched", { items: [], total: 0, limit: take, offset: skip });
+  }
 
-  const data = await prisma.competition.findMany({
-    where,
+  const centerProfiles = await prisma.centerProfile.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      franchiseProfileId: franchiseId,
+      status: { not: "ARCHIVED" }
+    },
+    select: {
+      id: true,
+      authUser: {
+        select: {
+          hierarchyNodeId: true
+        }
+      }
+    }
+  });
+
+  const centerIds = centerProfiles.map((center) => center.id);
+  const hierarchyNodeIds = centerProfiles.map((center) => center.authUser?.hierarchyNodeId).filter(Boolean);
+
+  const competitions = await prisma.competition.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      businessPartnerMappings: {
+        some: {
+          businessPartnerId,
+          status: "APPROVED"
+        }
+      }
+    },
     orderBy,
-    skip,
-    take,
     select: {
       id: true,
       title: true,
+      code: true,
       status: true,
       workflowStage: true,
       hierarchyNode: { select: { id: true, name: true, type: true } },
       level: { select: { id: true, name: true, rank: true } },
-      createdBy: { select: { id: true, email: true, role: true } }
+      centerSubmissions: {
+        where: {
+          tenantId: req.auth.tenantId,
+          ...(centerIds.length ? { centerId: { in: centerIds } } : {})
+        },
+        select: {
+          centerId: true,
+          status: true,
+          submittedAt: true
+        }
+      }
     }
   });
 
-  return res.apiSuccess("Franchise competition requests fetched", data);
+  const enriched = competitions
+    .map((competition) => {
+      const submissions = Array.isArray(competition.centerSubmissions) ? competition.centerSubmissions : [];
+      const latestSubmission = submissions
+        .slice()
+        .sort((left, right) => new Date(right.submittedAt || 0) - new Date(left.submittedAt || 0))[0] || null;
+      const currentStage = submissions.some((submission) => submission.status === "SUBMITTED")
+        ? "FRANCHISE_REVIEW"
+        : submissions.some((submission) => submission.status === "APPROVED")
+        ? "FRANCHISE_SUBMITTED"
+        : submissions.some((submission) => submission.status === "REOPENED" || submission.status === "RETURNED")
+        ? "RETURNED"
+        : "CENTER_SUBMITTED";
+
+      return {
+        id: competition.id,
+        title: competition.title,
+        code: competition.code,
+        status: competition.status,
+        workflowStage: currentStage,
+        hierarchyNode: competition.hierarchyNode,
+        level: competition.level,
+        center: competition.hierarchyNode,
+        studentCount: 0,
+        temporaryStudentCount: 0,
+        submittedAt: latestSubmission?.submittedAt || null
+      };
+    })
+    .filter((competition) => !stageFilter || stageFilter === "ALL" || competition.workflowStage === stageFilter);
+
+  const total = enriched.length;
+  const paged = enriched.slice(skip, skip + take);
+  const competitionIds = paged.map((competition) => competition.id);
+  const enrollments = competitionIds.length
+    ? await prisma.competitionEnrollment.findMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          competitionId: { in: competitionIds },
+          isActive: true,
+          ...(hierarchyNodeIds.length ? { student: { hierarchyNodeId: { in: hierarchyNodeIds } } } : {})
+        },
+        select: {
+          competitionId: true,
+          student: {
+            select: {
+              isTemporaryExam: true
+            }
+          }
+        }
+      })
+    : [];
+
+  const studentCounts = new Map();
+  const temporaryStudentCounts = new Map();
+  for (const enrollment of enrollments) {
+    studentCounts.set(enrollment.competitionId, (studentCounts.get(enrollment.competitionId) || 0) + 1);
+    if (enrollment.student?.isTemporaryExam) {
+      temporaryStudentCounts.set(
+        enrollment.competitionId,
+        (temporaryStudentCounts.get(enrollment.competitionId) || 0) + 1
+      );
+    }
+  }
+
+  const items = paged.map((competition) => {
+    return {
+      id: competition.id,
+      title: competition.title,
+      code: competition.code,
+      status: competition.status,
+      workflowStage: competition.workflowStage,
+      hierarchyNode: competition.hierarchyNode,
+      level: competition.level,
+      center: competition.hierarchyNode,
+      studentCount: studentCounts.get(competition.id) || 0,
+      temporaryStudentCount: temporaryStudentCounts.get(competition.id) || 0,
+      submittedAt: competition.submittedAt || null
+    };
+  });
+
+  return res.apiSuccess("Franchise competition requests fetched", {
+    items,
+    total,
+    limit: take,
+    offset: skip,
+    franchise: {
+      id: franchise.id,
+      name: franchise.name,
+      displayName: franchise.displayName,
+      code: franchise.code
+    }
+  });
 });
 
 const forwardFranchiseCompetitionRequest = asyncHandler(async (req, res) => {

@@ -33,6 +33,14 @@ import {
 import { requireSuperadmin } from "../middleware/rbac.js";
 import { auditAction } from "../middleware/audit-logger.js";
 import { kpiRateLimiter } from "../middleware/kpi-rate-limit.js";
+import { requireScopeAccess } from "../middleware/scope-access.js";
+
+import {
+  listSuperadminCompetitionBusinessPartners,
+  getSuperadminCompetitionBusinessPartnerDetail,
+  returnSuperadminCompetitionBusinessPartner,
+  approveSuperadminCompetitionBusinessPartner
+} from "../controllers/superadmin-competition.controller.js";
 import { genericLogoUpload, wrapUploadMiddleware } from "../middleware/upload.js";
 
 const superadminRouter = Router();
@@ -229,5 +237,38 @@ superadminRouter.get("/release/features", requireSuperadmin(), handleGetFeatureS
 superadminRouter.patch("/release/waves/:waveKey", requireSuperadmin(), handleToggleWave);
 superadminRouter.get("/release/deploy-info", requireSuperadmin(), handleGetDeployInfo);
 superadminRouter.get("/release/migrations", requireSuperadmin(), handleGetMigrationSequence);
+
+/* Competition business partner review endpoints */
+superadminRouter.get(
+  "/competitions/:competitionId/business-partners",
+  requireSuperadmin(),
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("SA_LIST_COMPETITION_BPS", "COMPETITION"),
+  listSuperadminCompetitionBusinessPartners
+);
+
+superadminRouter.get(
+  "/competitions/:competitionId/business-partners/:bpId",
+  requireSuperadmin(),
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("SA_VIEW_COMPETITION_BP", "COMPETITION", (req) => req.params.competitionId),
+  getSuperadminCompetitionBusinessPartnerDetail
+);
+
+superadminRouter.post(
+  "/competitions/:competitionId/business-partners/:bpId/return",
+  requireSuperadmin(),
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("SA_RETURN_COMPETITION_BP", "COMPETITION", (req) => req.params.competitionId),
+  returnSuperadminCompetitionBusinessPartner
+);
+
+superadminRouter.post(
+  "/competitions/:competitionId/business-partners/:bpId/approve",
+  requireSuperadmin(),
+  requireScopeAccess("competition", "competitionId"),
+  auditAction("SA_APPROVE_COMPETITION_BP", "COMPETITION", (req) => req.params.competitionId),
+  approveSuperadminCompetitionBusinessPartner
+);
 
 export { superadminRouter };

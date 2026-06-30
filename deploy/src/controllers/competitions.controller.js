@@ -2,10 +2,14 @@ import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { recordAudit } from "../utils/audit.js";
 import { getCompetitionLeaderboard } from "../services/competition-leaderboard.service.js";
-import { createBulkNotification } from "../services/notification.service.js";
+import {
+  notifyCenterRequestedCompetitionUnlock,
+  notifyCompetitionCreated,
+  notifyCompetitionForwarded,
+  notifyCompetitionRejected
+} from "../services/competition-notification.service.js";
 import { assertCanModifyOperational } from "../services/ownership-guard.service.js";
 import {
-  getNextRoleByWorkflowStage,
   transitionForward,
   transitionReject
 } from "../services/competition-workflow.service.js";
@@ -230,13 +234,15 @@ const createCompetition = asyncHandler(async (req, res) => {
     return res.apiError(400, "endsAt must be after startsAt", "VALIDATION_ERROR");
   }
 
-  if (!levelId || !String(levelId).trim()) {
-    return res.apiError(400, "levelId is required", "VALIDATION_ERROR");
+  if (levelId && !String(levelId).trim()) {
+    return res.apiError(400, "levelId must be empty or a valid level id", "VALIDATION_ERROR");
   }
 
-  const levelExists = await prisma.level.findUnique({ where: { id: String(levelId).trim() }, select: { id: true } });
-  if (!levelExists) {
-    return res.apiError(400, "Level not found", "LEVEL_NOT_FOUND");
+  if (levelId) {
+    const levelExists = await prisma.level.findUnique({ where: { id: String(levelId).trim() }, select: { id: true } });
+    if (!levelExists) {
+      return res.apiError(400, "Level not found", "LEVEL_NOT_FOUND");
+    }
   }
 
   const initialStageByRole = {
@@ -263,12 +269,22 @@ const createCompetition = asyncHandler(async (req, res) => {
       startsAt: parsedStart,
       endsAt: parsedEnd,
       hierarchyNodeId: resolvedHierarchyNodeId,
-      levelId: String(levelId).trim(),
+      levelId: levelId ? String(levelId).trim() : null,
       createdByUserId: req.auth.userId
     }
   });
 
   res.locals.entityId = created.id;
+  try {
+    await notifyCompetitionCreated({
+      tenantId: req.auth.tenantId,
+      competitionId: created.id,
+      actorRole: req.auth.role
+    });
+  } catch {
+    // Notification failures must not block competition creation.
+  }
+
   return res.apiSuccess("Competition created", created, 201);
 });
 
@@ -298,42 +314,17 @@ const forwardCompetitionRequest = asyncHandler(async (req, res) => {
     }
   });
 
-  void (async () => {
-    try {
-      const nextRole = getNextRoleByWorkflowStage(updated.workflowStage);
-
-      if (!nextRole) {
-        return;
-      }
-
-      const recipients = await prisma.authUser.findMany({
-        where: {
-          tenantId: req.auth.tenantId,
-          isActive: true,
-          role: nextRole,
-          ...(nextRole === "SUPERADMIN" ? {} : { hierarchyNodeId: updated.hierarchyNodeId })
-        },
-        select: {
-          id: true
-        },
-        take: 500
-      });
-
-      await createBulkNotification(
-        recipients.map((recipient) => ({
-          tenantId: req.auth.tenantId,
-          recipientUserId: recipient.id,
-          type: "COMPETITION_STAGE_UPDATE",
-          title: "Competition Stage Updated",
-          message: `Competition ${updated.title} moved to ${result.toStage}`,
-          entityType: "COMPETITION",
-          entityId: updated.id
-        }))
-      );
-    } catch {
-      return;
-    }
-  })();
+  try {
+    await notifyCompetitionForwarded({
+      tenantId: req.auth.tenantId,
+      competitionId: updated.id,
+      actorUserId: req.auth.userId,
+      actorRole: req.auth.role,
+      toStage: result.toStage
+    });
+  } catch {
+    // Notification failures must not block workflow transitions.
+  }
 
   return res.apiSuccess("Competition request forwarded", updated);
 });
@@ -365,6 +356,16 @@ const rejectCompetitionRequest = asyncHandler(async (req, res) => {
       action: result.action
     }
   });
+
+  try {
+    await notifyCompetitionRejected({
+      tenantId: req.auth.tenantId,
+      competitionId: updated.id,
+      reason
+    });
+  } catch {
+    // Notification failures must not block workflow rejection.
+  }
 
   return res.apiSuccess("Competition request rejected", updated);
 });
@@ -564,11 +565,45 @@ const exportCompetitionResultsCsv = asyncHandler(async (req, res) => {
   return res.status(200).send(csv);
 });
 
+const requestCompetitionCenterUnlock = asyncHandler(async (req, res) => {
+  const { id: competitionId } = req.params;
+  const reason = String(req.body?.reason || "Requesting center unlock").trim() || "Requesting center unlock";
+
+  const competition = await prisma.competition.findFirst({
+    where: { id: competitionId, tenantId: req.auth.tenantId },
+    select: { id: true, title: true }
+  });
+
+  if (!competition) {
+    return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
+  }
+
+  try {
+    await notifyCenterRequestedCompetitionUnlock({
+      tenantId: req.auth.tenantId,
+      competitionId,
+      actorUserId: req.auth.userId
+    });
+  } catch {
+    // Notification failures must not block recording the request response.
+  }
+
+  const request = {
+    competitionId,
+    competitionName: competition.title,
+    reason,
+    createdAt: new Date().toISOString(),
+    createdBy: req.auth.userId
+  };
+
+  return res.apiSuccess("Competition unlock request submitted", request, 201);
+});
+
 const enrollStudent = asyncHandler(async (req, res) => {
   assertCanModifyOperational(req.auth.role);
 
   const { id: competitionId } = req.params;
-  const { studentId, competitionFeeAmount } = req.body;
+  const { studentId, competitionFeeAmount, levelId: selectedLevelId } = req.body;
 
   if (!studentId) {
     return res.apiError(400, "studentId is required", "STUDENT_ID_REQUIRED");
@@ -609,6 +644,26 @@ const enrollStudent = asyncHandler(async (req, res) => {
       throw error;
     }
 
+    if (!selectedLevelId || !String(selectedLevelId).trim()) {
+      const error = new Error("levelId is required");
+      error.statusCode = 400;
+      error.errorCode = "VALIDATION_ERROR";
+      throw error;
+    }
+
+    const normalizedLevelId = String(selectedLevelId).trim();
+    const levelExists = await tx.level.findUnique({
+      where: { id: normalizedLevelId },
+      select: { id: true }
+    });
+
+    if (!levelExists) {
+      const error = new Error("Level not found");
+      error.statusCode = 400;
+      error.errorCode = "LEVEL_NOT_FOUND";
+      throw error;
+    }
+
     const existing = await tx.competitionEnrollment.findFirst({
       where: {
         competitionId,
@@ -633,6 +688,7 @@ const enrollStudent = asyncHandler(async (req, res) => {
         competitionId,
         studentId,
         tenantId: req.auth.tenantId,
+        levelId: normalizedLevelId,
         isActive: true
       }
     });
@@ -663,5 +719,6 @@ export {
   publishCompetitionResults,
   unpublishCompetitionResults,
   exportCompetitionResultsCsv,
-  enrollStudent
+  enrollStudent,
+  requestCompetitionCenterUnlock
 };

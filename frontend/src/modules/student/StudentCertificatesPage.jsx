@@ -26,9 +26,30 @@ async function resolveCertificateTemplate(cert, fallbackTemplate) {
   return fetchLatestCertificateTemplate().catch(() => null);
 }
 
+function buildCertificateDetails(cert) {
+  const competition = cert?.competitionSnapshot || cert?.metadata?.competition || null;
+  if (!competition) {
+    return [];
+  }
+
+  const course = competition.course || {};
+  const level = competition.level || {};
+  const score = competition.score ?? null;
+  const percentage = competition.percentage ?? null;
+  const completionDate = competition.completionDate || cert?.issuedAt || null;
+
+  return [
+    { label: "Competition", value: `${competition.title || "—"}${competition.code ? ` (${competition.code})` : ""}` },
+    { label: "Course / Level", value: `${course.name || "—"}${course.code ? ` (${course.code})` : ""} · ${level.title || `Level ${level.levelNumber || "—"}`}` },
+    { label: "Rank / Award", value: `${competition.rank ?? "—"} / ${competition.awardType || cert?.awardType || "PARTICIPATION"}` },
+    { label: "Score / Completed", value: `${score ?? "—"}${percentage !== null && percentage !== undefined ? ` (${percentage}%)` : ""} · ${completionDate ? new Date(completionDate).toLocaleDateString() : "—"}` },
+  ];
+}
+
 function CertificateCard({ cert, studentName, template, onPrint, onDownloadPdf }) {
   const isRevoked = cert.status === "REVOKED";
   const certTitle = template?.title || "Certificate of Achievement";
+  const isCompetitionCertificate = Boolean(cert?.competitionId);
 
   return (
     <div
@@ -82,6 +103,11 @@ function CertificateCard({ cert, studentName, template, onPrint, onDownloadPdf }
         <div style={{ fontWeight: 800, fontSize: 18, marginTop: 8, color: "var(--color-text-warning)" }}>{certTitle}</div>
         <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>This is to certify that</div>
         <div style={{ fontWeight: 800, fontSize: 20, marginTop: 8, color: "#1e293b" }}>{studentName}</div>
+        {isCompetitionCertificate ? (
+          <div style={{ display: "inline-flex", marginTop: 8, padding: "2px 8px", borderRadius: 999, background: "var(--color-bg-subtle)", border: "1px solid var(--color-border-strong)", fontSize: 11, fontWeight: 700, textTransform: "uppercase" }}>
+            Competition Award
+          </div>
+        ) : null}
         <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
           has successfully completed
         </div>
@@ -323,6 +349,7 @@ function StudentCertificatesPage() {
       levelName: cert.levelName,
       certificateNumber: cert.certificateNumber,
       issuedAt: cert.issuedAt,
+      details: buildCertificateDetails(cert),
       template: activeTemplate,
       qrDataUrl
     });

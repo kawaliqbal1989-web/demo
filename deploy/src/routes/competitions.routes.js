@@ -10,7 +10,8 @@ import {
   rejectCompetitionRequest,
   getLeaderboard,
   unpublishCompetitionResults,
-  listCompetitions
+  listCompetitions,
+  requestCompetitionCenterUnlock
 } from "../controllers/competitions.controller.js";
 import { requireOperationalRoles, requireRole } from "../middleware/rbac.js";
 import { requireScopeAccess } from "../middleware/scope-access.js";
@@ -54,6 +55,14 @@ competitionsRouter.post(
   requireScopeAccess("competition", "id"),
   auditAction("REJECT_COMPETITION_REQUEST", "COMPETITION", (req) => req.params.id),
   rejectCompetitionRequest
+);
+
+competitionsRouter.post(
+  "/:id/unlock-requests",
+  requireRole("CENTER"),
+  requireScopeAccess("competition", "id"),
+  auditAction("COMPETITION_CENTER_UNLOCK_REQUEST", "COMPETITION", (req) => req.params.id),
+  requestCompetitionCenterUnlock
 );
 
 competitionsRouter.get(

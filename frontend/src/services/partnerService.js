@@ -124,6 +124,33 @@ async function forwardPartnerCompetitionRequest(id) {
   return response.data;
 }
 
+async function listPartnerCompetitionFranchises(competitionId, { limit = 200, offset = 0 } = {}) {
+  const response = await apiClient.get(`/bp/competitions/${competitionId}/franchises`, {
+    params: { limit, offset }
+  });
+  return response.data;
+}
+
+async function getPartnerCompetitionFranchiseDetail(competitionId, franchiseId) {
+  const response = await apiClient.get(`/bp/competitions/${competitionId}/franchises/${franchiseId}`);
+  return response.data;
+}
+
+async function returnPartnerCompetitionFranchise(competitionId, franchiseId, payload = {}) {
+  const response = await apiClient.post(`/bp/competitions/${competitionId}/franchises/${franchiseId}/return`, payload);
+  return response.data;
+}
+
+async function approvePartnerCompetitionFranchise(competitionId, franchiseId) {
+  const response = await apiClient.post(`/bp/competitions/${competitionId}/franchises/${franchiseId}/approve`);
+  return response.data;
+}
+
+async function submitPartnerCompetition(competitionId) {
+  const response = await apiClient.post(`/bp/competitions/${competitionId}/submit`);
+  return response.data;
+}
+
 async function listPartnerCourses() {
   const response = await apiClient.get("/partner/courses");
   return response.data;
@@ -211,6 +238,11 @@ export {
   listPartnerCompetitionRequests,
   submitPartnerCompetitionRequest,
   forwardPartnerCompetitionRequest,
+  listPartnerCompetitionFranchises,
+  getPartnerCompetitionFranchiseDetail,
+  returnPartnerCompetitionFranchise,
+  approvePartnerCompetitionFranchise,
+  submitPartnerCompetition,
   listPartnerCourses,
   listPartnerHierarchy,
   getPartnerProfile,

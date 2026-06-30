@@ -41,6 +41,10 @@ import { SuperadminUsersPage } from "../modules/superadmin/SuperadminUsersPage";
 import { SuperadminCertificatesPage } from "../modules/superadmin/SuperadminCertificatesPage";
 import { SuperadminHierarchyPage } from "../modules/superadmin/SuperadminHierarchyPage";
 import { SuperadminCompetitionPage } from "../modules/superadmin/SuperadminCompetitionPage";
+import { SuperadminCompetitionDetailsPage } from "../modules/superadmin/SuperadminCompetitionDetailsPage";
+import { SuperadminCompetitionCoursesPage } from "../modules/superadmin/SuperadminCompetitionCoursesPage";
+import { SuperadminCompetitionCourseLevelsPage } from "../modules/superadmin/SuperadminCompetitionCourseLevelsPage";
+import { SuperadminCompetitionFoundationTemplatesPage } from "../modules/superadmin/SuperadminCompetitionFoundationTemplatesPage";
 import { SuperadminCompetitionPendingPage } from "../modules/superadmin/SuperadminCompetitionPendingPage";
 import { SuperadminCompetitionResultsPage } from "../modules/superadmin/SuperadminCompetitionResultsPage";
 import { SuperadminExportOperationsPage } from "../modules/superadmin/SuperadminExportOperationsPage";
@@ -54,6 +58,8 @@ import { CenterStudentFeesPage } from "../modules/center/CenterStudentFeesPage";
 import { CenterStudentNotesPage } from "../modules/center/CenterStudentNotesPage";
 import { CenterStudentChangeTeacherPage } from "../modules/center/CenterStudentChangeTeacherPage";
 import { CenterCompetitionEnrollmentPage } from "../modules/center/CenterCompetitionEnrollmentPage";
+import { CenterCompetitionRegistrationPage } from "../modules/center/CenterCompetitionRegistrationPage";
+import { CenterCompetitionsPage } from "../modules/center/CenterCompetitionsPage";
 import { CenterDashboardPage } from "../modules/center/CenterDashboardPage";
 import { CenterTeachersPage } from "../modules/center/CenterTeachersPage";
 import { CenterBatchesPage } from "../modules/center/CenterBatchesPage";
@@ -85,6 +91,9 @@ import { TeacherAttendancePage } from "../modules/teacher/TeacherAttendancePage"
 import { TeacherDashboardPage } from "../modules/teacher/TeacherDashboardPage";
 import { TeacherBatchesPage } from "../modules/teacher/TeacherBatchesPage";
 import { TeacherStudentsPage } from "../modules/teacher/TeacherStudentsPage";
+import { TeacherCompetitionDetailsPage } from "../modules/teacher/TeacherCompetitionDetailsPage";
+import { TeacherCompetitionRegistrationPage } from "../modules/teacher/TeacherCompetitionRegistrationPage";
+import { TeacherCompetitionsPage } from "../modules/teacher/TeacherCompetitionsPage";
 import { TeacherResultsPage } from "../modules/teacher/TeacherResultsPage";
 import { TeacherStudentViewPage } from "../modules/teacher/TeacherStudentViewPage";
 import { TeacherStudentAttemptsPage } from "../modules/teacher/TeacherStudentAttemptsPage";
@@ -114,6 +123,7 @@ import { BusinessPartnerStudentsPage } from "../modules/businessPartner/Business
 import { BusinessPartnerCertificatesPage } from "../modules/businessPartner/BusinessPartnerCertificatesPage";
 import { BusinessPartnerCertificateTemplatePage } from "../modules/businessPartner/BusinessPartnerCertificateTemplatePage";
 import { BusinessPartnerCompetitionRequestsPage } from "../modules/businessPartner/BusinessPartnerCompetitionRequestsPage";
+import { BusinessPartnerCompetitionsPage } from "../modules/businessPartner/BusinessPartnerCompetitionsPage";
 import { BusinessPartnerExamCyclesPage } from "../modules/businessPartner/BusinessPartnerExamCyclesPage";
 import { BusinessPartnerExamPendingListsPage } from "../modules/businessPartner/BusinessPartnerExamPendingListsPage";
 import { BusinessPartnerExamResultsPage } from "../modules/businessPartner/BusinessPartnerExamResultsPage";
@@ -139,6 +149,7 @@ import { FranchiseExamLateEnrollmentPage } from "../modules/franchise/FranchiseE
 import { FranchiseCoursesPage } from "../modules/franchise/FranchiseCoursesPage";
 import { FranchiseWorkflowQueuePage } from "../modules/franchise/FranchiseWorkflowQueuePage";
 import { FranchiseWorkflowDetailPage } from "../modules/franchise/FranchiseWorkflowDetailPage";
+import { FranchiseCompetitionReviewPage } from "../modules/franchise/FranchiseCompetitionReviewPage";
 import { StudentDashboardPage } from "../modules/student/StudentDashboardPage";
 import { StudentEnrollmentsPage } from "../modules/student/StudentEnrollmentsPage";
 import { StudentWorksheetsPage } from "../modules/student/StudentWorksheetsPage";
@@ -212,6 +223,14 @@ function AppRouter() {
             <Route path="/superadmin/certificates" element={<SuperadminCertificatesPage />} />
             <Route path="/superadmin/hierarchy" element={<SuperadminHierarchyPage />} />
             <Route path="/superadmin/competition" element={<SuperadminCompetitionPage />} />
+            <Route path="/superadmin/competition/courses" element={<SuperadminCompetitionCoursesPage />} />
+            <Route path="/superadmin/competition/courses/:courseId/levels" element={<SuperadminCompetitionCourseLevelsPage />} />
+            <Route path="/superadmin/competition/courses/:courseId/levels/:levelId/question-bank" element={<SuperadminCourseLevelQuestionBankPage />} />
+            <Route path="/superadmin/competition/courses/:courseId/levels/:levelId/worksheets" element={<SuperadminCourseLevelWorksheetsPage />} />
+            <Route path="/superadmin/competition/:competitionId/worksheets" element={<SuperadminCompetitionDetailsPage />} />
+            <Route path="/superadmin/competition/:competitionId/question-bank" element={<SuperadminCompetitionDetailsPage />} />
+            <Route path="/superadmin/competition/:competitionId" element={<SuperadminCompetitionDetailsPage />} />
+            <Route path="/superadmin/competition/foundation/templates" element={<SuperadminCompetitionFoundationTemplatesPage />} />
             <Route path="/superadmin/competition/:competitionId/pending" element={<SuperadminCompetitionPendingPage />} />
             <Route path="/superadmin/competition/:competitionId/results" element={<SuperadminCompetitionResultsPage />} />
             <Route path="/superadmin/question-bank" element={<SuperadminQuestionBankPage />} />
@@ -235,6 +254,8 @@ function AppRouter() {
             <Route path="/center/attendance" element={<CenterAttendanceSessionsPage />} />
             <Route path="/center/attendance-history" element={<CenterAttendanceHistoryPage />} />
             <Route path="/center/competition-enrollment" element={<CenterCompetitionEnrollmentPage />} />
+            <Route path="/center/competitions" element={<CenterCompetitionsPage />} />
+            <Route path="/center/competitions/:competitionId" element={<CenterCompetitionRegistrationPage />} />
             <Route path="/center/worksheets" element={<CenterWorksheetsPage />} />
             <Route path="/center/worksheets/:id" element={<WorksheetPage />} />
             <Route path="/center/exam-cycles" element={<CenterExamCyclesPage />} />
@@ -267,6 +288,10 @@ function AppRouter() {
             <Route path="/teacher/attendance" element={<TeacherAttendancePage />} />
             <Route path="/teacher/fees" element={<TeacherFeesPage />} />
             <Route path="/teacher/notes" element={<TeacherNotesPage />} />
+            <Route path="/teacher/competitions/registrations" element={<Navigate to="/teacher/competitions" replace />} />
+            <Route path="/teacher/competitions/:competitionId" element={<TeacherCompetitionDetailsPage />} />
+            <Route path="/teacher/competitions" element={<TeacherCompetitionsPage />} />
+            <Route path="/teacher/competitions/:competitionId/register" element={<TeacherCompetitionRegistrationPage />} />
             <Route path="/teacher/worksheets" element={<TeacherWorksheetsPage />} />
             <Route path="/teacher/virtual-abacus" element={<VirtualAbacusPage />} />
             <Route path="/teacher/exam-cycles" element={<TeacherExamCyclesPage />} />
@@ -295,6 +320,7 @@ function AppRouter() {
             <Route path="/bp/students" element={<BusinessPartnerStudentsPage />} />
             <Route path="/bp/certificates" element={<BusinessPartnerCertificatesPage />} />
             <Route path="/bp/certificate-template" element={<BusinessPartnerCertificateTemplatePage />} />
+            <Route path="/bp/competitions" element={<BusinessPartnerCompetitionsPage />} />
             <Route path="/bp/competition-requests" element={<BusinessPartnerCompetitionRequestsPage />} />
             <Route path="/bp/exam-cycles" element={<BusinessPartnerExamCyclesPage />} />
             <Route path="/bp/exam-cycles/:examCycleId/pending" element={<BusinessPartnerExamPendingListsPage />} />
@@ -322,6 +348,7 @@ function AppRouter() {
             <Route path="/franchise/courses" element={<FranchiseCoursesPage />} />
             <Route path="/franchise/students" element={<FranchiseStudentsPage />} />
             <Route path="/franchise/competition-requests" element={<FranchiseCompetitionRequestsPage />} />
+            <Route path="/franchise/competitions/:competitionId" element={<FranchiseCompetitionReviewPage />} />
             <Route path="/franchise/worksheets" element={<FranchiseWorksheetsPage />} />
             <Route path="/franchise/reports" element={<FranchiseReportsPage />} />
             <Route path="/franchise/margins" element={<FranchiseMarginsPage />} />

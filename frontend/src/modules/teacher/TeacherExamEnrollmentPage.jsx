@@ -45,6 +45,8 @@ function TeacherExamEnrollmentPage() {
   const canEdit = useMemo(() => {
     const status = String(list?.status || "");
     const locked = Boolean(list?.locked);
+    // If center has forwarded combined enrollment, main enrollment is closed for the center
+    if (list?.mainEnrollmentClosed) return false;
     if (status === "REJECTED") return true;
     if (status === "DRAFT") return true;
     if (status === "SUBMITTED_TO_CENTER" && locked) return false;
@@ -175,7 +177,9 @@ function TeacherExamEnrollmentPage() {
 
         {!canEdit ? (
           <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-            Editing is locked (submitted). If higher authority rejects, you can edit again.
+            {list?.mainEnrollmentClosed
+              ? "Main Enrollment Closed. The center has already submitted the enrollment list to the franchise. Please contact your Center Administrator if any correction is required."
+              : "Editing is locked (submitted). If higher authority rejects, you can edit again."}
           </div>
         ) : null}
 

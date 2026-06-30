@@ -897,11 +897,31 @@ function StudentWorksheetAttemptPage() {
     const previewTimeLimit = Number.isFinite(Number(worksheetPreview.timeLimitSeconds))
       ? formatSeconds(worksheetPreview.timeLimitSeconds)
       : "No limit";
+    const isCompetitionWorksheet = Boolean(worksheetPreview?.isCompetitionWorksheet);
 
     return (
       <div className="card" style={{ display: "grid", gap: 16, maxWidth: 760, margin: "0 auto" }}>
         <div>
-          <h2 style={{ marginTop: 0, marginBottom: 8 }}>{worksheetPreview.title || "Worksheet"}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <h2 style={{ margin: 0 }}>{worksheetPreview.title || "Worksheet"}</h2>
+            {isCompetitionWorksheet ? (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  background: "var(--color-bg-subtle)",
+                  border: "1px solid var(--color-border-strong)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase"
+                }}
+              >
+                Competition
+              </span>
+            ) : null}
+          </div>
           <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
             Read the instructions before you start. The worksheet timer and attempt will begin only after you continue.
           </p>
@@ -1010,6 +1030,8 @@ function StudentWorksheetAttemptPage() {
     };
 
   const isExamWorksheet = String(worksheet?.generationMode || "").toUpperCase() === "EXAM";
+  const isCompetitionWorksheet = Boolean(worksheet?.isCompetitionWorksheet || worksheetPreview?.isCompetitionWorksheet);
+  const showCompetitionPendingPublication = isCompetitionWorksheet && (isResultEmbargoed || (attemptStatus === "SUBMITTED" && !result));
   const useExamPageStyling = isColumnSumGrid;
   const worksheetTitle = String(worksheet?.title || "Worksheet");
   const currentEnrollment = studentCourseSummary?.currentEnrollment || null;
@@ -1178,7 +1200,26 @@ function StudentWorksheetAttemptPage() {
             ) : null}
 
             <div>
-              <div className={useExamPageStyling ? "ws-exam-title" : ""} style={{ fontWeight: 700 }}>{worksheetTitle}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div className={useExamPageStyling ? "ws-exam-title" : ""} style={{ fontWeight: 700 }}>{worksheetTitle}</div>
+                {isCompetitionWorksheet ? (
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      padding: "2px 8px",
+                      borderRadius: 999,
+                      background: "var(--color-bg-subtle)",
+                      border: "1px solid var(--color-border-strong)",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      textTransform: "uppercase"
+                    }}
+                  >
+                    Competition
+                  </span>
+                ) : null}
+              </div>
               <div style={{ fontSize: 12, marginTop: 6 }} className="muted">
                 {useExamPageStyling
                   ? `Worksheet · ${totalQuestions} Questions`
@@ -1244,13 +1285,24 @@ function StudentWorksheetAttemptPage() {
         </div>
       ) : null}
 
+      {showCompetitionPendingPublication && !result ? (
+        <div className="card" role="status" aria-live="polite">
+          <h3 style={{ marginTop: 0 }}>Submitted</h3>
+          <p style={{ margin: 0 }}>
+            Worksheet submitted successfully. Your result will appear after it is published.
+          </p>
+        </div>
+      ) : null}
+
       {result ? (
         <div className="card" role="status" aria-live="polite">
           <h3 style={{ marginTop: 0 }}>{result?.status === "TIMED_OUT" ? "Time Up" : "Submitted"}</h3>
           {isResultEmbargoed ? (
             <div style={{ display: "grid", gap: 8 }}>
               <p style={{ margin: 0 }}>
-                {result?.message || "Your exam has been submitted successfully. Results will be available after official publication."}
+                {isCompetitionWorksheet
+                  ? "Worksheet submitted successfully. Your result will appear after it is published."
+                  : (result?.message || "Your exam has been submitted successfully. Results will be available after official publication.")}
               </p>
               {submittedAtText ? (
                 <p style={{ margin: 0 }}>
@@ -1284,7 +1336,7 @@ function StudentWorksheetAttemptPage() {
             </div>
           )}
 
-          {!isExamWorksheet ? (
+          {!isExamWorksheet && !showCompetitionPendingPublication ? (
             <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
               <h4 style={{ margin: 0 }}>Correct Answers</h4>
               <div style={{ display: "grid", gap: 8 }}>

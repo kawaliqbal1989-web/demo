@@ -47,6 +47,8 @@ async function hierarchyContainsNode(targetNodeId, actorNodeId, tenantId) {
 const listWorksheets = asyncHandler(async (req, res) => {
   const { take, skip, orderBy } = parsePagination(req.query);
   const levelId = req.query.levelId ? String(req.query.levelId) : null;
+  const competitionCourseLevelId = req.query.competitionCourseLevelId ? String(req.query.competitionCourseLevelId) : null;
+  const competitionCoursePaperId = req.query.competitionCoursePaperId ? String(req.query.competitionCoursePaperId) : null;
   const published = req.query.published === undefined ? null : String(req.query.published).trim().toLowerCase();
   const difficulty = req.query.difficulty ? String(req.query.difficulty).trim().toUpperCase() : null;
   const q = req.query.q ? String(req.query.q).trim() : null;
@@ -54,13 +56,42 @@ const listWorksheets = asyncHandler(async (req, res) => {
 
   const where = {
     tenantId: req.auth.tenantId,
-    ...(levelId ? { levelId } : {})
+    ...(levelId ? { levelId } : {}),
+    ...(competitionCourseLevelId ? { competitionCourseLevelId } : {})
   };
 
-  const maxLevelRank = await resolveActorLevelCap({
-    tenantId: req.auth.tenantId,
-    auth: req.auth
-  });
+  if (competitionCoursePaperId) {
+    const paper = await prisma.competitionCoursePaper.findFirst({
+      where: { id: competitionCoursePaperId, tenantId: req.auth.tenantId },
+      select: { id: true, competitionCourseLevelId: true }
+    });
+    if (!paper) {
+      return res.apiError(404, "Competition course paper not found", "COMPETITION_COURSE_PAPER_NOT_FOUND");
+    }
+
+    if (competitionCourseLevelId && paper.competitionCourseLevelId !== competitionCourseLevelId) {
+      return res.apiError(400, "competitionCourseLevelId does not match competitionCoursePaperId", "VALIDATION_ERROR");
+    }
+
+    where.competitionCoursePaperId = paper.id;
+  }
+
+  if (competitionCourseLevelId) {
+    const level = await prisma.competitionCourseLevel.findFirst({
+      where: { id: competitionCourseLevelId, tenantId: req.auth.tenantId },
+      select: { id: true }
+    });
+    if (!level) {
+      return res.apiError(404, "Competition course level not found", "COMPETITION_COURSE_LEVEL_NOT_FOUND");
+    }
+  }
+
+  const maxLevelRank = competitionCourseLevelId
+    ? null
+    : await resolveActorLevelCap({
+        tenantId: req.auth.tenantId,
+        auth: req.auth
+      });
 
   if (Number.isFinite(maxLevelRank)) {
     const allowedLevelIds = await resolveAllowedLevelIdsByRank({
@@ -113,6 +144,15 @@ const listWorksheets = asyncHandler(async (req, res) => {
       take,
       include: {
         level: { select: { id: true, name: true, rank: true } },
+        competitionCourseLevel: {
+          select: { id: true, competitionCourseId: true, levelNumber: true, title: true, sortOrder: true, isActive: true }
+        },
+        competitionCoursePaper: {
+          select: { id: true, competitionCourseLevelId: true, code: true, title: true, sortOrder: true, status: true, isActive: true }
+        },
+        competitionCoursePaperBlueprint: {
+          select: { id: true, title: true, version: true, status: true }
+        },
         createdBy: { select: { id: true, email: true, role: true } },
         _count: { select: { questions: true, submissions: true } }
       }
@@ -135,11 +175,21 @@ const listWorksheets = asyncHandler(async (req, res) => {
         description: true,
         difficulty: true,
         levelId: true,
+        competitionCourseLevelId: true,
         createdByUserId: true,
         isPublished: true,
         createdAt: true,
         updatedAt: true,
         level: { select: { id: true, name: true, rank: true } },
+        competitionCourseLevel: {
+          select: { id: true, competitionCourseId: true, levelNumber: true, title: true, sortOrder: true, isActive: true }
+        },
+        competitionCoursePaper: {
+          select: { id: true, competitionCourseLevelId: true, code: true, title: true, sortOrder: true, status: true, isActive: true }
+        },
+        competitionCoursePaperBlueprint: {
+          select: { id: true, title: true, version: true, status: true }
+        },
         createdBy: { select: { id: true, email: true, role: true } },
         _count: { select: { questions: true, submissions: true } }
       }
@@ -174,6 +224,15 @@ const getWorksheet = asyncHandler(async (req, res) => {
     },
     include: {
       level: { select: { id: true, name: true, rank: true } },
+      competitionCourseLevel: {
+        select: { id: true, competitionCourseId: true, levelNumber: true, title: true, sortOrder: true, isActive: true }
+      },
+      competitionCoursePaper: {
+        select: { id: true, competitionCourseLevelId: true, code: true, title: true, sortOrder: true, status: true, isActive: true }
+      },
+      competitionCoursePaperBlueprint: {
+        select: { id: true, title: true, version: true, status: true }
+      },
       questions: {
         orderBy: { questionNumber: "asc" },
         include: {
@@ -196,7 +255,7 @@ const getWorksheet = asyncHandler(async (req, res) => {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
 
-  if (Number.isFinite(maxLevelRank) && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
+  if (Number.isFinite(maxLevelRank) && worksheet.levelId && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
     return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
   }
 
@@ -484,10 +543,63 @@ const deleteWorksheetQuestion = asyncHandler(async (req, res) => {
 const createWorksheet = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
 
-  const { title, description, difficulty, levelId, isPublished } = req.body;
+  const { title, description, difficulty, levelId, competitionCourseLevelId, competitionCoursePaperId, competitionCoursePaperBlueprintId, isPublished } = req.body;
 
   if (Boolean(isPublished)) {
     return res.apiError(409, "Create worksheet as draft, add questions, then publish", "WORKSHEET_PUBLISH_REQUIRES_QUESTIONS");
+  }
+
+  const normalizedLevelId = levelId ? String(levelId) : null;
+  const normalizedCompetitionCourseLevelId = competitionCourseLevelId ? String(competitionCourseLevelId) : null;
+  const normalizedCompetitionCoursePaperId = competitionCoursePaperId ? String(competitionCoursePaperId) : null;
+  let resolvedCompetitionCourseLevelId = normalizedCompetitionCourseLevelId;
+
+  if (normalizedCompetitionCoursePaperId) {
+    const paper = await prisma.competitionCoursePaper.findFirst({
+      where: { id: normalizedCompetitionCoursePaperId, tenantId: req.auth.tenantId },
+      select: { id: true, competitionCourseLevelId: true }
+    });
+
+    if (!paper) {
+      return res.apiError(404, "Competition course paper not found", "COMPETITION_COURSE_PAPER_NOT_FOUND");
+    }
+
+    if (normalizedCompetitionCourseLevelId && normalizedCompetitionCourseLevelId !== paper.competitionCourseLevelId) {
+      return res.apiError(400, "competitionCourseLevelId does not match competitionCoursePaperId", "VALIDATION_ERROR");
+    }
+
+    resolvedCompetitionCourseLevelId = paper.competitionCourseLevelId;
+  }
+
+  if (competitionCoursePaperBlueprintId) {
+    const blueprint = await prisma.competitionCoursePaperBlueprint.findFirst({
+      where: { id: String(competitionCoursePaperBlueprintId), tenantId: req.auth.tenantId },
+      select: { id: true, competitionCoursePaperId: true }
+    });
+    if (!blueprint) {
+      return res.apiError(404, "Competition course paper blueprint not found", "COMPETITION_COURSE_PAPER_BLUEPRINT_NOT_FOUND");
+    }
+    if (normalizedCompetitionCoursePaperId && blueprint.competitionCoursePaperId !== normalizedCompetitionCoursePaperId) {
+      return res.apiError(400, "competitionCoursePaperBlueprintId does not match competitionCoursePaperId", "VALIDATION_ERROR");
+    }
+  }
+
+  if (!normalizedLevelId && !resolvedCompetitionCourseLevelId) {
+    return res.apiError(400, "levelId or competitionCourseLevelId is required", "VALIDATION_ERROR");
+  }
+
+  if (normalizedLevelId && resolvedCompetitionCourseLevelId && !normalizedCompetitionCoursePaperId) {
+    return res.apiError(400, "Use either levelId or competitionCourseLevelId, not both", "VALIDATION_ERROR");
+  }
+
+  if (resolvedCompetitionCourseLevelId) {
+    const level = await prisma.competitionCourseLevel.findFirst({
+      where: { id: resolvedCompetitionCourseLevelId, tenantId: req.auth.tenantId },
+      select: { id: true }
+    });
+    if (!level) {
+      return res.apiError(404, "Competition course level not found", "COMPETITION_COURSE_LEVEL_NOT_FOUND");
+    }
   }
 
   const created = await prisma.worksheet.create({
@@ -496,7 +608,10 @@ const createWorksheet = asyncHandler(async (req, res) => {
       title,
       description,
       difficulty,
-      levelId,
+      levelId: normalizedLevelId,
+      competitionCourseLevelId: resolvedCompetitionCourseLevelId,
+      competitionCoursePaperId: normalizedCompetitionCoursePaperId,
+      competitionCoursePaperBlueprintId: req.body.competitionCoursePaperBlueprintId ? String(req.body.competitionCoursePaperBlueprintId) : null,
       createdByUserId: req.auth.userId,
       isPublished: Boolean(isPublished)
     }
@@ -569,11 +684,15 @@ const duplicateWorksheet = asyncHandler(async (req, res) => {
   const existing = await prisma.worksheet.findFirst({
     where: { id, tenantId: req.auth.tenantId },
     include: {
-      questions: {
+      competitionCoursePaper: {
+        select: { id: true, competitionCourseLevelId: true, code: true, title: true, sortOrder: true, status: true, isActive: true }
+      },
+        questions: {
         orderBy: { questionNumber: "asc" },
         select: {
           questionBankId: true,
           questionNumber: true,
+          marks: true,
           operands: true,
           operation: true,
           correctAnswer: true
@@ -594,6 +713,9 @@ const duplicateWorksheet = asyncHandler(async (req, res) => {
         description: existing.description,
         difficulty: existing.difficulty,
         levelId: existing.levelId,
+        competitionCourseLevelId: existing.competitionCourseLevelId,
+        competitionCoursePaperId: existing.competitionCoursePaperId,
+        competitionCoursePaperBlueprintId: existing.competitionCoursePaperBlueprintId,
         createdByUserId: req.auth.userId,
         isPublished: false,
         timeLimitSeconds: existing.timeLimitSeconds,
@@ -609,6 +731,7 @@ const duplicateWorksheet = asyncHandler(async (req, res) => {
           worksheetId: worksheet.id,
           questionBankId: question.questionBankId,
           questionNumber: index + 1,
+          marks: question.marks,
           operands: question.operands,
           operation: question.operation,
           correctAnswer: question.correctAnswer

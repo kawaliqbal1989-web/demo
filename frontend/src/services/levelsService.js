@@ -1,7 +1,20 @@
 import { apiClient } from "./apiClient";
 
-async function listLevels() {
-  const response = await apiClient.get("/levels", { _skipGlobalLoading: true });
+async function listLevels({ limit = 100, offset = 0 } = {}) {
+  const response = await apiClient.get("/levels", {
+    params: { limit, offset },
+    _skipGlobalLoading: true
+  });
+  return response.data;
+}
+
+async function createLevel(payload) {
+  const response = await apiClient.post("/levels", payload, { _skipGlobalLoading: true });
+  return response.data;
+}
+
+async function updateLevel(id, payload) {
+  const response = await apiClient.patch(`/levels/${id}`, payload, { _skipGlobalLoading: true });
   return response.data;
 }
 
@@ -10,4 +23,4 @@ async function updateLevelFeeDefaults(id, payload) {
   return response.data;
 }
 
-export { listLevels, updateLevelFeeDefaults };
+export { listLevels, createLevel, updateLevel, updateLevelFeeDefaults };

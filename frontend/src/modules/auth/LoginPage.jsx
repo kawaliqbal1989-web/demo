@@ -6,8 +6,8 @@ function LoginPage() {
   const navigate = useNavigate();
   const { login, loading } = useAuth();
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("superadmin@abacusweb.local");
+  const [password, setPassword] = useState("Pass@123");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [touched, setTouched] = useState({ username: false, password: false });
@@ -32,7 +32,7 @@ function LoginPage() {
     try {
       const result = await login({
         tenantCode: "DEFAULT",
-        username: username.trim().toUpperCase(),
+        username: username.trim(),
         password
       });
       navigate(result?.mustChangePassword ? "/change-password" : "/", { replace: true });
@@ -84,7 +84,7 @@ function LoginPage() {
                     placeholder="Enter username or email"
                     autoComplete="username"
                     value={username}
-                    onChange={(event) => setUsername(event.target.value.toUpperCase())}
+                    onChange={(event) => setUsername(event.target.value)}
                     onBlur={() => setTouched((t) => ({ ...t, username: true }))}
                     aria-invalid={Boolean(touched.username && usernameError)}
                   />

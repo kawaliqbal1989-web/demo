@@ -620,7 +620,14 @@ const getTeacherList = asyncHandler(async (req, res) => {
     }
   });
 
-  return res.apiSuccess("Teacher enrollment list", full);
+  // Determine whether the center has already forwarded combined enrollment (main enrollment closed)
+  const closure = await isMainEnrollmentClosedForCenter({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    centerNodeId
+  });
+
+  return res.apiSuccess("Teacher enrollment list", { ...full, mainEnrollmentClosed: closure.closed, centerCombinedStatus: closure.combined?.status || null });
 });
 
 const teacherEnrollStudents = asyncHandler(async (req, res) => {
@@ -665,6 +672,17 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
     teacherUserId: req.auth.userId,
     centerNodeId
   });
+
+  // If center has already forwarded combined enrollment, main enrollment is closed for this center
+  const closure = await isMainEnrollmentClosedForCenter({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    centerNodeId
+  });
+
+  if (closure.closed) {
+    return res.apiError(403, "Main Enrollment Closed: The center has already submitted the enrollment list to the franchise. Please contact your Center Administrator.", "MAIN_ENROLLMENT_CLOSED");
+  }
 
   if (list.locked && list.status === "SUBMITTED_TO_CENTER") {
     return res.apiError(409, "List is submitted and locked", "LIST_LOCKED");
@@ -810,6 +828,17 @@ const submitTeacherListToCenter = asyncHandler(async (req, res) => {
     centerNodeId
   });
 
+  // If center has already forwarded combined enrollment, main enrollment is closed for this center
+  const closure = await isMainEnrollmentClosedForCenter({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    centerNodeId
+  });
+
+  if (closure.closed) {
+    return res.apiError(403, "Main Enrollment Closed: The center has already submitted the enrollment list to the franchise. Please contact your Center Administrator.", "MAIN_ENROLLMENT_CLOSED");
+  }
+
   const entriesCount = await prisma.examEnrollmentListItem.count({
     where: { tenantId: req.auth.tenantId, listId: list.id }
   });
@@ -907,6 +936,24 @@ async function getOrCreateCenterCombinedList({ tenantId, examCycleId, centerNode
     }
     throw error;
   }
+}
+
+async function isMainEnrollmentClosedForCenter({ tenantId, examCycleId, centerNodeId }) {
+  const combined = await prisma.examEnrollmentList.findFirst({
+    where: { tenantId, examCycleId, type: "CENTER_COMBINED", hierarchyNodeId: centerNodeId },
+    select: { id: true, status: true, locked: true }
+  });
+
+  if (!combined) return { closed: false, combined: null };
+
+  const forwardedStatuses = new Set([
+    "SUBMITTED_TO_FRANCHISE",
+    "SUBMITTED_TO_BUSINESS_PARTNER",
+    "SUBMITTED_TO_SUPERADMIN",
+    "APPROVED"
+  ]);
+
+  return { closed: forwardedStatuses.has(combined.status), combined };
 }
 
 async function allocateTemporaryStudentUsername({ tx, tenantId }) {

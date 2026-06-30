@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { ErrorState } from "../../components/ErrorState";
 import { DataTable, PaginationBar } from "../../components/DataTable";
@@ -9,6 +9,16 @@ import { formatWorksheetQuestionPrompt } from "../../utils/worksheetQuestions";
 import { getCourse } from "../../services/coursesService";
 import { listCourseLevels } from "../../services/courseLevelsService";
 import { listLevels } from "../../services/levelsService";
+import {
+  createCompetitionCourseLevelQuestionBankEntry,
+  deleteCompetitionCourseLevelQuestionBankEntry,
+  getCompetitionCourse,
+  exportCompetitionCourseLevelQuestionBankCsv,
+  importCompetitionCourseLevelQuestionBank,
+  listCompetitionCourseLevelQuestionBank,
+  listCompetitionCourseLevels,
+  updateCompetitionCourseLevelQuestionBankEntry
+} from "../../services/competitionCoursesService";
 import { resolveAcademicLevelForCourseLevel } from "../../utils/courseLevelMapping";
 import { formatWorksheetQuestionPreview } from "../../utils/worksheetQuestionPreview";
 import {
@@ -102,7 +112,9 @@ function computeCorrectAnswer(operation, terms, operators) {
 
 function SuperadminCourseLevelQuestionBankPage() {
   const navigate = useNavigate();
-  const { courseId, levelNumber } = useParams();
+  const location = useLocation();
+  const { courseId, levelNumber, levelId } = useParams();
+  const isCompetitionCourseMode = location.pathname.startsWith("/superadmin/competition/courses/");
   const levelNumberInt = Number(levelNumber);
 
   const [course, setCourse] = useState(null);
@@ -129,16 +141,22 @@ function SuperadminCourseLevelQuestionBankPage() {
   const [previewQuestionId, setPreviewQuestionId] = useState(null);
 
   const courseLevel = useMemo(() => {
+    if (isCompetitionCourseMode) {
+      return courseLevels.find((item) => item.id === levelId) || null;
+    }
     return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
-  }, [courseLevels, levelNumberInt]);
+  }, [courseLevels, isCompetitionCourseMode, levelId, levelNumberInt]);
 
   const academicLevel = useMemo(() => {
+    if (isCompetitionCourseMode) {
+      return null;
+    }
     return resolveAcademicLevelForCourseLevel({
       courseLevel,
       academicLevels,
       levelNumber: levelNumberInt
     });
-  }, [academicLevels, courseLevel, levelNumberInt]);
+  }, [academicLevels, courseLevel, isCompetitionCourseMode, levelNumberInt]);
 
   const visibleBankItems = useMemo(() => {
     return bankItems.slice(pageOffset, pageOffset + pageLimit);
@@ -160,11 +178,17 @@ function SuperadminCourseLevelQuestionBankPage() {
     setLoading(true);
     setError("");
     try {
-      const [courseResp, courseLevelsResp, academicLevelsResp] = await Promise.all([
-        getCourse(courseId),
-        listCourseLevels({ courseId, limit: 100, offset: 0 }),
-        listLevels()
-      ]);
+      const [courseResp, courseLevelsResp, academicLevelsResp] = isCompetitionCourseMode
+        ? await Promise.all([
+            getCompetitionCourse(courseId),
+            listCompetitionCourseLevels({ courseId, limit: 100, offset: 0 }),
+            Promise.resolve({ data: [] })
+          ])
+        : await Promise.all([
+            getCourse(courseId),
+            listCourseLevels({ courseId, limit: 100, offset: 0 }),
+            listLevels()
+          ]);
       setCourse(courseResp?.data || null);
       setCourseLevels(courseLevelsResp?.data?.items || []);
       setAcademicLevels(academicLevelsResp?.data || []);
@@ -175,14 +199,20 @@ function SuperadminCourseLevelQuestionBankPage() {
     }
   };
 
-  const loadBank = async (levelId) => {
+  const loadBank = async (scopeLevelId) => {
     setBankLoading(true);
     setBankError("");
     try {
-      const resp = await listQuestionBank({
-        levelId,
-        q: bankQ || undefined
-      });
+      const resp = isCompetitionCourseMode
+        ? await listCompetitionCourseLevelQuestionBank({
+            courseId,
+            levelId: scopeLevelId,
+            q: bankQ || undefined
+          })
+        : await listQuestionBank({
+            levelId: scopeLevelId,
+            q: bankQ || undefined
+          });
       setBankItems(resp?.data?.items || []);
       setPageOffset(0);
       setPreviewQuestionId(null);
@@ -195,14 +225,15 @@ function SuperadminCourseLevelQuestionBankPage() {
 
   useEffect(() => {
     void load();
-  }, [courseId, levelNumber]);
+  }, [courseId, levelId, levelNumber]);
 
   useEffect(() => {
-    if (!academicLevel?.id) {
+    const scopeLevelId = isCompetitionCourseMode ? courseLevel?.id : academicLevel?.id;
+    if (!scopeLevelId) {
       return;
     }
-    void loadBank(academicLevel.id);
-  }, [academicLevel?.id]);
+    void loadBank(scopeLevelId);
+  }, [academicLevel?.id, courseLevel?.id, isCompetitionCourseMode]);
 
   if (loading) {
     return <LoadingState label="Loading question bank..." />;
@@ -216,7 +247,7 @@ function SuperadminCourseLevelQuestionBankPage() {
     return <ErrorState title="Level not found" message="The course level could not be resolved." />;
   }
 
-  if (!academicLevel) {
+  if (!isCompetitionCourseMode && !academicLevel) {
     return <ErrorState title="Level mapping missing" message="No academic level exists for this level number." />;
   }
 
@@ -253,7 +284,7 @@ function SuperadminCourseLevelQuestionBankPage() {
       }
 
       const payload = {
-        levelId: academicLevel.id,
+        ...(isCompetitionCourseMode ? {} : { levelId: academicLevel.id }),
         difficulty: "EASY",
         prompt,
         operation: bankCreateForm.operation,
@@ -262,14 +293,27 @@ function SuperadminCourseLevelQuestionBankPage() {
       };
 
       if (editingQuestionId) {
-        await updateQuestionBankEntry(editingQuestionId, payload);
+        if (isCompetitionCourseMode) {
+          await updateCompetitionCourseLevelQuestionBankEntry({
+            courseId,
+            levelId: courseLevel.id,
+            mappingId: editingQuestionId,
+            payload
+          });
+        } else {
+          await updateQuestionBankEntry(editingQuestionId, payload);
+        }
         setEditingQuestionId(null);
       } else {
-        await createQuestionBankEntry(payload);
+        if (isCompetitionCourseMode) {
+          await createCompetitionCourseLevelQuestionBankEntry({ courseId, levelId: courseLevel.id, payload });
+        } else {
+          await createQuestionBankEntry(payload);
+        }
       }
 
       setBankCreateForm((prev) => ({ ...prev, prompt: "", numbers: ["", ""], operators: ["", "+"] }));
-  await loadBank(academicLevel.id);
+      await loadBank(isCompetitionCourseMode ? courseLevel.id : academicLevel.id);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to create question.");
     } finally {
@@ -279,8 +323,11 @@ function SuperadminCourseLevelQuestionBankPage() {
 
   const onExportBank = async () => {
     try {
-      const blob = await exportQuestionBankCsv({ levelId: academicLevel.id });
-      downloadBlob(blob, `question-bank-level-${levelNumberInt}.csv`);
+      const blob = isCompetitionCourseMode
+        ? await exportCompetitionCourseLevelQuestionBankCsv({ courseId, levelId: courseLevel.id })
+        : await exportQuestionBankCsv({ levelId: academicLevel.id });
+      const exportLevelLabel = isCompetitionCourseMode ? courseLevel.levelNumber : levelNumberInt;
+      downloadBlob(blob, `question-bank-level-${exportLevelLabel}.csv`);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to export CSV.");
     }
@@ -313,7 +360,7 @@ function SuperadminCourseLevelQuestionBankPage() {
 
       // Normalize field name variants and build operands from prompt when absent
       const items = raw.map((item) => {
-        // difficulty: numeric (1→EASY, 2→MEDIUM, 3→HARD) or string
+        // difficulty: numeric (1 -> EASY, 2 -> MEDIUM, 3 -> HARD) or string
         let difficulty = item.difficulty;
         if (typeof difficulty === "number") {
           difficulty = difficulty <= 1 ? "EASY" : difficulty === 2 ? "MEDIUM" : "HARD";
@@ -345,8 +392,13 @@ function SuperadminCourseLevelQuestionBankPage() {
         };
       });
 
-      await importQuestionBank({ levelId: academicLevel.id, items });
-      await loadBank(academicLevel.id);
+      if (isCompetitionCourseMode) {
+        await importCompetitionCourseLevelQuestionBank({ courseId, levelId: courseLevel.id, items });
+        await loadBank(courseLevel.id);
+      } else {
+        await importQuestionBank({ levelId: academicLevel.id, items });
+        await loadBank(academicLevel.id);
+      }
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to import question bank.");
     }
@@ -377,7 +429,7 @@ function SuperadminCourseLevelQuestionBankPage() {
     <section style={{ display: "grid", gap: 14 }}>
       <div>
         <h2 style={{ margin: 0 }}>
-          Question Bank: {course.name} · Level {levelNumberInt}
+          Question Bank: {course.name} · Level {isCompetitionCourseMode ? courseLevel.levelNumber : levelNumberInt}
         </h2>
         <p style={{ margin: "6px 0 0", opacity: 0.75, fontSize: 13 }}>
           Create, search, import, export, and manage question bank entries.
@@ -389,7 +441,7 @@ function SuperadminCourseLevelQuestionBankPage() {
           className="button secondary"
           type="button"
           style={{ width: "auto" }}
-          onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}`)}
+          onClick={() => navigate(isCompetitionCourseMode ? `/superadmin/competition/courses/${courseId}/levels` : `/superadmin/courses/${courseId}/levels/${levelNumber}`)}
         >
           Back
         </button>
@@ -397,7 +449,7 @@ function SuperadminCourseLevelQuestionBankPage() {
           className="button"
           type="button"
           style={{ width: "auto" }}
-          onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}/worksheets`)}
+          onClick={() => navigate(isCompetitionCourseMode ? `/superadmin/competition/courses/${courseId}/levels/${levelId}/worksheets` : `/superadmin/courses/${courseId}/levels/${levelNumber}/worksheets`)}
         >
           Open Worksheets
         </button>
@@ -426,8 +478,8 @@ function SuperadminCourseLevelQuestionBankPage() {
                   }
                   event.target.value = "";
                 }}
-              />
-            </label>
+                />
+              </label>
           </div>
         </div>
 
@@ -445,7 +497,7 @@ function SuperadminCourseLevelQuestionBankPage() {
             className="button secondary"
             type="button"
             style={{ width: "auto" }}
-            onClick={() => void loadBank(academicLevel.id)}
+            onClick={() => void loadBank(isCompetitionCourseMode ? courseLevel.id : academicLevel.id)}
             disabled={bankLoading}
           >
             {bankLoading ? "Loading..." : "Refresh"}
@@ -494,7 +546,7 @@ function SuperadminCourseLevelQuestionBankPage() {
                   <option value="SUB">Less (-)</option>
                   <option value="MUL">Multiply (x or *)</option>
                   <option value="DIV">Divide (/)</option>
-                  <option value="MIX">Mix (+−×÷)</option>
+                  <option value="MIX">Mix (+ - * /)</option>
                 </select>
               </label>
               <label style={{ gridColumn: "1 / -1" }}>
@@ -521,9 +573,9 @@ function SuperadminCourseLevelQuestionBankPage() {
                               }}
                             >
                               <option value="ADD">+</option>
-                              <option value="SUB">−</option>
-                              <option value="MUL">×</option>
-                              <option value="DIV">÷</option>
+                              <option value="SUB">-</option>
+                              <option value="MUL">*</option>
+                              <option value="DIV">/</option>
                             </select>
                           ) : null}
                           <input
@@ -653,16 +705,16 @@ function SuperadminCourseLevelQuestionBankPage() {
           ) : (
             <>
               <div style={{ fontSize: 13 }}>
-                <strong>Prompt:</strong> {previewQuestion.prompt || "—"}
+                <strong>Prompt:</strong> {previewQuestion.prompt || "-"}
               </div>
               <div style={{ fontSize: 13 }}>
                 <strong>Expression:</strong> {formatWorksheetQuestionPreview(previewQuestion)}
               </div>
               <div style={{ fontSize: 13 }}>
-                <strong>Operation:</strong> {String(previewQuestion.operation || "").toUpperCase() || "—"}
+                <strong>Operation:</strong> {String(previewQuestion.operation || "").toUpperCase() || "-"}
               </div>
               <div style={{ fontSize: 13 }}>
-                <strong>Correct Answer:</strong> {previewQuestion.correctAnswer ?? "—"}
+                <strong>Correct Answer:</strong> {previewQuestion.correctAnswer ?? "-"}
               </div>
               <div style={{ fontSize: 13 }}>
                 <strong>Operands:</strong>
@@ -697,8 +749,16 @@ function SuperadminCourseLevelQuestionBankPage() {
           if (!target) {
             return;
           }
-          await deleteQuestionBankEntry(target.id);
-          await loadBank(academicLevel.id);
+          if (isCompetitionCourseMode) {
+            await deleteCompetitionCourseLevelQuestionBankEntry({
+              courseId,
+              levelId: courseLevel.id,
+              mappingId: target.id
+            });
+          } else {
+            await deleteQuestionBankEntry(target.id);
+          }
+          await loadBank(isCompetitionCourseMode ? courseLevel.id : academicLevel.id);
         }}
         onCancel={() => setDeleteQuestionTarget(null)}
       />

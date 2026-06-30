@@ -74,7 +74,7 @@ function Sidebar({ open, onClose, collapsed = false }) {
             const [emoji, text] = splitEmoji(item.label);
             return (
               <NavLink
-                key={item.to}
+                key={`${item.to}-${index}`}
                 to={item.to}
                 end
                 className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}

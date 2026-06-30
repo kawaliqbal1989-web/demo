@@ -142,6 +142,8 @@ function StudentWorksheetsPage() {
             <tr>
               <th>Title</th>
               <th>Questions</th>
+              <th>Rank</th>
+              <th>Award</th>
               <th>Duration</th>
               <th>Reassignments</th>
               <th style={{ textAlign: "right" }}>Action</th>
@@ -150,8 +152,31 @@ function StudentWorksheetsPage() {
           <tbody>
             {items.map((item) => (
               <tr key={item.worksheetId}>
-                <td>{item.title}</td>
+                <td>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span>{item.title}</span>
+                    {item.isCompetitionWorksheet ? (
+                      <span
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          background: "var(--color-bg-subtle)",
+                          border: "1px solid var(--color-border-strong)",
+                          fontSize: 11,
+                          fontWeight: 700,
+                          textTransform: "uppercase"
+                        }}
+                      >
+                        Competition
+                      </span>
+                    ) : null}
+                  </div>
+                </td>
                 <td>{item.totalQuestions}</td>
+                <td>{item.latestAttempt?.rank ?? "—"}</td>
+                <td>{item.latestAttempt?.awardType ?? "—"}</td>
                 <td>{item.durationSeconds ? `${Math.round(item.durationSeconds / 60)}m` : "—"}</td>
                 <td>{item.reassignmentCount ?? 0}</td>
                 <td style={{ textAlign: "right" }}>

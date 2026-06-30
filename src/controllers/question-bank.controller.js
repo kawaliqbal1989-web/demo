@@ -51,6 +51,18 @@ function safeJson(value) {
   }
 }
 
+async function ensureCourseLevelQuestion(tenantId, levelId, questionBankId) {
+  const existing = await prisma.courseLevelQuestion.findFirst({
+    where: { tenantId, levelId, questionBankId }
+  });
+
+  if (!existing) {
+    await prisma.courseLevelQuestion.create({
+      data: { tenantId, levelId, questionBankId }
+    });
+  }
+}
+
 const listQuestionBank = asyncHandler(async (req, res) => {
   const levelId = req.query.levelId ? String(req.query.levelId) : null;
   const difficulty = normalizeDifficulty(req.query.difficulty);
@@ -62,7 +74,7 @@ const listQuestionBank = asyncHandler(async (req, res) => {
 
   const where = {
     tenantId: req.auth.tenantId,
-    levelId
+    courseLevelQuestions: { some: { levelId } }
   };
 
   if (difficulty) {
@@ -101,7 +113,6 @@ const createQuestionBankEntry = asyncHandler(async (req, res) => {
   const created = await prisma.questionBank.create({
     data: {
       tenantId: req.auth.tenantId,
-      levelId,
       difficulty,
       prompt,
       operands,
@@ -109,6 +120,8 @@ const createQuestionBankEntry = asyncHandler(async (req, res) => {
       correctAnswer
     }
   });
+
+  await ensureCourseLevelQuestion(req.auth.tenantId, levelId, created.id);
 
   res.locals.entityId = created.id;
   return res.apiSuccess("Question created", created, 201);
@@ -171,6 +184,7 @@ const deleteQuestionBankEntry = asyncHandler(async (req, res) => {
     return res.apiError(404, "Question not found", "QUESTION_NOT_FOUND");
   }
 
+  await prisma.courseLevelQuestion.deleteMany({ where: { tenantId: req.auth.tenantId, questionBankId: existing.id } });
   await prisma.questionBank.delete({ where: { id: existing.id } });
 
   await recordAudit({
@@ -193,7 +207,10 @@ const exportQuestionBankCsv = asyncHandler(async (req, res) => {
   }
 
   const items = await prisma.questionBank.findMany({
-    where: { tenantId: req.auth.tenantId, levelId },
+    where: {
+      tenantId: req.auth.tenantId,
+      courseLevelQuestions: { some: { levelId } }
+    },
     orderBy: { createdAt: "desc" },
     take: 10000
   });
@@ -239,7 +256,7 @@ const importQuestionBank = asyncHandler(async (req, res) => {
     return res.apiError(400, "Maximum 500 items per import", "VALIDATION_ERROR");
   }
 
-  const rows = [];
+  let createdCount = 0;
   for (const item of items) {
     const difficulty = normalizeDifficulty(item?.difficulty);
     const prompt = normalizeString(item?.prompt);
@@ -251,23 +268,28 @@ const importQuestionBank = asyncHandler(async (req, res) => {
       return res.apiError(400, "Each item requires difficulty, prompt, operation, correctAnswer, operands", "VALIDATION_ERROR");
     }
 
-    rows.push({
-      tenantId: req.auth.tenantId,
-      levelId,
-      difficulty,
-      prompt,
-      operands,
-      operation,
-      correctAnswer
+    let question = await prisma.questionBank.findFirst({
+      where: { tenantId: req.auth.tenantId, prompt }
     });
+
+    if (!question) {
+      question = await prisma.questionBank.create({
+        data: {
+          tenantId: req.auth.tenantId,
+          difficulty,
+          prompt,
+          operands,
+          operation,
+          correctAnswer
+        }
+      });
+      createdCount += 1;
+    }
+
+    await ensureCourseLevelQuestion(req.auth.tenantId, levelId, question.id);
   }
 
-  const created = await prisma.questionBank.createMany({
-    data: rows,
-    skipDuplicates: true
-  });
-
-  return res.apiSuccess("Question bank imported", { createdCount: created.count }, 201);
+  return res.apiSuccess("Question bank imported", { createdCount }, 201);
 });
 
 export {

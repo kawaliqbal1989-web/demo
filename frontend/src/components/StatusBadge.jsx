@@ -1,5 +1,5 @@
-function StatusBadge({ value }) {
-  const text = String(value || "UNKNOWN").toUpperCase();
+function StatusBadge({ value, status }) {
+  const text = String(value ?? status ?? "UNKNOWN").toUpperCase();
 
   let background = "var(--color-bg-badge)";
   let color = "var(--color-text-primary)";

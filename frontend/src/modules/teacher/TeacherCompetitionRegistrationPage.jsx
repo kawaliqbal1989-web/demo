@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { LoadingState } from "../../components/LoadingState";
 import { EmptyState } from "../../components/EmptyState";
-import { getCompetitionDetail, enrollCompetitionStudent } from "../../services/competitionsService";
+import { getCompetitionDetail, getCompetitionRegistrations, enrollCompetitionStudent } from "../../services/competitionsService";
 import { listLevels } from "../../services/levelsService";
 import { listMyStudents } from "../../services/teacherPortalService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
@@ -13,6 +13,25 @@ function unwrapStudents(response) {
   if (Array.isArray(response?.data?.items)) return response.data.items;
   if (Array.isArray(response?.items)) return response.items;
   return [];
+}
+
+function unwrapRegistrations(response) {
+  if (Array.isArray(response?.data?.registrations)) return response.data.registrations;
+  if (Array.isArray(response?.registrations)) return response.registrations;
+  return [];
+}
+
+function normalizeRegisteredStudent(row) {
+  const student = row?.student || {};
+  const fullName = `${student.firstName || ""} ${student.lastName || ""}`.trim();
+  return {
+    studentId: row?.studentId || student.id,
+    fullName: fullName || student.admissionNo || "-",
+    studentName: fullName || student.admissionNo || "-",
+    level: row?.competitionLevel || row?.academicLevel || row?.level || null,
+    alreadyRegistered: true,
+    isTemporaryCompetitionStudent: Boolean(student.isTemporaryExam)
+  };
 }
 
 function TeacherCompetitionRegistrationPage() {
@@ -36,15 +55,30 @@ function TeacherCompetitionRegistrationPage() {
     setLoading(true);
     setError("");
     try {
-      const [competitionResponse, levelsResponse, studentsResponse] = await Promise.all([
+      const [competitionResponse, levelsResponse, studentsResponse, registrationsResponse] = await Promise.all([
         getCompetitionDetail(competitionId),
         listLevels({ limit: 100, offset: 0 }),
-        listMyStudents()
+        listMyStudents(),
+        getCompetitionRegistrations(competitionId)
       ]);
+
+      const assignedStudents = unwrapStudents(studentsResponse);
+      const registeredStudents = unwrapRegistrations(registrationsResponse).map(normalizeRegisteredStudent);
+      const byStudentId = new Map();
+      for (const student of assignedStudents) {
+        if (student?.studentId) {
+          byStudentId.set(student.studentId, student);
+        }
+      }
+      for (const student of registeredStudents) {
+        if (student?.studentId) {
+          byStudentId.set(student.studentId, { ...(byStudentId.get(student.studentId) || {}), ...student });
+        }
+      }
 
       setCompetition(competitionResponse?.data || null);
       setLevels(Array.isArray(levelsResponse?.data?.items) ? levelsResponse.data.items : []);
-      setStudents(unwrapStudents(studentsResponse));
+      setStudents([...byStudentId.values()]);
       setSelectedStudentIds([]);
       setSelectedLevels({});
     } catch (err) {
@@ -80,7 +114,7 @@ function TeacherCompetitionRegistrationPage() {
   };
 
   const enrollSelectedStudents = async () => {
-    const selectedStudents = students.filter((student) => selectedStudentIds.includes(student.studentId));
+    const selectedStudents = students.filter((student) => selectedStudentIds.includes(student.studentId) && !student.alreadyRegistered);
     for (const student of selectedStudents) {
       const levelId = selectedLevels[student.studentId] || student?.level?.id || "";
       if (!levelId) continue;
@@ -216,16 +250,19 @@ function TeacherCompetitionRegistrationPage() {
                         type="checkbox"
                         checked={selectedStudentIds.includes(student.studentId)}
                         onChange={() => toggleStudent(student.studentId)}
-                        disabled={!canEdit}
+                        disabled={!canEdit || student.alreadyRegistered}
                       />
                     </td>
-                    <td style={{ padding: 10 }}>{student.fullName || student.studentName || "-"}</td>
+                    <td style={{ padding: 10 }}>
+                      <div>{student.fullName || student.studentName || "-"}</div>
+                      {student.alreadyRegistered ? <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Already registered</div> : null}
+                    </td>
                     <td style={{ padding: 10 }}>
                       <select
                         className="input"
                         value={selectedLevels[student.studentId] || student?.level?.id || ""}
                         onChange={(event) => updateLevel(student.studentId, event.target.value)}
-                        disabled={!canEdit}
+                        disabled={!canEdit || student.alreadyRegistered}
                       >
                         <option value="">Select level</option>
                         {levels.map((level) => (

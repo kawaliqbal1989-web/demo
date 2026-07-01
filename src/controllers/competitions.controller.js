@@ -412,6 +412,22 @@ async function buildCompetitionVisibilityWhere({ auth, extraWhere = {} } = {}) {
     }
   }
 
+  if (auth.role === "TEACHER") {
+    return {
+      ...tenantWhere,
+      enrollments: {
+        some: {
+          tenantId: auth.tenantId,
+          isActive: true,
+          student: {
+            isActive: true,
+            currentTeacherUserId: auth.userId
+          }
+        }
+      }
+    };
+  }
+
   if (auth.hierarchyNodeId) {
     return { ...tenantWhere, hierarchyNodeId: auth.hierarchyNodeId };
   }
@@ -609,6 +625,7 @@ const listCompetitions = asyncHandler(async (req, res) => {
 
   let centerSubmissionByCompetitionId = new Map();
   let centerEnrollmentByCompetitionId = new Map();
+  let teacherEnrollmentByCompetitionId = new Map();
 
   if (req.auth?.role === "CENTER" && req.auth?.hierarchyNodeId && items.length) {
     const competitionIds = items.map((item) => item.id);
@@ -662,6 +679,36 @@ const listCompetitions = asyncHandler(async (req, res) => {
     }
   }
 
+  if (req.auth?.role === "TEACHER" && items.length) {
+    const competitionIds = items.map((item) => item.id);
+    const enrollments = await prisma.competitionEnrollment.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        competitionId: { in: competitionIds },
+        isActive: true,
+        student: {
+          isActive: true,
+          currentTeacherUserId: req.auth.userId
+        }
+      },
+      select: {
+        competitionId: true,
+        student: {
+          select: {
+            isTemporaryExam: true
+          }
+        }
+      }
+    });
+
+    teacherEnrollmentByCompetitionId = new Map();
+    for (const row of enrollments) {
+      const list = teacherEnrollmentByCompetitionId.get(row.competitionId) || [];
+      list.push(row);
+      teacherEnrollmentByCompetitionId.set(row.competitionId, list);
+    }
+  }
+
   const centerWorkflowState = (submissions) => {
     const latest = submissions?.[0] || null;
     if (!latest) return "CENTER_REVIEW";
@@ -704,7 +751,17 @@ const listCompetitions = asyncHandler(async (req, res) => {
           submittedSubmissionCount: counts.submitted
         };
       })
-    : items;
+    : req.auth?.role === "TEACHER"
+      ? items.map((item) => {
+          const enrollments = teacherEnrollmentByCompetitionId.get(item.id) || [];
+          return {
+            ...item,
+            registeredStudentsCount: enrollments.length,
+            assignedStudentsCount: enrollments.length,
+            temporaryStudentCount: enrollments.filter((row) => row.student?.isTemporaryExam).length
+          };
+        })
+      : items;
 
   res.setHeader("X-Pagination-Limit", String(limit));
   res.setHeader("X-Pagination-Offset", String(offset));
@@ -2424,9 +2481,12 @@ const exportCompetitionResultsCsv = asyncHandler(async (req, res) => {
 
 const listCompetitionRegistrations = asyncHandler(async (req, res) => {
   const { id: competitionId } = req.params;
+  const competitionWhere = req.auth.role === "TEACHER"
+    ? await buildCompetitionVisibilityWhere({ auth: req.auth, extraWhere: { id: competitionId } })
+    : { id: competitionId, tenantId: req.auth.tenantId };
 
   const competition = await prisma.competition.findFirst({
-    where: { id: competitionId, tenantId: req.auth.tenantId },
+    where: competitionWhere,
     select: { id: true, title: true, registrationStartsAt: true, registrationEndsAt: true, startsAt: true, endsAt: true, code: true }
   });
 
@@ -2434,9 +2494,20 @@ const listCompetitionRegistrations = asyncHandler(async (req, res) => {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
   }
 
+  const registrationWhere = {
+    competitionId,
+    tenantId: req.auth.tenantId,
+    isActive: true,
+    ...(req.auth.role === "TEACHER"
+      ? { student: { currentTeacherUserId: req.auth.userId, isActive: true } }
+      : req.auth.role === "CENTER" && req.auth.hierarchyNodeId
+        ? { student: { hierarchyNodeId: req.auth.hierarchyNodeId } }
+        : {})
+  };
+
   const [registrations, levelSummary] = await Promise.all([
     prisma.competitionEnrollment.findMany({
-      where: { competitionId, tenantId: req.auth.tenantId, isActive: true },
+      where: registrationWhere,
       orderBy: [{ enrolledAt: "asc" }],
       select: {
         competitionId: true,
@@ -2450,6 +2521,7 @@ const listCompetitionRegistrations = asyncHandler(async (req, res) => {
             admissionNo: true,
             firstName: true,
             lastName: true,
+            isTemporaryExam: true,
             currentTeacher: {
               select: {
                 id: true,
@@ -2465,7 +2537,7 @@ const listCompetitionRegistrations = asyncHandler(async (req, res) => {
     }),
     prisma.competitionEnrollment.groupBy({
       by: ["levelId"],
-      where: { competitionId, tenantId: req.auth.tenantId, isActive: true },
+      where: registrationWhere,
       _count: { studentId: true }
     })
   ]);
@@ -2481,6 +2553,7 @@ const listCompetitionRegistrations = asyncHandler(async (req, res) => {
       admissionNo: row.student.admissionNo,
       firstName: row.student.firstName,
       lastName: row.student.lastName,
+      isTemporaryExam: row.student.isTemporaryExam,
       currentTeacher: row.student.currentTeacher
     },
     level: row.level,
@@ -2575,6 +2648,118 @@ const updateCompetitionRegistrationLevel = asyncHandler(async (req, res) => {
   });
 
   return res.apiSuccess("Competition registration level updated", updated);
+});
+
+const updateCompetitionRegistrationTeacher = asyncHandler(async (req, res) => {
+  const { id: competitionId, registrationId } = req.params;
+  const hasTeacherField = Object.prototype.hasOwnProperty.call(req.body || {}, "teacherUserId")
+    || Object.prototype.hasOwnProperty.call(req.body || {}, "currentTeacherUserId");
+  const rawTeacherUserId = Object.prototype.hasOwnProperty.call(req.body || {}, "teacherUserId")
+    ? req.body.teacherUserId
+    : req.body?.currentTeacherUserId;
+
+  if (!hasTeacherField) {
+    return res.apiError(400, "teacherUserId is required", "VALIDATION_ERROR");
+  }
+
+  const normalizedTeacherUserId = rawTeacherUserId ? String(rawTeacherUserId).trim() : null;
+  const targetStudentId = resolveCompetitionRegistrationStudentId({ registrationId });
+
+  const [competition, enrollment] = await Promise.all([
+    prisma.competition.findFirst({
+      where: { id: competitionId, tenantId: req.auth.tenantId },
+      select: { id: true, registrationEndsAt: true, workflowStage: true }
+    }),
+    targetStudentId
+      ? prisma.competitionEnrollment.findFirst({
+          where: {
+            competitionId,
+            tenantId: req.auth.tenantId,
+            studentId: targetStudentId,
+            isActive: true,
+            student: { hierarchyNodeId: req.auth.hierarchyNodeId }
+          },
+          select: {
+            competitionId: true,
+            studentId: true,
+            student: { select: { id: true, hierarchyNodeId: true } }
+          }
+        })
+      : null
+  ]);
+
+  if (!competition) {
+    return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
+  }
+
+  if (competition.registrationEndsAt && new Date() > new Date(competition.registrationEndsAt)) {
+    return res.apiError(409, "Enrollment window is closed", "ENROLLMENT_WINDOW_CLOSED");
+  }
+
+  if (competition.workflowStage === "APPROVED") {
+    return res.apiError(409, "Competition is approved and locked", "COMPETITION_LOCKED");
+  }
+
+  const centerId = req.auth.hierarchyNodeId;
+  if (!centerId) {
+    return res.apiError(403, "Center context required", "HIERARCHY_CONTEXT_REQUIRED");
+  }
+
+  const locked = await prisma.competitionCenterSubmission.findFirst({
+    where: {
+      competitionId,
+      tenantId: req.auth.tenantId,
+      centerId,
+      status: { in: ["SUBMITTED", "APPROVED"] }
+    }
+  });
+  if (locked) {
+    return res.apiError(409, "Registrations for this center are locked", "CENTER_LOCKED");
+  }
+
+  if (!enrollment) {
+    return res.apiError(404, "Registration not found", "REGISTRATION_NOT_FOUND");
+  }
+
+  if (normalizedTeacherUserId) {
+    const teacher = await prisma.authUser.findFirst({
+      where: {
+        id: normalizedTeacherUserId,
+        tenantId: req.auth.tenantId,
+        role: "TEACHER",
+        isActive: true,
+        hierarchyNodeId: centerId
+      },
+      select: { id: true }
+    });
+
+    if (!teacher) {
+      return res.apiError(400, "Invalid teacherUserId", "INVALID_TEACHER");
+    }
+  }
+
+  const updated = await prisma.student.update({
+    where: { id: enrollment.studentId },
+    data: { currentTeacherUserId: normalizedTeacherUserId },
+    select: {
+      id: true,
+      admissionNo: true,
+      firstName: true,
+      lastName: true,
+      currentTeacher: {
+        select: {
+          id: true,
+          username: true,
+          teacherProfile: { select: { fullName: true } }
+        }
+      }
+    }
+  });
+
+  return res.apiSuccess("Competition registration teacher updated", {
+    registrationId: `${competitionId}:${enrollment.studentId}`,
+    student: updated
+  });
 });
 
 const removeCompetitionRegistration = asyncHandler(async (req, res) => {
@@ -3074,6 +3259,7 @@ export {
   removeCompetitionBusinessPartner,
   listCompetitionRegistrations,
   updateCompetitionRegistrationLevel,
+  updateCompetitionRegistrationTeacher,
   removeCompetitionRegistration,
   createCompetitionTemporaryStudent,
   lockCompetitionCenterRegistration,

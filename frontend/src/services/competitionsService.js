@@ -77,6 +77,11 @@ async function updateCompetitionRegistrationLevel(id, registrationId, payload) {
   return response.data;
 }
 
+async function updateCompetitionRegistrationTeacher(id, registrationId, payload) {
+  const response = await apiClient.patch(`/competitions/${id}/registrations/${registrationId}/teacher`, payload);
+  return response.data;
+}
+
 async function removeCompetitionRegistration(id, registrationId) {
   const response = await apiClient.delete(`/competitions/${id}/registrations/${registrationId}`);
   return response.data;
@@ -185,6 +190,7 @@ export {
   getCompetitionDetail,
   getCompetitionRegistrations,
   updateCompetitionRegistrationLevel,
+  updateCompetitionRegistrationTeacher,
   removeCompetitionRegistration,
   createCompetitionTemporaryStudent,
   lockCompetitionCenterRegistration,

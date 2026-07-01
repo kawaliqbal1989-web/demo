@@ -21,6 +21,7 @@ import {
   removeCompetitionBusinessPartner,
   listCompetitionRegistrations,
   updateCompetitionRegistrationLevel,
+  updateCompetitionRegistrationTeacher,
   removeCompetitionRegistration,
   createCompetitionTemporaryStudent,
   lockCompetitionCenterRegistration,
@@ -50,7 +51,7 @@ competitionsRouter.post(
 
 competitionsRouter.get(
   "/:id/registrations",
-  requireRole("CENTER"),
+  requireRole("CENTER", "TEACHER"),
   requireScopeAccess("competition", "id"),
   auditAction("COMPETITION_REGISTRATIONS_VIEW", "COMPETITION", (req) => req.params.id),
   listCompetitionRegistrations
@@ -62,6 +63,14 @@ competitionsRouter.patch(
   requireScopeAccess("competition", "id"),
   auditAction("COMPETITION_REGISTRATION_LEVEL_UPDATE", "COMPETITION", (req) => req.params.id),
   updateCompetitionRegistrationLevel
+);
+
+competitionsRouter.patch(
+  "/:id/registrations/:registrationId/teacher",
+  requireRole("CENTER"),
+  requireScopeAccess("competition", "id"),
+  auditAction("COMPETITION_REGISTRATION_TEACHER_UPDATE", "COMPETITION", (req) => req.params.id),
+  updateCompetitionRegistrationTeacher
 );
 
 competitionsRouter.delete(

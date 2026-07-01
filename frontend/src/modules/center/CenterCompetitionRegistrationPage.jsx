@@ -4,9 +4,10 @@ import toast from "react-hot-toast";
 import { LoadingState } from "../../components/LoadingState";
 import { EmptyState } from "../../components/EmptyState";
 import { useAuth } from "../../hooks/useAuth";
-import { getCompetitionDetail, getCompetitionRegistrations, updateCompetitionRegistrationLevel, removeCompetitionRegistration, createCompetitionTemporaryStudent, lockCompetitionCenterRegistration, forwardCompetitionRequest, submitCenterUnlockRequest } from "../../services/competitionsService";
+import { getCompetitionDetail, getCompetitionRegistrations, updateCompetitionRegistrationLevel, updateCompetitionRegistrationTeacher, removeCompetitionRegistration, createCompetitionTemporaryStudent, lockCompetitionCenterRegistration, forwardCompetitionRequest, submitCenterUnlockRequest } from "../../services/competitionsService";
 import { CompetitionWorkflowTimeline } from "../../components/CompetitionWorkflowTimeline";
 import { listLevels } from "../../services/levelsService";
+import { listTeachers } from "../../services/teachersService";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 
 function createIdempotencyKey() {
@@ -23,6 +24,7 @@ function CenterCompetitionRegistrationPage() {
   const [registrations, setRegistrations] = useState([]);
   const [summary, setSummary] = useState(null);
   const [levels, setLevels] = useState([]);
+  const [teachers, setTeachers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -47,10 +49,11 @@ function CenterCompetitionRegistrationPage() {
     setLoading(true);
     setError("");
     try {
-      const [competitionResponse, registrationsResponse, levelsResponse] = await Promise.all([
+      const [competitionResponse, registrationsResponse, levelsResponse, teachersResponse] = await Promise.all([
         getCompetitionDetail(competitionId),
         getCompetitionRegistrations(competitionId),
-        listLevels({ limit: 100, offset: 0 })
+        listLevels({ limit: 100, offset: 0 }),
+        listTeachers({ limit: 500, offset: 0, status: "ACTIVE" })
       ]);
 
       setCompetition(competitionResponse?.data || null);
@@ -60,6 +63,7 @@ function CenterCompetitionRegistrationPage() {
       setRegistrations(registrationsPayload);
       setSummary(registrationsResponse?.data?.summary || null);
       setLevels(Array.isArray(levelsResponse?.data?.items) ? levelsResponse.data.items : []);
+      setTeachers(Array.isArray(teachersResponse?.data?.items) ? teachersResponse.data.items : []);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load competition registrations.");
     } finally {
@@ -120,6 +124,21 @@ function CenterCompetitionRegistrationPage() {
       await loadData();
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to update competition level.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleTeacherChange = async (registrationId, teacherUserId) => {
+    if (!canEdit || saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      await updateCompetitionRegistrationTeacher(competitionId, registrationId, { teacherUserId: teacherUserId || null });
+      toast.success("Teacher updated.");
+      await loadData();
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to update teacher.");
     } finally {
       setSaving(false);
     }
@@ -428,7 +447,21 @@ function CenterCompetitionRegistrationPage() {
               <tbody>
                 {filteredRegistrations.map((row) => (
                   <tr key={row.id} style={{ borderBottom: "1px solid var(--color-border)" }}>
-                    <td style={{ padding: 10 }}>{row?.student?.currentTeacher?.teacherProfile?.fullName || row?.student?.currentTeacher?.username || "—"}</td>
+                    <td style={{ padding: 10 }}>
+                      <select
+                        className="input"
+                        value={row?.student?.currentTeacher?.id || ""}
+                        onChange={(event) => void handleTeacherChange(row.id, event.target.value)}
+                        disabled={!canEdit || saving}
+                      >
+                        <option value="">Unassigned</option>
+                        {teachers.map((teacher) => (
+                          <option key={teacher.id} value={teacher.id}>
+                            {teacher?.teacherProfile?.fullName || teacher.username || teacher.email}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
                     <td style={{ padding: 10 }}>{`${row?.student?.firstName || ""} ${row?.student?.lastName || ""}`.trim() || "—"}</td>
                     <td style={{ padding: 10 }}>{row?.student?.admissionNo || "—"}</td>
                     <td style={{ padding: 10 }}>{row?.academicLevel?.name || row?.level?.name || "—"}</td>

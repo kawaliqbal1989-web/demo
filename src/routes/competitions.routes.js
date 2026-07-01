@@ -6,9 +6,11 @@ import {
   forwardCompetitionRequest,
   getCompetitionDetail,
   getCompetitionResults,
+  listCompetitionRegistrations,
   publishCompetitionResults,
   rejectCompetitionRequest,
   getLeaderboard,
+  updateCompetitionRegistrationTeacher,
   unpublishCompetitionResults,
   listCompetitions
 } from "../controllers/competitions.controller.js";
@@ -25,6 +27,13 @@ competitionsRouter.get(
   requireScopeAccess("competition", "id"),
   getCompetitionDetail
 );
+competitionsRouter.get(
+  "/:id/registrations",
+  requireRole("CENTER", "TEACHER"),
+  requireScopeAccess("competition", "id"),
+  auditAction("COMPETITION_REGISTRATIONS_VIEW", "COMPETITION", (req) => req.params.id),
+  listCompetitionRegistrations
+);
 competitionsRouter.post(
   "/",
   requireRole("BP", "FRANCHISE", "CENTER", "SUPERADMIN"),
@@ -38,6 +47,13 @@ competitionsRouter.post(
   requireScopeAccess("competition", "id"),
   auditAction("ENROLL_STUDENT_COMPETITION", "COMPETITION", (req) => req.params.id),
   enrollStudent
+);
+competitionsRouter.patch(
+  "/:id/registrations/:registrationId/teacher",
+  requireRole("CENTER"),
+  requireScopeAccess("competition", "id"),
+  auditAction("COMPETITION_REGISTRATION_TEACHER_UPDATE", "COMPETITION", (req) => req.params.id),
+  updateCompetitionRegistrationTeacher
 );
 
 competitionsRouter.post(

@@ -25,6 +25,11 @@ async function getCompetitionDetail(id) {
   return response.data;
 }
 
+async function getCompetitionRegistrations(id) {
+  const response = await apiClient.get(`/competitions/${id}/registrations`);
+  return response.data;
+}
+
 async function forwardCompetitionRequest(id) {
   const response = await apiClient.post(`/competitions/${id}/forward-request`);
   return response.data;
@@ -37,6 +42,11 @@ async function rejectCompetitionRequest(id, reason) {
 
 async function getLeaderboard(id) {
   const response = await apiClient.get(`/competitions/${id}/leaderboard`);
+  return response.data;
+}
+
+async function updateCompetitionRegistrationTeacher(id, registrationId, payload) {
+  const response = await apiClient.patch(`/competitions/${id}/registrations/${registrationId}/teacher`, payload);
   return response.data;
 }
 
@@ -65,11 +75,13 @@ async function exportCompetitionResultsCsv(id) {
 export {
   listCompetitions,
   getCompetitionDetail,
+  getCompetitionRegistrations,
   enrollCompetitionStudent,
   createCompetition,
   forwardCompetitionRequest,
   rejectCompetitionRequest,
   getLeaderboard,
+  updateCompetitionRegistrationTeacher,
   getCompetitionResults,
   publishCompetitionResults,
   unpublishCompetitionResults,

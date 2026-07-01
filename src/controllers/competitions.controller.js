@@ -19,7 +19,23 @@ function isCompetitionResultStatusSchemaMissing(error) {
   return error?.code === "P2022" || msg.includes("resultstatus") || msg.includes("resultpublishedat");
 }
 
-function buildCompetitionSelect({ includeResultMeta = true, includeStageTransitions = false } = {}) {
+function buildCompetitionSelect({ includeResultMeta = true, includeStageTransitions = false, auth = null } = {}) {
+  const enrollmentSelect = {
+    select: { studentId: true, rank: true, totalScore: true, enrolledAt: true }
+  };
+
+  if (auth?.role === "TEACHER") {
+    enrollmentSelect.where = {
+      tenantId: auth.tenantId,
+      isActive: true,
+      student: {
+        isActive: true,
+        hierarchyNodeId: auth.hierarchyNodeId,
+        currentTeacherUserId: auth.userId
+      }
+    };
+  }
+
   const select = {
     id: true,
     tenantId: true,
@@ -39,7 +55,7 @@ function buildCompetitionSelect({ includeResultMeta = true, includeStageTransiti
     hierarchyNode: { select: { id: true, name: true, type: true, code: true } },
     level: { select: { id: true, name: true, rank: true } },
     createdBy: { select: { id: true, email: true, role: true } },
-    enrollments: { select: { studentId: true, rank: true, totalScore: true, enrolledAt: true } },
+    enrollments: enrollmentSelect,
     worksheets: { select: { worksheetId: true, assignedAt: true } }
   };
 
@@ -77,7 +93,7 @@ function applyLegacyCompetitionResultMeta(item) {
   };
 }
 
-async function findCompetitionsWithResultFallback({ where, orderBy, skip, take }) {
+async function findCompetitionsWithResultFallback({ where, orderBy, skip, take, auth = null }) {
   try {
     return {
       items: await prisma.competition.findMany({
@@ -85,7 +101,7 @@ async function findCompetitionsWithResultFallback({ where, orderBy, skip, take }
         orderBy,
         skip,
         take,
-        select: buildCompetitionSelect({ includeResultMeta: true })
+        select: buildCompetitionSelect({ includeResultMeta: true, auth })
       }),
       legacyResultStatus: false
     };
@@ -99,7 +115,7 @@ async function findCompetitionsWithResultFallback({ where, orderBy, skip, take }
       orderBy,
       skip,
       take,
-      select: buildCompetitionSelect({ includeResultMeta: false })
+      select: buildCompetitionSelect({ includeResultMeta: false, auth })
     });
 
     return {
@@ -109,11 +125,33 @@ async function findCompetitionsWithResultFallback({ where, orderBy, skip, take }
   }
 }
 
-async function findCompetitionDetailWithResultFallback(where) {
+function buildCompetitionRegistrationWhere({ auth, competitionId } = {}) {
+  const where = {
+    competitionId,
+    tenantId: auth.tenantId,
+    isActive: true
+  };
+
+  if (auth.role === "TEACHER") {
+    where.student = {
+      isActive: true,
+      hierarchyNodeId: auth.hierarchyNodeId,
+      currentTeacherUserId: auth.userId
+    };
+  } else if (auth.role === "CENTER" && auth.hierarchyNodeId) {
+    where.student = {
+      hierarchyNodeId: auth.hierarchyNodeId
+    };
+  }
+
+  return where;
+}
+
+async function findCompetitionDetailWithResultFallback(where, auth = null) {
   try {
     return await prisma.competition.findFirst({
       where,
-      select: buildCompetitionSelect({ includeResultMeta: true, includeStageTransitions: true })
+      select: buildCompetitionSelect({ includeResultMeta: true, includeStageTransitions: true, auth })
     });
   } catch (error) {
     if (!isCompetitionResultStatusSchemaMissing(error)) {
@@ -122,7 +160,7 @@ async function findCompetitionDetailWithResultFallback(where) {
 
     const item = await prisma.competition.findFirst({
       where,
-      select: buildCompetitionSelect({ includeResultMeta: false, includeStageTransitions: true })
+      select: buildCompetitionSelect({ includeResultMeta: false, includeStageTransitions: true, auth })
     });
 
     return applyLegacyCompetitionResultMeta(item);
@@ -203,6 +241,23 @@ async function buildCompetitionVisibilityWhere({ auth, extraWhere = {} } = {}) {
     }
   }
 
+  if (auth.role === "TEACHER") {
+    return {
+      ...tenantWhere,
+      enrollments: {
+        some: {
+          tenantId: auth.tenantId,
+          isActive: true,
+          student: {
+            isActive: true,
+            hierarchyNodeId: auth.hierarchyNodeId,
+            currentTeacherUserId: auth.userId
+          }
+        }
+      }
+    };
+  }
+
   if (auth.hierarchyNodeId) {
     return { ...tenantWhere, hierarchyNodeId: auth.hierarchyNodeId };
   }
@@ -244,7 +299,7 @@ const listCompetitions = asyncHandler(async (req, res) => {
   const where = await buildCompetitionVisibilityWhere({ auth: req.auth });
 
   const [{ items, legacyResultStatus }, total] = await Promise.all([
-    findCompetitionsWithResultFallback({ where, orderBy, skip, take }),
+    findCompetitionsWithResultFallback({ where, orderBy, skip, take, auth: req.auth }),
     prisma.competition.count({ where })
   ]);
 
@@ -261,7 +316,7 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
 
   const where = await buildCompetitionVisibilityWhere({ auth: req.auth, extraWhere: { id } });
 
-  const item = await findCompetitionDetailWithResultFallback(where);
+  const item = await findCompetitionDetailWithResultFallback(where, req.auth);
 
   if (!item) {
     return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
@@ -658,6 +713,192 @@ const exportCompetitionResultsCsv = asyncHandler(async (req, res) => {
   return res.status(200).send(csv);
 });
 
+const listCompetitionRegistrations = asyncHandler(async (req, res) => {
+  const { id: competitionId } = req.params;
+  const competitionWhere = req.auth.role === "TEACHER"
+    ? await buildCompetitionVisibilityWhere({ auth: req.auth, extraWhere: { id: competitionId } })
+    : { id: competitionId, tenantId: req.auth.tenantId };
+
+  const competition = await prisma.competition.findFirst({
+    where: competitionWhere,
+    select: {
+      id: true,
+      title: true,
+      workflowStage: true,
+      startsAt: true,
+      endsAt: true
+    }
+  });
+
+  if (!competition) {
+    return res.apiError(404, "Competition not found", "COMPETITION_NOT_FOUND");
+  }
+
+  const registrations = await prisma.competitionEnrollment.findMany({
+    where: buildCompetitionRegistrationWhere({ auth: req.auth, competitionId }),
+    orderBy: [{ enrolledAt: "asc" }],
+    select: {
+      competitionId: true,
+      studentId: true,
+      enrolledAt: true,
+      student: {
+        select: {
+          id: true,
+          admissionNo: true,
+          firstName: true,
+          lastName: true,
+          isTemporaryExam: true,
+          currentTeacher: {
+            select: {
+              id: true,
+              username: true,
+              teacherProfile: { select: { fullName: true } }
+            }
+          }
+        }
+      }
+    }
+  });
+
+  return res.apiSuccess("Competition registrations fetched", {
+    competition,
+    registrations
+  });
+});
+
+function resolveCompetitionRegistrationStudentId({ competitionId, registrationId } = {}) {
+  const normalized = String(registrationId || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (normalized.includes(":")) {
+    const parts = normalized.split(":").filter(Boolean);
+    if (parts.length >= 2 && parts[0] === competitionId) {
+      return parts.slice(1).join(":");
+    }
+
+    return parts.slice(1).join(":") || parts[0] || null;
+  }
+
+  return normalized;
+}
+
+const updateCompetitionRegistrationTeacher = asyncHandler(async (req, res) => {
+  const { id: competitionId, registrationId } = req.params;
+  const hasTeacherField = Object.prototype.hasOwnProperty.call(req.body || {}, "teacherUserId")
+    || Object.prototype.hasOwnProperty.call(req.body || {}, "currentTeacherUserId");
+  const rawTeacherUserId = Object.prototype.hasOwnProperty.call(req.body || {}, "teacherUserId")
+    ? req.body.teacherUserId
+    : req.body?.currentTeacherUserId;
+
+  if (!hasTeacherField) {
+    return res.apiError(400, "teacherUserId is required", "VALIDATION_ERROR");
+  }
+
+  const normalizedTeacherUserId = rawTeacherUserId ? String(rawTeacherUserId).trim() : null;
+  const targetStudentId = resolveCompetitionRegistrationStudentId({ competitionId, registrationId });
+
+  if (!targetStudentId) {
+    return res.apiError(400, "registrationId is required", "VALIDATION_ERROR");
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const competition = await tx.competition.findFirst({
+      where: { id: competitionId, tenantId: req.auth.tenantId },
+      select: { id: true, workflowStage: true }
+    });
+
+    if (!competition) {
+      const error = new Error("Competition not found");
+      error.statusCode = 404;
+      error.errorCode = "COMPETITION_NOT_FOUND";
+      throw error;
+    }
+
+    if (competition.workflowStage !== "CENTER_REVIEW") {
+      const error = new Error("Competition registrations are locked");
+      error.statusCode = 409;
+      error.errorCode = "COMPETITION_LOCKED";
+      throw error;
+    }
+
+    if (!req.auth.hierarchyNodeId) {
+      const error = new Error("Center context required");
+      error.statusCode = 403;
+      error.errorCode = "HIERARCHY_CONTEXT_REQUIRED";
+      throw error;
+    }
+
+    const enrollment = await tx.competitionEnrollment.findFirst({
+      where: {
+        competitionId,
+        tenantId: req.auth.tenantId,
+        studentId: targetStudentId,
+        isActive: true,
+        student: {
+          isActive: true,
+          hierarchyNodeId: req.auth.hierarchyNodeId
+        }
+      },
+      select: {
+        competitionId: true,
+        studentId: true
+      }
+    });
+
+    if (!enrollment) {
+      const error = new Error("Registration not found");
+      error.statusCode = 404;
+      error.errorCode = "REGISTRATION_NOT_FOUND";
+      throw error;
+    }
+
+    if (normalizedTeacherUserId) {
+      const teacher = await tx.authUser.findFirst({
+        where: {
+          id: normalizedTeacherUserId,
+          tenantId: req.auth.tenantId,
+          role: "TEACHER",
+          isActive: true,
+          hierarchyNodeId: req.auth.hierarchyNodeId
+        },
+        select: { id: true }
+      });
+
+      if (!teacher) {
+        const error = new Error("Invalid teacherUserId");
+        error.statusCode = 400;
+        error.errorCode = "INVALID_TEACHER";
+        throw error;
+      }
+    }
+
+    return tx.student.update({
+      where: { id: enrollment.studentId },
+      data: { currentTeacherUserId: normalizedTeacherUserId },
+      select: {
+        id: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        currentTeacher: {
+          select: {
+            id: true,
+            username: true,
+            teacherProfile: { select: { fullName: true } }
+          }
+        }
+      }
+    });
+  });
+
+  return res.apiSuccess("Competition registration teacher updated", {
+    registrationId: `${competitionId}:${targetStudentId}`,
+    student: updated
+  });
+});
+
 const enrollStudent = asyncHandler(async (req, res) => {
   assertCanModifyOperational(req.auth.role);
 
@@ -757,5 +998,7 @@ export {
   publishCompetitionResults,
   unpublishCompetitionResults,
   exportCompetitionResultsCsv,
-  enrollStudent
+  enrollStudent,
+  listCompetitionRegistrations,
+  updateCompetitionRegistrationTeacher
 };

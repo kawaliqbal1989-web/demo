@@ -2015,7 +2015,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
           select: enrollmentEntrySelect
         }
       },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "desc" }
     }),
     prisma.examLateEnrollmentStudent.findMany({
       where: buildScopedLateEnrollmentWhere({ tenantId, examCycleId, actor, scope }),
@@ -2034,7 +2034,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
         level: { select: { id: true, name: true, rank: true } },
         student: { select: studentSelect }
       },
-      orderBy: [{ approvedAt: "asc" }, { createdAt: "asc" }]
+      orderBy: [{ approvedAt: "desc" }, { createdAt: "desc" }]
     })
   ]);
 
@@ -2055,9 +2055,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
   for (const item of items) {
     if (item.entry?.studentId) {
       const key = `${item.entry.studentId}:${item.entry.enrolledLevelId || ""}`;
-      if (!byCandidateKey.has(key)) {
-        byCandidateKey.set(key, { ...item, isLateEnrollment: false });
-      }
+      byCandidateKey.set(key, { ...item, isLateEnrollment: false });
     }
   }
 
@@ -2073,10 +2071,6 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
       null;
     const lateLevelId = lateEntry?.enrolledLevelId || lateRow.levelId;
     const key = `${lateRow.studentId}:${lateLevelId || ""}`;
-
-    if (byCandidateKey.has(key)) {
-      continue;
-    }
 
     byCandidateKey.set(key, {
       isLateEnrollment: true,

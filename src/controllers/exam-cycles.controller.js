@@ -40,6 +40,11 @@ function toCsv({ headers, rows }) {
   return `${lines.join("\n")}\n`;
 }
 
+function roundPercentage(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Number(numeric.toFixed(2)) : null;
+}
+
 function normalizeExamCompletionTime(completionTimeSeconds, timeLimitSeconds) {
   if (
     completionTimeSeconds === null ||
@@ -75,6 +80,241 @@ function normalizeExamCompletionTime(completionTimeSeconds, timeLimitSeconds) {
     normalizedCompletionTime,
     Math.floor(timeLimit)
   );
+}
+
+function deriveCandidateStatus(submission) {
+  if (!submission) return "ABSENT";
+  if (!submission.finalSubmittedAt) return "IN_PROGRESS";
+  return String(submission.remarks || "").trim().toLowerCase() === "timed out" ? "TIMED_OUT" : "SUBMITTED";
+}
+
+const EXAM_RESULT_RULES = Object.freeze({
+  scoreBasis: "Score, accuracy, answer count, and completion time",
+  rankingOrder: [
+    "Higher score",
+    "Higher accuracy",
+    "More correct answers",
+    "Fewer wrong answers",
+    "Shorter completion time",
+    "Earlier submission time"
+  ],
+  passFailDisplayed: false,
+  lateEnrollmentIncluded: true
+});
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function deriveResultOutcome({ candidateStatus, percentage }) {
+  if (candidateStatus === "ABSENT") return "ABSENT";
+  if (candidateStatus === "IN_PROGRESS") return "IN_PROGRESS";
+  if (percentage === null || percentage === undefined) return "PENDING";
+  return "SCORED";
+}
+
+function compareExamRankRows(left, right) {
+  const leftScore = toNullableNumber(left.score) ?? -Infinity;
+  const rightScore = toNullableNumber(right.score) ?? -Infinity;
+  if (leftScore !== rightScore) return rightScore - leftScore;
+
+  const leftPercentage = toNullableNumber(left.percentage) ?? -Infinity;
+  const rightPercentage = toNullableNumber(right.percentage) ?? -Infinity;
+  if (leftPercentage !== rightPercentage) return rightPercentage - leftPercentage;
+
+  const leftCorrect = toNullableNumber(left.correctCount) ?? -Infinity;
+  const rightCorrect = toNullableNumber(right.correctCount) ?? -Infinity;
+  if (leftCorrect !== rightCorrect) return rightCorrect - leftCorrect;
+
+  const leftWrong = toNullableNumber(left.wrongCount) ?? Infinity;
+  const rightWrong = toNullableNumber(right.wrongCount) ?? Infinity;
+  if (leftWrong !== rightWrong) return leftWrong - rightWrong;
+
+  const leftDuration = toNullableNumber(left.completionTimeSeconds) ?? Infinity;
+  const rightDuration = toNullableNumber(right.completionTimeSeconds) ?? Infinity;
+  if (leftDuration !== rightDuration) return leftDuration - rightDuration;
+
+  const leftSubmitted = left.submittedAt ? new Date(left.submittedAt).getTime() : Infinity;
+  const rightSubmitted = right.submittedAt ? new Date(right.submittedAt).getTime() : Infinity;
+  if (leftSubmitted !== rightSubmitted) return leftSubmitted - rightSubmitted;
+
+  return String(left.studentId || "").localeCompare(String(right.studentId || ""));
+}
+
+function examRankTieKey(row) {
+  return [
+    toNullableNumber(row.score) ?? null,
+    toNullableNumber(row.percentage) ?? null,
+    toNullableNumber(row.correctCount) ?? null,
+    toNullableNumber(row.wrongCount) ?? null,
+    toNullableNumber(row.completionTimeSeconds) ?? null,
+    row.submittedAt ? new Date(row.submittedAt).toISOString() : null
+  ].join("|");
+}
+
+function assignExamResultRanks(rows = []) {
+  const rankedRows = rows
+    .filter((row) => row.resultOutcome === "SCORED")
+    .sort(compareExamRankRows);
+
+  const rankByKey = new Map();
+  let currentRank = 0;
+  let previousTieKey = null;
+
+  rankedRows.forEach((row, index) => {
+    const tieKey = examRankTieKey(row);
+    if (tieKey !== previousTieKey) {
+      currentRank = index + 1;
+      previousTieKey = tieKey;
+    }
+    rankByKey.set(`${row.studentId}:${row.enrolledLevelId || ""}`, currentRank);
+  });
+
+  return rows.map((row) => ({
+    ...row,
+    rank: rankByKey.get(`${row.studentId}:${row.enrolledLevelId || ""}`) ?? null
+  }));
+}
+
+function normalizeResultQuery(query = {}) {
+  const sortByAllowList = new Set([
+    "studentName",
+    "admissionNo",
+    "levelName",
+    "teacherName",
+    "centerName",
+    "rank",
+    "percentage",
+    "score",
+    "completionTimeSeconds",
+    "submittedAt"
+  ]);
+  const sortBy = sortByAllowList.has(String(query.sortBy || "")) ? String(query.sortBy) : "admissionNo";
+  const sortOrder = String(query.sortOrder || "asc").toLowerCase() === "desc" ? "desc" : "asc";
+
+  return {
+    q: String(query.q || "").trim().toLowerCase(),
+    levelId: String(query.levelId || "").trim(),
+    teacherUserId: String(query.teacherUserId || "").trim(),
+    centerNodeId: String(query.centerNodeId || "").trim(),
+    candidateStatus: String(query.candidateStatus || "").trim().toUpperCase(),
+    resultOutcome: String(query.resultOutcome || "").trim().toUpperCase(),
+    candidateType: String(query.candidateType || "").trim().toUpperCase(),
+    sortBy,
+    sortOrder
+  };
+}
+
+function applyExamResultFiltersAndSort(rows = [], query = {}) {
+  const filters = normalizeResultQuery(query);
+  const filtered = rows.filter((row) => {
+    if (filters.q) {
+      const haystack = [
+        row.admissionNo,
+        row.studentName,
+        row.teacherCode,
+        row.teacherName,
+        row.centerCode,
+        row.centerName,
+        row.levelName,
+        row.rank
+      ].map((value) => String(value || "").toLowerCase());
+      if (!haystack.some((value) => value.includes(filters.q))) return false;
+    }
+    if (filters.levelId && row.enrolledLevelId !== filters.levelId) return false;
+    if (filters.teacherUserId && row.teacherUserId !== filters.teacherUserId) return false;
+    if (filters.centerNodeId && row.centerNodeId !== filters.centerNodeId) return false;
+    if (filters.candidateStatus && row.candidateStatus !== filters.candidateStatus) return false;
+    if (filters.resultOutcome && row.resultOutcome !== filters.resultOutcome) return false;
+    if (filters.candidateType === "TEMPORARY" && !row.isTemporaryCandidate) return false;
+    if (filters.candidateType === "REGULAR" && row.isTemporaryCandidate) return false;
+    return true;
+  });
+
+  const direction = filters.sortOrder === "desc" ? -1 : 1;
+  const valueForSort = (row) => {
+    if (filters.sortBy === "rank" || filters.sortBy === "score" || filters.sortBy === "percentage" || filters.sortBy === "completionTimeSeconds") {
+      const numeric = Number(row[filters.sortBy]);
+      return Number.isFinite(numeric) ? numeric : null;
+    }
+    if (filters.sortBy === "submittedAt") {
+      const time = row.submittedAt ? new Date(row.submittedAt).getTime() : null;
+      return Number.isFinite(time) ? time : null;
+    }
+    return String(row[filters.sortBy] || "").toLowerCase();
+  };
+
+  return filtered.sort((a, b) => {
+    const aValue = valueForSort(a);
+    const bValue = valueForSort(b);
+    if (aValue === null && bValue !== null) return 1;
+    if (aValue !== null && bValue === null) return -1;
+    if (aValue < bValue) return -1 * direction;
+    if (aValue > bValue) return 1 * direction;
+    return String(a.admissionNo || a.studentName || "").localeCompare(String(b.admissionNo || b.studentName || ""));
+  });
+}
+
+function getScopedHierarchyNodeIds({ actor, scope }) {
+  const nodeIds = Array.isArray(scope?.hierarchyNodeIds) ? scope.hierarchyNodeIds.filter(Boolean) : [];
+  if (nodeIds.length) return nodeIds;
+  return actor?.hierarchyNodeId ? [actor.hierarchyNodeId] : [];
+}
+
+function buildScopedLateEnrollmentWhere({ tenantId, examCycleId, actor, scope }) {
+  const where = {
+    tenantId,
+    status: "APPROVED",
+    request: {
+      is: {
+        examCycleId
+      }
+    }
+  };
+
+  if (actor.role === "SUPERADMIN") {
+    return where;
+  }
+
+  if (actor.role === "TEACHER") {
+    const centerNodeId = actor.hierarchyNodeId || "__NO_CENTER_SCOPE__";
+    return {
+      ...where,
+      request: {
+        is: {
+          examCycleId,
+          centerId: centerNodeId
+        }
+      },
+      OR: [
+        { student: { currentTeacherUserId: actor.userId } },
+        {
+          student: {
+            batchEnrollments: {
+              some: {
+                tenantId,
+                status: "ACTIVE",
+                assignedTeacherUserId: actor.userId
+              }
+            }
+          }
+        }
+      ]
+    };
+  }
+
+  const nodeIds = getScopedHierarchyNodeIds({ actor, scope });
+  return {
+    ...where,
+    request: {
+      is: {
+        examCycleId,
+        centerId: nodeIds.length ? { in: nodeIds } : "__NO_HIERARCHY_SCOPE__"
+      }
+    }
+  };
 }
 
 function parseDateTime(value, field) {
@@ -1437,7 +1677,7 @@ const exportEnrollmentListCsv = asyncHandler(async (req, res) => {
   return res.status(200).send(csv);
 });
 
-async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
+async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {} }) {
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
     select: { id: true, resultStatus: true }
@@ -1490,22 +1730,147 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
     itemWhere.entry = { is: { ...(itemWhere.entry?.is || {}), sourceTeacherUserId: actor.userId } };
   }
 
+  const teacherSelect = {
+    id: true,
+    username: true,
+    teacherProfile: { select: { fullName: true } }
+  };
+  const studentSelect = {
+    id: true,
+    admissionNo: true,
+    firstName: true,
+    lastName: true,
+    currentTeacherUserId: true,
+    currentTeacher: { select: teacherSelect },
+    batchEnrollments: {
+      where: { tenantId, status: "ACTIVE" },
+      select: {
+        assignedTeacherUserId: true,
+        assignedTeacher: { select: teacherSelect }
+      },
+      orderBy: { createdAt: "desc" },
+      take: 1
+    }
+  };
+  const enrollmentEntrySelect = {
+    id: true,
+    studentId: true,
+    enrolledLevelId: true,
+    isTemporary: true,
+    sourceTeacherUserId: true,
+    enrolledLevel: { select: { id: true, name: true, rank: true } },
+    sourceTeacherUser: { select: teacherSelect },
+    student: {
+      select: {
+        ...studentSelect,
+        hierarchyNodeId: true
+      }
+    }
+  };
+
   const items = listIds.length
     ? await prisma.examEnrollmentListItem.findMany({
         where: itemWhere,
         select: {
-          entry: {
+          list: {
             select: {
-              studentId: true,
-              student: { select: { admissionNo: true, firstName: true, lastName: true, hierarchyNodeId: true } }
+              hierarchyNodeId: true,
+              centerNode: { select: { id: true, code: true, name: true } }
             }
+          },
+          entry: {
+            select: enrollmentEntrySelect
           }
-        }
+        },
+        orderBy: { createdAt: "asc" }
       })
     : [];
 
-  const entries = items.map((i) => i.entry);
-  const studentIds = entries.map((e) => e.studentId);
+  const approvedLateRows = await prisma.examLateEnrollmentStudent.findMany({
+    where: buildScopedLateEnrollmentWhere({ tenantId, examCycleId, actor, scope }),
+    select: {
+      id: true,
+      studentId: true,
+      levelId: true,
+      approvedAt: true,
+      request: {
+        select: {
+          id: true,
+          centerId: true,
+          centerNode: { select: { id: true, code: true, name: true } }
+        }
+      },
+      level: { select: { id: true, name: true, rank: true } },
+      student: { select: studentSelect }
+    },
+    orderBy: [{ approvedAt: "asc" }, { createdAt: "asc" }]
+  });
+
+  const lateStudentIds = Array.from(new Set(approvedLateRows.map((row) => row.studentId).filter(Boolean)));
+  const lateEntryRows = lateStudentIds.length
+    ? await prisma.examEnrollmentEntry.findMany({
+        where: {
+          tenantId,
+          examCycleId,
+          studentId: { in: lateStudentIds }
+        },
+        select: enrollmentEntrySelect
+      })
+    : [];
+  const lateEntryByStudentId = new Map(lateEntryRows.map((entry) => [entry.studentId, entry]));
+
+  const byCandidateKey = new Map();
+  for (const item of items) {
+    if (item.entry?.studentId) {
+      const key = `${item.entry.studentId}:${item.entry.enrolledLevelId || ""}`;
+      if (!byCandidateKey.has(key)) {
+        byCandidateKey.set(key, { ...item, isLateEnrollment: false });
+      }
+    }
+  }
+
+  for (const lateRow of approvedLateRows) {
+    const lateEntry = lateEntryByStudentId.get(lateRow.studentId);
+    const fallbackTeacher =
+      lateRow.student?.currentTeacher ||
+      lateRow.student?.batchEnrollments?.[0]?.assignedTeacher ||
+      null;
+    const fallbackTeacherUserId =
+      lateRow.student?.currentTeacherUserId ||
+      lateRow.student?.batchEnrollments?.[0]?.assignedTeacherUserId ||
+      null;
+    const lateLevelId = lateEntry?.enrolledLevelId || lateRow.levelId;
+    const key = `${lateRow.studentId}:${lateLevelId || ""}`;
+
+    if (byCandidateKey.has(key)) {
+      continue;
+    }
+
+    byCandidateKey.set(key, {
+      isLateEnrollment: true,
+      lateEnrollmentStudentId: lateRow.id,
+      lateEnrollmentRequestId: lateRow.request?.id || null,
+      lateEnrollmentApprovedAt: lateRow.approvedAt || null,
+      list: {
+        hierarchyNodeId: lateRow.request?.centerId || null,
+        centerNode: lateRow.request?.centerNode || null
+      },
+      entry: {
+        id: lateEntry?.id || `late:${lateRow.id}`,
+        studentId: lateRow.studentId,
+        enrolledLevelId: lateLevelId,
+        isTemporary: Boolean(lateEntry?.isTemporary),
+        sourceTeacherUserId: lateEntry?.sourceTeacherUserId || fallbackTeacherUserId || null,
+        enrolledLevel: lateEntry?.enrolledLevel || lateRow.level || null,
+        sourceTeacherUser: lateEntry?.sourceTeacherUser || fallbackTeacher,
+        student: lateEntry?.student || lateRow.student || null
+      }
+    });
+  }
+
+  const scopedItems = Array.from(byCandidateKey.values());
+  const entries = scopedItems.map((i) => i.entry).filter(Boolean);
+  const studentIds = Array.from(new Set(entries.map((e) => e.studentId).filter(Boolean)));
 
   const submissions = studentIds.length
     ? await prisma.worksheetSubmission.findMany({
@@ -1520,53 +1885,138 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId }) {
           }
         },
         select: {
+          id: true,
           studentId: true,
           score: true,
+          totalMarks: true,
+          earnedMarks: true,
+          percentage: true,
           correctCount: true,
+          wrongCount: true,
+          unansweredCount: true,
           totalQuestions: true,
           completionTimeSeconds: true,
           finalSubmittedAt: true,
-          worksheet: {
-            select: {
-              id: true,
-              timeLimitSeconds: true
-            }
-          }
+          submittedAt: true,
+          createdAt: true,
+          remarks: true,
+          worksheet: { select: { id: true, levelId: true, timeLimitSeconds: true } }
         }
       })
     : [];
 
-  const byStudent = new Map();
-  for (const s of submissions) {
-    byStudent.set(s.studentId, s);
+  const submissionsByStudentAndLevel = new Map();
+  const submissionsByStudent = new Map();
+  for (const submission of submissions) {
+    const levelId = submission.worksheet?.levelId || "";
+    const studentBucket = submissionsByStudent.get(submission.studentId) || [];
+    studentBucket.push(submission);
+    submissionsByStudent.set(submission.studentId, studentBucket);
+    if (levelId) {
+      const key = `${submission.studentId}:${levelId}`;
+      const bucket = submissionsByStudentAndLevel.get(key) || [];
+      bucket.push(submission);
+      submissionsByStudentAndLevel.set(key, bucket);
+    }
   }
 
-  const results = entries.map((e) => {
-    const sub = byStudent.get(e.studentId);
+  const sortSubmissions = (bucket) => {
+    bucket.sort((a, b) => {
+      const aFinal = a.finalSubmittedAt ? 1 : 0;
+      const bFinal = b.finalSubmittedAt ? 1 : 0;
+      if (aFinal !== bFinal) return bFinal - aFinal;
+      const aTime = new Date(a.finalSubmittedAt || a.submittedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.finalSubmittedAt || b.submittedAt || b.createdAt || 0).getTime();
+      if (aTime !== bTime) return bTime - aTime;
+      return String(a.id || "").localeCompare(String(b.id || ""));
+    });
+  };
+
+  for (const bucket of submissionsByStudentAndLevel.values()) sortSubmissions(bucket);
+  for (const bucket of submissionsByStudent.values()) sortSubmissions(bucket);
+
+  const results = scopedItems.map((item) => {
+    const e = item.entry;
+    const candidates = submissionsByStudentAndLevel.get(`${e.studentId}:${e.enrolledLevelId}`) || [];
+    const sub = candidates[0] || null;
+    const fallbackSub = sub ? null : (submissionsByStudent.get(e.studentId) || []).find((candidate) => candidate.finalSubmittedAt) || null;
+    const statusSubmission = sub || fallbackSub;
+    const hasLevelMismatchSubmission = Boolean(!sub && fallbackSub);
+    const finalizedMatches = candidates.filter((candidate) => candidate.finalSubmittedAt);
+    const correctCount = toNullableNumber(sub?.correctCount);
+    const totalQuestions = toNullableNumber(sub?.totalQuestions);
+    const unansweredCount = toNullableNumber(sub?.unansweredCount);
+    const wrongCount = sub?.wrongCount !== null && sub?.wrongCount !== undefined
+      ? toNullableNumber(sub.wrongCount)
+      : totalQuestions !== null && correctCount !== null
+        ? Math.max(0, totalQuestions - correctCount - (unansweredCount || 0))
+        : null;
+    const calculatedPercentage =
+      totalQuestions && totalQuestions > 0 && correctCount !== null && correctCount !== undefined
+        ? roundPercentage((Number(correctCount) / Number(totalQuestions)) * 100)
+        : null;
+    const storedPercentage = toNullableNumber(sub?.percentage ?? sub?.score);
+    const percentage = calculatedPercentage ?? storedPercentage;
+    const score = toNullableNumber(sub?.earnedMarks ?? sub?.score ?? percentage);
+    const candidateStatus = deriveCandidateStatus(statusSubmission);
+    const teacher =
+      e.sourceTeacherUser ||
+      e.student?.currentTeacher ||
+      e.student?.batchEnrollments?.[0]?.assignedTeacher ||
+      null;
+    const teacherUserId =
+      e.sourceTeacherUserId ||
+      e.student?.currentTeacherUserId ||
+      e.student?.batchEnrollments?.[0]?.assignedTeacherUserId ||
+      null;
+    const teacherName = teacher?.teacherProfile?.fullName || teacher?.username || null;
+    const centerNode = item.list?.centerNode || null;
+
     return {
       studentId: e.studentId,
-      admissionNo: e.student.admissionNo,
-      studentName: `${e.student.firstName} ${e.student.lastName}`.trim(),
-      hierarchyNodeId: e.student.hierarchyNodeId,
-      score: sub?.score ?? null,
-      correctCount: sub?.correctCount ?? null,
-      totalQuestions: sub?.totalQuestions ?? null,
+      admissionNo: e.student?.admissionNo || null,
+      studentName: `${e.student?.firstName || ""} ${e.student?.lastName || ""}`.trim(),
+      enrolledLevelId: e.enrolledLevelId,
+      levelName: e.enrolledLevel?.name || null,
+      levelRank: e.enrolledLevel?.rank ?? null,
+      teacherUserId,
+      teacherName,
+      teacherCode: teacher?.username || null,
+      centerNodeId: centerNode?.id || item.list?.hierarchyNodeId || null,
+      centerName: centerNode?.name || null,
+      centerCode: centerNode?.code || null,
+      isTemporaryCandidate: Boolean(e.isTemporary),
+      isLateEnrollment: Boolean(item.isLateEnrollment),
+      candidateStatus,
+      resultOutcome: deriveResultOutcome({ candidateStatus, percentage }),
+      rank: null,
+      score,
+      percentage,
+      correctCount,
+      wrongCount,
+      unansweredCount,
+      totalQuestions,
       completionTimeSeconds: sub
-        ? normalizeExamCompletionTime(
-            sub.completionTimeSeconds,
-            sub.worksheet?.timeLimitSeconds
-          )
+        ? normalizeExamCompletionTime(sub.completionTimeSeconds, sub.worksheet?.timeLimitSeconds)
         : null,
-      submittedAt: sub?.finalSubmittedAt ?? null,
-      worksheetId: sub?.worksheet?.id ?? null
+      submittedAt: statusSubmission?.finalSubmittedAt ?? null,
+      worksheetId: sub?.worksheet?.id ?? null,
+      resultConflict: finalizedMatches.length > 1 || hasLevelMismatchSubmission,
+      resultConflictReason: hasLevelMismatchSubmission ? "LEVEL_MISMATCH_SUBMISSION" : null
     };
   });
 
-  return { status: examCycle.resultStatus, results };
+  const rankedResults = assignExamResultRanks(results);
+
+  return {
+    status: examCycle.resultStatus,
+    resultRules: EXAM_RESULT_RULES,
+    results: applyExamResultFiltersAndSort(rankedResults, query)
+  };
 }
 
 async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
-  const [examCycle, payload, enrollmentLevels, levelRules] = await Promise.all([
+  const [examCycle, payload] = await Promise.all([
     prisma.examCycle.findFirst({
       where: { id: examCycleId, tenantId },
       select: {
@@ -1578,25 +2028,14 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
         resultPublishedByUserId: true,
         examStartsAt: true,
         examEndsAt: true,
-        businessPartnerId: true
+        businessPartnerId: true,
+        businessPartner: { select: { id: true, code: true, name: true } }
       }
     }),
     buildExamResultsPayload({
       tenantId,
       actor,
       examCycleId
-    }),
-    prisma.examEnrollmentEntry.findMany({
-      where: { tenantId, examCycleId },
-      select: {
-        studentId: true,
-        enrolledLevelId: true,
-        enrolledLevel: { select: { id: true, name: true, rank: true } }
-      }
-    }),
-    prisma.levelRule.findMany({
-      where: { tenantId },
-      select: { levelId: true, passThreshold: true }
     })
   ]);
 
@@ -1607,53 +2046,36 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
     throw error;
   }
 
-  const levelByStudentId = new Map();
-  const levelMetaById = new Map();
-  for (const entry of enrollmentLevels) {
-    levelByStudentId.set(entry.studentId, entry.enrolledLevelId);
-    if (entry.enrolledLevel?.id) {
-      levelMetaById.set(entry.enrolledLevel.id, {
-        levelId: entry.enrolledLevel.id,
-        levelName: entry.enrolledLevel.name,
-        levelRank: entry.enrolledLevel.rank
-      });
-    }
-  }
-
-  const passThresholdByLevelId = new Map();
-  for (const rule of levelRules) {
-    const threshold = Number(rule?.passThreshold);
-    passThresholdByLevelId.set(rule.levelId, Number.isFinite(threshold) ? threshold : 85);
-  }
-
   const results = payload.results || [];
-  const appeared = results.filter((row) => row.score !== null && row.score !== undefined);
-  const absentCount = results.length - appeared.length;
-  const totalScore = appeared.reduce((sum, row) => sum + Number(row.score || 0), 0);
-  const avgScore = appeared.length ? Number((totalScore / appeared.length).toFixed(2)) : 0;
-
-  let passCount = 0;
-  let failCount = 0;
+  const appeared = results.filter((row) => row.candidateStatus !== "ABSENT");
+  const absentCount = results.filter((row) => row.candidateStatus === "ABSENT").length;
+  const inProgressCount = results.filter((row) => row.candidateStatus === "IN_PROGRESS").length;
+  const timedOutCount = results.filter((row) => row.candidateStatus === "TIMED_OUT").length;
+  const scored = results.filter((row) => row.percentage !== null && row.percentage !== undefined);
+  const rankedCount = results.filter((row) => row.rank !== null && row.rank !== undefined).length;
+  const lateEnrollmentCount = results.filter((row) => row.isLateEnrollment).length;
+  const totalScore = scored.reduce((sum, row) => sum + Number(row.percentage || 0), 0);
+  const avgScore = scored.length ? Number((totalScore / scored.length).toFixed(2)) : 0;
+  const totalCompletionTime = scored.reduce((sum, row) => sum + Number(row.completionTimeSeconds || 0), 0);
+  const avgCompletionTimeSeconds = scored.length ? Number((totalCompletionTime / scored.length).toFixed(2)) : 0;
 
   const levelWiseMap = new Map();
   for (const row of results) {
-    const levelId = levelByStudentId.get(row.studentId) || "UNASSIGNED";
-    const levelMeta = levelMetaById.get(levelId) || {
-      levelId,
-      levelName: "Unassigned",
-      levelRank: null
-    };
+    const levelId = row.enrolledLevelId || "UNASSIGNED";
 
     if (!levelWiseMap.has(levelId)) {
       levelWiseMap.set(levelId, {
-        levelId: levelMeta.levelId,
-        levelName: levelMeta.levelName,
-        levelRank: levelMeta.levelRank,
+        levelId,
+        levelName: row.levelName || "Unassigned",
+        levelRank: row.levelRank ?? null,
         total: 0,
         appeared: 0,
         absent: 0,
-        pass: 0,
-        fail: 0,
+        scored: 0,
+        ranked: 0,
+        lateEnrollment: 0,
+        inProgress: 0,
+        timedOut: 0,
         totalScore: 0
       });
     }
@@ -1661,23 +2083,28 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
     const bucket = levelWiseMap.get(levelId);
     bucket.total += 1;
 
-    if (row.score === null || row.score === undefined) {
+    if (row.isLateEnrollment) {
+      bucket.lateEnrollment += 1;
+    }
+
+    if (row.candidateStatus === "ABSENT") {
       bucket.absent += 1;
       continue;
     }
 
-    const numericScore = Number(row.score || 0);
-    const threshold = passThresholdByLevelId.get(levelId) ?? 85;
-    const passed = numericScore >= threshold;
-
     bucket.appeared += 1;
-    bucket.totalScore += numericScore;
-    if (passed) {
-      bucket.pass += 1;
-      passCount += 1;
-    } else {
-      bucket.fail += 1;
-      failCount += 1;
+    if (row.percentage !== null && row.percentage !== undefined) {
+      bucket.totalScore += Number(row.percentage || 0);
+      bucket.scored += 1;
+    }
+    if (row.rank !== null && row.rank !== undefined) {
+      bucket.ranked += 1;
+    }
+    if (row.candidateStatus === "IN_PROGRESS") {
+      bucket.inProgress += 1;
+    }
+    if (row.candidateStatus === "TIMED_OUT") {
+      bucket.timedOut += 1;
     }
   }
 
@@ -1689,9 +2116,12 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
       total: bucket.total,
       appeared: bucket.appeared,
       absent: bucket.absent,
-      pass: bucket.pass,
-      fail: bucket.fail,
-      avgScore: bucket.appeared ? Number((bucket.totalScore / bucket.appeared).toFixed(2)) : 0
+      scored: bucket.scored,
+      ranked: bucket.ranked,
+      lateEnrollment: bucket.lateEnrollment,
+      inProgress: bucket.inProgress,
+      timedOut: bucket.timedOut,
+      avgScore: bucket.scored ? Number((bucket.totalScore / bucket.scored).toFixed(2)) : 0
     }))
     .sort((a, b) => {
       const rankA = Number(a.levelRank ?? Number.MAX_SAFE_INTEGER);
@@ -1701,15 +2131,25 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
     });
 
   const topPerformers = appeared
+    .filter((row) => row.percentage !== null && row.percentage !== undefined)
     .map((row) => ({
       studentId: row.studentId,
       admissionNo: row.admissionNo,
       studentName: row.studentName,
-      score: Number(row.score || 0),
-      levelId: levelByStudentId.get(row.studentId) || null,
-      levelName: levelMetaById.get(levelByStudentId.get(row.studentId))?.levelName || null
+      score: Number(row.percentage || 0),
+      rank: row.rank ?? null,
+      correctCount: row.correctCount ?? null,
+      totalQuestions: row.totalQuestions ?? null,
+      completionTimeSeconds: row.completionTimeSeconds ?? null,
+      levelId: row.enrolledLevelId || null,
+      levelName: row.levelName || null
     }))
-    .sort((a, b) => b.score - a.score || String(a.studentName || "").localeCompare(String(b.studentName || "")))
+    .sort((a, b) => {
+      const rankA = Number(a.rank ?? Number.MAX_SAFE_INTEGER);
+      const rankB = Number(b.rank ?? Number.MAX_SAFE_INTEGER);
+      if (rankA !== rankB) return rankA - rankB;
+      return b.score - a.score || String(a.studentName || "").localeCompare(String(b.studentName || ""));
+    })
     .slice(0, 10);
 
   return {
@@ -1725,10 +2165,15 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
       totalCandidates: results.length,
       appearedCount: appeared.length,
       absentCount,
-      passCount,
-      failCount,
-      avgScore
+      scoredCount: scored.length,
+      rankedCount,
+      lateEnrollmentCount,
+      inProgressCount,
+      timedOutCount,
+      avgScore,
+      avgCompletionTimeSeconds
     },
+    resultRules: payload.resultRules || EXAM_RESULT_RULES,
     topPerformers,
     levelWise,
     rows: results
@@ -2708,7 +3153,7 @@ const deleteExamCycle = asyncHandler(async (req, res) => {
 const getExamResults = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
 
-  const payload = await buildExamResultsPayload({ tenantId: req.auth.tenantId, actor: req.auth, examCycleId });
+  const payload = await buildExamResultsPayload({ tenantId: req.auth.tenantId, actor: req.auth, examCycleId, query: req.query });
   return res.apiSuccess("Exam results", payload);
 });
 
@@ -2724,7 +3169,7 @@ const exportExamResultsCsv = asyncHandler(async (req, res) => {
     return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
   }
 
-  const payload = await buildExamResultsPayload({ tenantId: req.auth.tenantId, actor: req.auth, examCycleId });
+  const payload = await buildExamResultsPayload({ tenantId: req.auth.tenantId, actor: req.auth, examCycleId, query: req.query });
 
   const headers = [
     { key: "examCode", label: "Exam Code" },

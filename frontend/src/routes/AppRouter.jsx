@@ -68,6 +68,7 @@ import { WorksheetPage } from "../modules/center/WorksheetPage";
 import { CenterExamCyclesPage } from "../modules/center/CenterExamCyclesPage";
 import { CenterExamEnrollmentPage } from "../modules/center/CenterExamEnrollmentPage";
 import { CenterExamLateEnrollmentPage } from "../modules/center/CenterExamLateEnrollmentPage";
+import { CenterExamResultsPage } from "../modules/center/CenterExamResultsPage";
 import { CenterQuestionBankPage } from "../modules/center/CenterQuestionBankPage";
 
 import { CenterAnalyticsPage } from "../modules/center/CenterAnalyticsPage";
@@ -96,6 +97,7 @@ import { TeacherProfilePage } from "../modules/teacher/TeacherProfilePage";
 import { TeacherWorksheetsPage } from "../modules/teacher/TeacherWorksheetsPage";
 import { TeacherExamCyclesPage } from "../modules/teacher/TeacherExamCyclesPage";
 import { TeacherExamEnrollmentPage } from "../modules/teacher/TeacherExamEnrollmentPage";
+import { TeacherExamResultsPage } from "../modules/teacher/TeacherExamResultsPage";
 import { TeacherAnalyticsPage } from "../modules/teacher/TeacherAnalyticsPage";
 import { TeacherReassignmentQueuePage } from "../modules/teacher/TeacherReassignmentQueuePage";
 import { TeacherWorkflowQueuePage } from "../modules/teacher/TeacherWorkflowQueuePage";
@@ -239,6 +241,7 @@ function AppRouter() {
             <Route path="/center/worksheets/:id" element={<WorksheetPage />} />
             <Route path="/center/exam-cycles" element={<CenterExamCyclesPage />} />
             <Route path="/center/exam-cycles/:examCycleId" element={<CenterExamEnrollmentPage />} />
+            <Route path="/center/exam-cycles/:examCycleId/results" element={<CenterExamResultsPage />} />
             <Route path="/center/exam-cycles/:examCycleId/late-enrollment" element={<CenterExamLateEnrollmentPage />} />
             <Route path="/center/question-bank" element={<CenterQuestionBankPage />} />
             <Route path="/center/courses" element={<Navigate to="/center/worksheets" replace />} />
@@ -271,6 +274,7 @@ function AppRouter() {
             <Route path="/teacher/virtual-abacus" element={<VirtualAbacusPage />} />
             <Route path="/teacher/exam-cycles" element={<TeacherExamCyclesPage />} />
             <Route path="/teacher/exam-cycles/:examCycleId" element={<TeacherExamEnrollmentPage />} />
+            <Route path="/teacher/exam-cycles/:examCycleId/results" element={<TeacherExamResultsPage />} />
             <Route path="/teacher/analytics" element={<TeacherAnalyticsPage />} />
             <Route path="/teacher/workflows" element={<TeacherWorkflowQueuePage />} />
             <Route path="/teacher/workflows/:id" element={<TeacherWorkflowDetailPage />} />

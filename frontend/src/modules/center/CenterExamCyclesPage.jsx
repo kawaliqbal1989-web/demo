@@ -107,6 +107,9 @@ function CenterExamCyclesPage() {
                 <Link className="button secondary" style={{ width: "auto" }} to={`/center/exam-cycles/${r.id}/late-enrollment`}>
                   Late Enrollment
                 </Link>
+                <Link className="button secondary" style={{ width: "auto" }} to={`/center/exam-cycles/${r.id}/results`}>
+                  Results
+                </Link>
               </div>
             )
           }

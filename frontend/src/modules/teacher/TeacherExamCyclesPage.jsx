@@ -85,9 +85,14 @@ function TeacherExamCyclesPage() {
             key: "actions",
             header: "Actions",
             render: (r) => (
-              <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/exam-cycles/${r.id}`}>
-                Manage Enrollment
-              </Link>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/exam-cycles/${r.id}`}>
+                  Manage Enrollment
+                </Link>
+                <Link className="button secondary" style={{ width: "auto" }} to={`/teacher/exam-cycles/${r.id}/results`}>
+                  Results
+                </Link>
+              </div>
             )
           }
         ]}

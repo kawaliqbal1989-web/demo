@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
+import { StatusBadge } from "../../components/StatusBadge";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { downloadBlob } from "../../utils/downloadBlob";
@@ -25,6 +26,26 @@ function formatDateTime(value) {
   });
 }
 
+function formatDuration(value) {
+  if (value === null || value === undefined || value === "") return "\u2014";
+  const totalSeconds = Math.max(0, Math.floor(Number(value)));
+  if (!Number.isFinite(totalSeconds)) return "\u2014";
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function hasAppeared(row) {
+  return row?.score !== null && row?.score !== undefined;
+}
+
+function formatAccuracy(row) {
+  const correct = Number(row?.correctCount);
+  const total = Number(row?.totalQuestions);
+  if (!Number.isFinite(correct) || !Number.isFinite(total) || total <= 0) return "\u2014";
+  return `${Math.round((correct / total) * 1000) / 10}%`;
+}
+
 function SuperadminExamResultsPage() {
   const { examCycleId } = useParams();
   const navigate = useNavigate();
@@ -39,6 +60,8 @@ function SuperadminExamResultsPage() {
   const [publishNote, setPublishNote] = useState("");
   const [unpublishNote, setUnpublishNote] = useState("");
   const [confirmAction, setConfirmAction] = useState(null); // "publish" | "unpublish" | null
+  const [search, setSearch] = useState("");
+  const [attendanceFilter, setAttendanceFilter] = useState("ALL");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -70,6 +93,19 @@ function SuperadminExamResultsPage() {
     [resultStatus]
   );
   const canUnpublish = useMemo(() => resultStatus === "PUBLISHED", [resultStatus]);
+
+  const visibleRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      const appeared = hasAppeared(row);
+      if (attendanceFilter === "APPEARED" && !appeared) return false;
+      if (attendanceFilter === "ABSENT" && appeared) return false;
+      if (!q) return true;
+      return [row?.studentName, row?.admissionNo].some((value) =>
+        String(value || "").toLowerCase().includes(q)
+      );
+    });
+  }, [rows, search, attendanceFilter]);
 
   const doPublish = async () => {
     if (acting || !canPublish) return;
@@ -129,11 +165,14 @@ function SuperadminExamResultsPage() {
 
   return (
     <section style={{ display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
         <div>
-          <h2 style={{ margin: 0 }}>Exam Results</h2>
-          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-            Status: <b>{resultStatus}</b>
+          <h2 style={{ margin: 0 }}>{examMeta?.name ? `Exam Results: ${examMeta.name}` : "Exam Results"}</h2>
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
+            {examMeta?.code ? `Cycle ${examMeta.code} \u00b7 ` : ""}Superadmin result review and publication governance.
+          </div>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 4 }}>
+            Status: <StatusBadge value={resultStatus || "PENDING"} />
           </div>
         </div>
         <button className="button secondary" type="button" onClick={() => navigate(-1)} style={{ width: "auto" }}>
@@ -141,7 +180,7 @@ function SuperadminExamResultsPage() {
         </button>
       </div>
 
-      <div className="card" style={{ display: "flex", gap: 12, alignItems: "center" }}>
+      <div className="card" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <button className="button secondary" type="button" onClick={() => void load()} style={{ width: "auto" }}>
           Refresh
         </button>
@@ -163,19 +202,24 @@ function SuperadminExamResultsPage() {
         </button>
       </div>
 
-      <div className="card" style={{ display: "grid", gap: 12 }}>
-        <div style={{ fontWeight: 600 }}>Review Summary</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-          <div><strong>Total Candidates:</strong> {summary.totalCandidates ?? 0}</div>
-          <div><strong>Appeared:</strong> {summary.appearedCount ?? 0}</div>
-          <div><strong>Absent:</strong> {summary.absentCount ?? 0}</div>
-          <div><strong>Pass:</strong> {summary.passCount ?? 0}</div>
-          <div><strong>Fail:</strong> {summary.failCount ?? 0}</div>
-          <div><strong>Average Score:</strong> {summary.avgScore ?? 0}</div>
-        </div>
-        <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-          Window: {formatDateTime(examMeta?.examStartsAt)} to {formatDateTime(examMeta?.examEndsAt)}
-        </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+        {[
+          ["Candidates", summary.totalCandidates ?? 0],
+          ["Appeared", summary.appearedCount ?? 0],
+          ["Absent", summary.absentCount ?? 0],
+          ["Pass", summary.passCount ?? 0],
+          ["Fail", summary.failCount ?? 0],
+          ["Average Score", summary.avgScore ?? 0]
+        ].map(([label, value]) => (
+          <div key={label} className="card" style={{ display: "grid", gap: 6 }}>
+            <div style={{ fontSize: 12, color: "var(--color-text-muted)", fontWeight: 800 }}>{label}</div>
+            <div style={{ fontSize: 26, fontWeight: 900 }}>{Number(value || 0).toLocaleString()}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="card" style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+        Window: {formatDateTime(examMeta?.examStartsAt)} to {formatDateTime(examMeta?.examEndsAt)}
       </div>
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
@@ -185,10 +229,10 @@ function SuperadminExamResultsPage() {
           emptyMessage="No scored attempts yet."
           keyField={(row) => row?.studentId || row?.admissionNo}
           columns={[
-            { key: "admissionNo", header: "Student Code", render: (row) => row?.admissionNo || "" },
-            { key: "studentName", header: "Student", render: (row) => row?.studentName || "" },
-            { key: "level", header: "Level", render: (row) => row?.levelName || "-" },
-            { key: "score", header: "Score", render: (row) => String(row?.score ?? "") }
+            { key: "admissionNo", header: "Student Code", render: (row) => row?.admissionNo || "\u2014" },
+            { key: "studentName", header: "Student", render: (row) => row?.studentName || "\u2014" },
+            { key: "level", header: "Level", render: (row) => row?.levelName || "\u2014" },
+            { key: "score", header: "Score", render: (row) => (row?.score === null || row?.score === undefined ? "\u2014" : String(row.score)) }
           ]}
         />
       </div>
@@ -219,19 +263,92 @@ function SuperadminExamResultsPage() {
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
         <div style={{ fontWeight: 600 }}>Results</div>
-        <DataTable
-          emptyMessage={error ? "Unable to load exam results. Use Refresh to retry." : resultStatus === "PUBLISHED" ? "No published results found." : "No exam results available yet."}
-          columns={[
-            { key: "admissionNo", header: "Student Code", render: (r) => r?.admissionNo || "" },
-            { key: "name", header: "Student Name", render: (r) => r?.studentName || "" },
-            { key: "score", header: "Score", render: (r) => (r?.score === null || r?.score === undefined ? "" : String(r.score)) },
-            { key: "correct", header: "Correct", render: (r) => (r?.correctCount === null || r?.correctCount === undefined ? "" : String(r.correctCount)) },
-            { key: "total", header: "Total", render: (r) => (r?.totalQuestions === null || r?.totalQuestions === undefined ? "" : String(r.totalQuestions)) },
-            { key: "time", header: "Time (sec)", render: (r) => (r?.completionTimeSeconds === null || r?.completionTimeSeconds === undefined ? "" : String(r.completionTimeSeconds)) }
-          ]}
-          rows={rows}
-          keyField={(row) => row?.studentId || row?.admissionNo || JSON.stringify(row)}
-        />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, alignItems: "end" }}>
+          <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+            Search
+            <input
+              className="input"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Student name or code"
+            />
+          </label>
+          <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+            Attendance
+            <select className="input" value={attendanceFilter} onChange={(event) => setAttendanceFilter(event.target.value)}>
+              <option value="ALL">All candidates</option>
+              <option value="APPEARED">Appeared</option>
+              <option value="ABSENT">Absent</option>
+            </select>
+          </label>
+          <button
+            className="button secondary"
+            type="button"
+            style={{ width: "auto" }}
+            onClick={() => {
+              setSearch("");
+              setAttendanceFilter("ALL");
+            }}
+          >
+            Reset
+          </button>
+        </div>
+        <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+          Showing {visibleRows.length} of {rows.length} result rows.
+        </div>
+        <div style={{ overflow: "auto" }}>
+          <DataTable
+            emptyMessage={error
+              ? "Unable to load exam results. Use Refresh to retry."
+              : rows.length
+                ? "No result rows match the selected filters."
+                : resultStatus === "PUBLISHED"
+                  ? "No published results found."
+                  : "No exam results available yet."}
+            columns={[
+              {
+                key: "student",
+                header: "Student",
+                render: (r) => (
+                  <div style={{ display: "grid", gap: 2 }}>
+                    <strong>{r?.studentName || "\u2014"}</strong>
+                    <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>{r?.admissionNo || "\u2014"}</span>
+                  </div>
+                )
+              },
+              {
+                key: "attendance",
+                header: "Attendance",
+                render: (r) => <StatusBadge value={hasAppeared(r) ? "APPEARED" : "ABSENT"} />
+              },
+              {
+                key: "score",
+                header: "Score",
+                render: (r) => (hasAppeared(r) ? String(r.score) : "Absent")
+              },
+              {
+                key: "correct",
+                header: "Correct / Total",
+                render: (r) => (r?.correctCount != null && r?.totalQuestions != null
+                  ? `${r.correctCount}/${r.totalQuestions}`
+                  : "\u2014")
+              },
+              { key: "accuracy", header: "Accuracy", render: (r) => formatAccuracy(r) },
+              { key: "time", header: "Time", render: (r) => formatDuration(r?.completionTimeSeconds) },
+              {
+                key: "submittedAt",
+                header: "Submitted",
+                render: (r) => (r?.submittedAt
+                  ? formatDateTime(r.submittedAt)
+                  : hasAppeared(r)
+                    ? "Not submitted"
+                    : "Absent")
+              }
+            ]}
+            rows={visibleRows}
+            keyField={(row) => row?.studentId || row?.admissionNo || JSON.stringify(row)}
+          />
+        </div>
       </div>
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
@@ -242,7 +359,7 @@ function SuperadminExamResultsPage() {
           keyField={(row) => row?.id || `${row?.action}-${row?.actedAt}`}
           columns={[
             { key: "actedAt", header: "When", render: (row) => formatDateTime(row?.actedAt) },
-            { key: "action", header: "Action", render: (row) => row?.action || "" },
+            { key: "action", header: "Action", render: (row) => row?.action || "\u2014" },
             { key: "actor", header: "Actor", render: (row) => row?.actedByUser?.username || row?.actedByUser?.email || "-" },
             { key: "role", header: "Role", render: (row) => row?.actedByUser?.role || "-" },
             { key: "notes", header: "Notes", render: (row) => row?.notes || "-" }

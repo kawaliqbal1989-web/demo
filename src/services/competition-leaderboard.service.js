@@ -1,5 +1,21 @@
 import { prisma } from "../lib/prisma.js";
 
+function isOptionalCompetitionSchemaDriftError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.code === "P2021" ||
+    error?.code === "P2022" ||
+    message.includes("unknown field") ||
+    message.includes("does not exist in the current database") ||
+    message.includes("table") && message.includes("does not exist")
+  );
+}
+
+function isCompetitionResultStatusSchemaMissing(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return error?.code === "P2022" || message.includes("resultstatus") || message.includes("resultpublishedat");
+}
+
 function normalizeLimit(limit) {
   const parsed = Number(limit || 50);
 
@@ -88,11 +104,102 @@ function assignRanks(rows) {
   });
 }
 
+function compareFrozenRows(left, right) {
+  const leftRank = toComparableNumber(left.rank, Infinity);
+  const rightRank = toComparableNumber(right.rank, Infinity);
+  if (leftRank !== rightRank) return leftRank - rightRank;
+
+  const leftScore = toComparableNumber(left.earnedMarks, -Infinity);
+  const rightScore = toComparableNumber(right.earnedMarks, -Infinity);
+  if (leftScore !== rightScore) return rightScore - leftScore;
+
+  return String(left.studentId || "").localeCompare(String(right.studentId || ""));
+}
+
 function getAwardTypeForRank(rank) {
   if (rank === 1) return "GOLD";
   if (rank === 2) return "SILVER";
   if (rank === 3) return "BRONZE";
   return "PARTICIPATION";
+}
+
+async function findCompetitionEnrollmentsWithAwardFallback({ competitionId, tenantId, requireFrozenOnly = false }) {
+  const baseWhere = {
+    competitionId,
+    tenantId,
+    isActive: true,
+    student: { isActive: true }
+  };
+
+  const where = requireFrozenOnly
+    ? {
+        ...baseWhere,
+        OR: [{ rank: { not: null } }, { totalScore: { not: null } }]
+      }
+    : baseWhere;
+
+  const baseStudentLevelSelect = {
+    studentId: true,
+    levelId: true,
+    level: {
+      select: {
+        id: true,
+        name: true,
+        rank: true
+      }
+    },
+    student: {
+      select: {
+        id: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        hierarchyNodeId: true,
+        hierarchyNode: {
+          select: {
+            id: true,
+            name: true,
+            code: true
+          }
+        }
+      }
+    }
+  };
+
+  if (requireFrozenOnly) {
+    baseStudentLevelSelect.rank = true;
+    baseStudentLevelSelect.totalScore = true;
+  }
+
+  try {
+    return await prisma.competitionEnrollment.findMany({
+      where,
+      select: {
+        ...baseStudentLevelSelect,
+        awardType: true,
+        awardFinalizedAt: true,
+        awardFinalizedByUserId: true
+      },
+      ...(requireFrozenOnly ? { orderBy: [{ rank: "asc" }, { totalScore: "desc" }, { studentId: "asc" }] } : {})
+    });
+  } catch (error) {
+    if (!isOptionalCompetitionSchemaDriftError(error)) {
+      throw error;
+    }
+
+    const legacyRows = await prisma.competitionEnrollment.findMany({
+      where,
+      select: baseStudentLevelSelect,
+      ...(requireFrozenOnly ? { orderBy: [{ rank: "asc" }, { totalScore: "desc" }, { studentId: "asc" }] } : {})
+    });
+
+    return legacyRows.map((row) => ({
+      ...row,
+      awardType: null,
+      awardFinalizedAt: null,
+      awardFinalizedByUserId: null
+    }));
+  }
 }
 
 async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipApprovalCheck = false, includeAll = false }) {
@@ -103,10 +210,26 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
     competitionWhere.workflowStage = "APPROVED";
   }
 
-  const competition = await prisma.competition.findFirst({
-    where: competitionWhere,
-    select: { id: true }
-  });
+  let competition;
+  try {
+    competition = await prisma.competition.findFirst({
+      where: competitionWhere,
+      select: { id: true, resultStatus: true }
+    });
+  } catch (error) {
+    if (!isCompetitionResultStatusSchemaMissing(error)) {
+      throw error;
+    }
+
+    const legacyCompetition = await prisma.competition.findFirst({
+      where: competitionWhere,
+      select: { id: true }
+    });
+
+    competition = legacyCompetition
+      ? { id: legacyCompetition.id, resultStatus: "DRAFT" }
+      : null;
+  }
 
   if (!competition) {
     const error = new Error("Competition not found or not approved");
@@ -115,45 +238,102 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
     throw error;
   }
 
-  const [enrollments, assignments] = await Promise.all([
-    prisma.competitionEnrollment.findMany({
-      where: {
-        competitionId,
-        tenantId,
-        isActive: true
-      },
-      select: {
-        studentId: true,
-        levelId: true,
-        level: {
-          select: {
-            id: true,
-            name: true,
-            rank: true
-          }
-        },
-        awardType: true,
-        awardFinalizedAt: true,
-        awardFinalizedByUserId: true,
-        student: {
-          select: {
-            id: true,
-            admissionNo: true,
-            firstName: true,
-            lastName: true,
-            hierarchyNodeId: true,
-            hierarchyNode: {
-              select: {
-                id: true,
-                name: true,
-                code: true
-              }
-            }
-          }
-        }
+  if (competition.resultStatus === "PUBLISHED") {
+    const frozenEnrollments = await findCompetitionEnrollmentsWithAwardFallback({
+      competitionId,
+      tenantId,
+      requireFrozenOnly: true
+    });
+
+    if (frozenEnrollments.length) {
+      const rows = frozenEnrollments
+        .map((enrollment) => ({
+          studentId: enrollment.studentId,
+          levelId: enrollment.levelId,
+          studentName: `${enrollment.student?.firstName || ""} ${enrollment.student?.lastName || ""}`.trim() || enrollment.studentId,
+          admissionNo: enrollment.student?.admissionNo || null,
+          centerId: enrollment.student?.hierarchyNodeId || null,
+          centerName: enrollment.student?.hierarchyNode?.name || null,
+          centerCode: enrollment.student?.hierarchyNode?.code || null,
+          level: enrollment.level,
+          earnedMarks: enrollment.totalScore ? Number(enrollment.totalScore) : 0,
+          totalMarks: null,
+          percentage: null,
+          correctCount: null,
+          wrongCount: null,
+          unansweredCount: null,
+          durationSeconds: null,
+          submittedAt: null,
+          worksheetCount: 0,
+          rank: enrollment.rank ?? null,
+          awardType: enrollment.awardType || null,
+          awardFinalizedAt: enrollment.awardFinalizedAt || null,
+          awardFinalizedByUserId: enrollment.awardFinalizedByUserId || null
+        }))
+        .filter((row) => row.rank !== null || row.earnedMarks !== 0);
+
+      const visibleRows = rows.slice(0, safeLimit);
+
+      const overallRows = visibleRows.map((row) => ({
+        ...row,
+        score: row.earnedMarks,
+        completionTime: row.durationSeconds,
+        previewAwardType: getAwardTypeForRank(row.rank),
+        awardIsFinalized: Boolean(row.awardFinalizedAt)
+      }));
+
+      const levelGroups = new Map();
+      for (const row of rows) {
+        const levelKey = row.levelId;
+        const bucket = levelGroups.get(levelKey) || [];
+        bucket.push(row);
+        levelGroups.set(levelKey, bucket);
       }
-    }),
-    prisma.competitionWorksheetAssignment.findMany({
+
+      const levelLeaderboards = [...levelGroups.entries()].map(([levelId, levelRows]) => {
+        const levelMeta = levelRows[0]?.level || null;
+        const ranked = levelRows.slice().sort(compareFrozenRows).map((row) => ({
+          ...row,
+          score: row.earnedMarks,
+          completionTime: row.durationSeconds,
+          previewAwardType: getAwardTypeForRank(row.rank),
+          awardIsFinalized: Boolean(row.awardFinalizedAt)
+        }));
+
+        return {
+          levelId,
+          levelName: levelMeta?.name || levelId,
+          levelRank: levelMeta?.rank ?? null,
+          totalParticipants: ranked.length,
+          leaderboard: ranked.slice(0, safeLimit)
+        };
+      }).sort((left, right) => {
+        const leftRank = toComparableNumber(left.levelRank, Infinity);
+        const rightRank = toComparableNumber(right.levelRank, Infinity);
+        if (leftRank !== rightRank) {
+          return leftRank - rightRank;
+        }
+        return String(left.levelName || "").localeCompare(String(right.levelName || ""));
+      });
+
+      return {
+        competitionId,
+        totalParticipants: rows.length,
+        leaderboard: overallRows.sort(compareFrozenRows),
+        levelLeaderboards
+      };
+    }
+  }
+
+  const enrollments = await findCompetitionEnrollmentsWithAwardFallback({
+    competitionId,
+    tenantId,
+    requireFrozenOnly: false
+  });
+
+  let assignments = [];
+  try {
+    assignments = await prisma.competitionWorksheetAssignment.findMany({
       where: {
         competitionId,
         tenantId,
@@ -172,8 +352,12 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
           }
         }
       }
-    })
-  ]);
+    });
+  } catch (error) {
+    if (!isOptionalCompetitionSchemaDriftError(error)) {
+      throw error;
+    }
+  }
 
   const enrollmentByStudentId = new Map(
     enrollments.map((row) => [row.studentId, row])
@@ -182,8 +366,10 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
   const worksheetIds = [...new Set(publishedAssignments.map((row) => row.worksheetId).filter(Boolean))];
   const studentIds = [...new Set(publishedAssignments.map((row) => row.studentId).filter(Boolean))];
 
-  const submissions = worksheetIds.length && studentIds.length
-    ? await prisma.worksheetSubmission.findMany({
+  let submissions = [];
+  if (worksheetIds.length && studentIds.length) {
+    try {
+      submissions = await prisma.worksheetSubmission.findMany({
         where: {
           tenantId,
           worksheetId: { in: worksheetIds },
@@ -196,7 +382,6 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
           worksheetId: true,
           studentId: true,
           score: true,
-          totalMarks: true,
           earnedMarks: true,
           percentage: true,
           correctCount: true,
@@ -208,8 +393,13 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
           publishedAt: true,
           completionTimeSeconds: true
         }
-      })
-    : [];
+      });
+    } catch (error) {
+      if (!isOptionalCompetitionSchemaDriftError(error)) {
+        throw error;
+      }
+    }
+  }
 
   const submissionByKey = new Map(
     submissions.map((submission) => [`${submission.worksheetId}:${submission.studentId}`, submission])
@@ -240,8 +430,9 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
       centerCode: enrollment.student?.hierarchyNode?.code || null,
       level: enrollment.level || (assignment.worksheet?.levelId ? { id: assignment.worksheet.levelId, name: assignment.worksheet.levelId, rank: null } : null),
       earnedMarks: 0,
-      totalMarks: 0,
       percentage: 0,
+      percentageTotal: 0,
+      percentageCount: 0,
       correctCount: 0,
       wrongCount: 0,
       unansweredCount: 0,
@@ -254,7 +445,7 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
     };
 
     const earnedMarks = toComparableNumber(submission.earnedMarks, 0) ?? 0;
-    const totalMarks = toComparableNumber(submission.totalMarks, 0) ?? 0;
+    const submissionPercentage = toComparableNumber(submission.percentage, null);
     const correctCount = toComparableNumber(submission.correctCount, 0) ?? 0;
     const wrongCount = toComparableNumber(submission.wrongCount, 0) ?? 0;
     const unansweredCount = toComparableNumber(submission.unansweredCount, 0) ?? 0;
@@ -265,7 +456,6 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
       : toComparableNumber(submission.completionTimeSeconds, null);
 
     current.earnedMarks += earnedMarks;
-    current.totalMarks += totalMarks;
     current.correctCount += correctCount;
     current.wrongCount += wrongCount;
     current.unansweredCount += unansweredCount;
@@ -274,7 +464,11 @@ async function getCompetitionLeaderboard({ competitionId, tenantId, limit, skipA
     current.submittedAt = current.submittedAt
       ? (submittedAt && new Date(submittedAt) < new Date(current.submittedAt) ? submittedAt : current.submittedAt)
       : submittedAt;
-    current.percentage = current.totalMarks > 0 ? Number(((current.earnedMarks / current.totalMarks) * 100).toFixed(2)) : 0;
+    if (submissionPercentage !== null) {
+      current.percentageTotal += submissionPercentage;
+      current.percentageCount += 1;
+      current.percentage = Number((current.percentageTotal / current.percentageCount).toFixed(2));
+    }
 
     aggregatedByStudentLevel.set(key, current);
   }

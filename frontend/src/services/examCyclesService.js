@@ -158,8 +158,10 @@ async function approveEnrollmentListAsSuperadmin(examCycleId, listId, payload = 
   return response.data;
 }
 
-async function getExamResults(examCycleId) {
-  const response = await apiClient.get(`/exam-cycles/${examCycleId}/results`);
+async function getExamResults(examCycleId, params = {}) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/results`, {
+    params
+  });
   return response.data;
 }
 
@@ -203,8 +205,9 @@ async function exportEnrollmentListCsv(examCycleId, listId) {
   return response;
 }
 
-async function exportExamResultsCsv(examCycleId) {
+async function exportExamResultsCsv(examCycleId, params = {}) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/results/export.csv`, {
+    params,
     responseType: "blob",
     _skipGlobalLoading: true
   });

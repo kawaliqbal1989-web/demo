@@ -1,0 +1,733 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=9374973f"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=9374973f"; const useContext = __vite__cjsImport3_react["useContext"]; const useEffect = __vite__cjsImport3_react["useEffect"]; const useMemo = __vite__cjsImport3_react["useMemo"]; const useState = __vite__cjsImport3_react["useState"];
+import { useNavigate } from "/node_modules/.vite/deps/react-router-dom.js?v=9374973f";
+import {
+  createStudentAbacusPracticeWorksheet,
+  getStudentPracticeFeatureStatus,
+  getStudentAbacusPracticeWorksheetOptions
+} from "/src/services/studentPortalService.js";
+import { AuthContext } from "/src/auth/AuthContext.jsx";
+import { getFriendlyErrorMessage } from "/src/utils/apiErrors.js";
+function opLabel(op) {
+  const normalized = String(op || "").trim().toUpperCase();
+  if (normalized === "ADD") return "Add (+)";
+  if (normalized === "SUB") return "Less (-)";
+  if (normalized === "MUL") return "Multiply (×)";
+  if (normalized === "DIV") return "Divide (÷)";
+  return normalized;
+}
+function StudentAbacusPracticeWorksheetPage() {
+  _s();
+  const navigate = useNavigate();
+  const auth = useContext(AuthContext);
+  const logout = auth?.logout;
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState(null);
+  const [hasAbacusPracticeAccess, setHasAbacusPracticeAccess] = useState(true);
+  const [level, setLevel] = useState(null);
+  const [availableOps, setAvailableOps] = useState([]);
+  const [availableDigitsModes, setAvailableDigitsModes] = useState(
+    [
+      "DIGIT_1",
+      "DIGIT_2",
+      "DIGIT_3",
+      "SMALL_FRIENDS",
+      "LOWER_DECK_1_4",
+      "LOWER_DECK_TENS_10_40",
+      "UPPER_DECK_1_9",
+      "UPPER_DECK_TENS_50_90"
+    ]
+  );
+  const [maxTotalQuestions, setMaxTotalQuestions] = useState(500);
+  const [totalQuestions, setTotalQuestions] = useState(200);
+  const [minutes, setMinutes] = useState(10);
+  const [termCount, setTermCount] = useState(3);
+  const [digitsMode, setDigitsMode] = useState("DIGIT_3");
+  const [selectedOps, setSelectedOps] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        const statusResp = await getStudentPracticeFeatureStatus();
+        const statusPayload = statusResp?.data?.data;
+        const abacusEnabled = Boolean(statusPayload?.ABACUS_PRACTICE);
+        if (cancelled) return;
+        setHasAbacusPracticeAccess(abacusEnabled);
+        if (!abacusEnabled) {
+          setError("This feature is not enabled for your student account. Ask your center to assign it first.");
+          return;
+        }
+        const resp = await getStudentAbacusPracticeWorksheetOptions();
+        const payload = resp?.data?.data;
+        if (cancelled) return;
+        setLevel(payload?.level || null);
+        const ops = Array.isArray(payload?.operations) ? payload.operations : [];
+        setAvailableOps(ops);
+        setSelectedOps([...ops]);
+        const dm = Array.isArray(payload?.digitsModes) ? payload.digitsModes : null;
+        if (dm?.length) {
+          setAvailableDigitsModes(dm);
+          if (dm.includes("DIGIT_3")) setDigitsMode("DIGIT_3");
+          else
+            setDigitsMode(String(dm[0]));
+        }
+        const maxQ = Number(payload?.maxTotalQuestions);
+        setMaxTotalQuestions(Number.isFinite(maxQ) && maxQ > 0 ? maxQ : 500);
+        const defQ = Number(payload?.defaultTotalQuestions);
+        setTotalQuestions(Number.isFinite(defQ) && defQ > 0 ? defQ : 200);
+        const safeTermCounts = Array.isArray(payload?.termCounts) ? payload.termCounts : null;
+        if (safeTermCounts?.includes(3)) setTermCount(3);
+      } catch (e) {
+        if (cancelled) return;
+        setError(getFriendlyErrorMessage(e) || "Failed to load abacus practice options");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const safeSelectedOps = useMemo(() => {
+    const allowed = new Set(availableOps.map((x) => String(x).trim().toUpperCase()));
+    return selectedOps.map((x) => String(x).trim().toUpperCase()).filter((x) => allowed.has(x));
+  }, [availableOps, selectedOps]);
+  const isLowerDeckMode = useMemo(() => {
+    return String(digitsMode || "").trim().toUpperCase() === "LOWER_DECK_1_4";
+  }, [digitsMode]);
+  const isSmallFriendsMode = useMemo(() => {
+    return String(digitsMode || "").trim().toUpperCase() === "SMALL_FRIENDS";
+  }, [digitsMode]);
+  const isTensLowerDeckMode = useMemo(() => {
+    return String(digitsMode || "").trim().toUpperCase() === "LOWER_DECK_TENS_10_40";
+  }, [digitsMode]);
+  const isUpperDeckMode = useMemo(() => {
+    return String(digitsMode || "").trim().toUpperCase() === "UPPER_DECK_1_9";
+  }, [digitsMode]);
+  const isTensUpperDeckMode = useMemo(() => {
+    return String(digitsMode || "").trim().toUpperCase() === "UPPER_DECK_TENS_50_90";
+  }, [digitsMode]);
+  useEffect(() => {
+    if (!isSmallFriendsMode && !isLowerDeckMode && !isTensLowerDeckMode && !isUpperDeckMode && !isTensUpperDeckMode) return;
+    setSelectedOps((prev) => prev.filter((op) => {
+      const n = String(op || "").trim().toUpperCase();
+      return n === "ADD" || n === "SUB";
+    }));
+  }, [isSmallFriendsMode, isLowerDeckMode, isTensLowerDeckMode, isUpperDeckMode, isTensUpperDeckMode]);
+  const onToggleOp = (op) => {
+    const normalized = String(op || "").trim().toUpperCase();
+    if ((isSmallFriendsMode || isLowerDeckMode || isTensLowerDeckMode || isUpperDeckMode || isTensUpperDeckMode) && (normalized === "MUL" || normalized === "DIV")) {
+      return;
+    }
+    setSelectedOps((prev) => {
+      const exists = prev.map((x) => String(x).trim().toUpperCase()).includes(normalized);
+      if (exists) return prev.filter((x) => String(x).trim().toUpperCase() !== normalized);
+      return [...prev, normalized];
+    });
+  };
+  const selectAllOps = () => {
+    setSelectedOps([...availableOps]);
+  };
+  const clearAllOps = () => {
+    setSelectedOps([]);
+  };
+  const onStart = async (e) => {
+    e.preventDefault();
+    if (isSubmitting) return;
+    if (!hasAbacusPracticeAccess) {
+      setError("This feature is not enabled for your student account. Ask your center to assign it first.");
+      return;
+    }
+    setError(null);
+    const mins = Number(minutes);
+    if (!Number.isFinite(mins) || mins <= 0 || !Number.isInteger(mins)) {
+      setError("Time must be a positive integer (minutes)");
+      return;
+    }
+    const qCount = Number(totalQuestions);
+    if (!Number.isFinite(qCount) || qCount <= 0 || !Number.isInteger(qCount)) {
+      setError("Number of questions must be a positive integer");
+      return;
+    }
+    if (Number.isFinite(maxTotalQuestions) && qCount > maxTotalQuestions) {
+      setError(`Number of questions must be ${maxTotalQuestions} or less`);
+      return;
+    }
+    const tCount = Number(termCount);
+    if (!Number.isFinite(tCount) || !Number.isInteger(tCount) || tCount < 1 || tCount > 12) {
+      setError("Terms per question must be an integer between 1 and 12");
+      return;
+    }
+    const dm = String(digitsMode || "").trim().toUpperCase();
+    if (!dm) {
+      setError("Select a digit mode");
+      return;
+    }
+    if (tCount > 1 && !safeSelectedOps.length) {
+      setError("Select at least one operation");
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      const resp = await createStudentAbacusPracticeWorksheet({
+        timeLimitSeconds: mins * 60,
+        termCount: tCount,
+        digitsMode: dm,
+        operations: tCount > 1 ? safeSelectedOps : [],
+        totalQuestions: qCount
+      });
+      const worksheetId = resp?.data?.data?.worksheetId;
+      if (!worksheetId) {
+        throw new Error("Practice worksheet created but worksheetId missing");
+      }
+      navigate(`/student/worksheets/${worksheetId}`);
+    } catch (e2) {
+      const status = e2?.response?.status;
+      const code = e2?.response?.data?.error_code;
+      if (status === 401 || code === "INVALID_ACCESS_TOKEN" || code === "AUTH_REQUIRED") {
+        try {
+          localStorage.removeItem("abacus_access_token");
+          localStorage.removeItem("abacus_refresh_token");
+        } catch {
+        }
+        if (typeof logout === "function") {
+          try {
+            await logout();
+          } catch {
+          }
+        }
+        setError("Session expired. Please log in again.");
+        navigate("/login", { replace: true, state: { from: "/student/abacus-practice" } });
+        return;
+      }
+      setError(e2?.response?.data?.message || e2?.message || "Failed to start abacus practice");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+  return /* @__PURE__ */ jsxDEV("div", { className: "container", children: [
+    /* @__PURE__ */ jsxDEV("div", { className: "page-head", children: /* @__PURE__ */ jsxDEV("div", { children: [
+      /* @__PURE__ */ jsxDEV("h1", { children: "Abacus Practice (Auto)" }, void 0, false, {
+        fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+        lineNumber: 273,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { className: "muted", children: level ? `Level ${level.rank}: ${level.name}` : "" }, void 0, false, {
+        fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+        lineNumber: 274,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+      lineNumber: 272,
+      columnNumber: 9
+    }, this) }, void 0, false, {
+      fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+      lineNumber: 271,
+      columnNumber: 7
+    }, this),
+    isLoading ? /* @__PURE__ */ jsxDEV("div", { className: "card", children: "Loading…" }, void 0, false, {
+      fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+      lineNumber: 279,
+      columnNumber: 7
+    }, this) : !hasAbacusPracticeAccess ? /* @__PURE__ */ jsxDEV("div", { className: "card", children: /* @__PURE__ */ jsxDEV("div", { className: "banner banner--error", children: error || "This feature is not enabled for your student account. Ask your center to assign it first." }, void 0, false, {
+      fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+      lineNumber: 282,
+      columnNumber: 11
+    }, this) }, void 0, false, {
+      fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+      lineNumber: 281,
+      columnNumber: 7
+    }, this) : /* @__PURE__ */ jsxDEV("form", { className: "card", onSubmit: onStart, children: [
+      error ? /* @__PURE__ */ jsxDEV("div", { className: "banner banner--error", style: { marginBottom: 12 }, children: error }, void 0, false, {
+        fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+        lineNumber: 289,
+        columnNumber: 9
+      }, this) : null,
+      /* @__PURE__ */ jsxDEV("div", { className: "form-grid", children: [
+        /* @__PURE__ */ jsxDEV("label", { className: "form-field", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "form-label", children: "Number of questions" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 296,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "input",
+            {
+              className: "input",
+              type: "number",
+              min: 1,
+              step: 1,
+              value: totalQuestions,
+              onChange: (e2) => setTotalQuestions(e2.target.value)
+            },
+            void 0,
+            false,
+            {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 297,
+              columnNumber: 15
+            },
+            this
+          ),
+          /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 6 }, children: [
+            "Max: ",
+            /* @__PURE__ */ jsxDEV("strong", { children: maxTotalQuestions }, void 0, false, {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 306,
+              columnNumber: 22
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 305,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 295,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("label", { className: "form-field", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "form-label", children: "Time (minutes)" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 311,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "input",
+            {
+              className: "input",
+              type: "number",
+              min: 1,
+              step: 1,
+              value: minutes,
+              onChange: (e3) => setMinutes(e3.target.value)
+            },
+            void 0,
+            false,
+            {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 312,
+              columnNumber: 15
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 310,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("label", { className: "form-field", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "form-label", children: "Terms per question" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 323,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "input",
+            {
+              className: "input",
+              type: "number",
+              min: 1,
+              max: 12,
+              step: 1,
+              value: termCount,
+              onChange: (e4) => setTermCount(e4.target.value)
+            },
+            void 0,
+            false,
+            {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 324,
+              columnNumber: 15
+            },
+            this
+          ),
+          /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 6 }, children: [
+            "Examples: 3 → ",
+            /* @__PURE__ */ jsxDEV("strong", { children: "22 + 23 + 24" }, void 0, false, {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 334,
+              columnNumber: 31
+            }, this),
+            ", 5 → ",
+            /* @__PURE__ */ jsxDEV("strong", { children: "56 + 1 + 15 + 45 + 85" }, void 0, false, {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 334,
+              columnNumber: 66
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 333,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 322,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("label", { className: "form-field", children: [
+          /* @__PURE__ */ jsxDEV("span", { className: "form-label", children: "Digits" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 339,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV(
+            "select",
+            {
+              className: "input",
+              value: digitsMode,
+              onChange: (e5) => setDigitsMode(e5.target.value),
+              children: [
+                availableDigitsModes.includes("DIGIT_1") ? /* @__PURE__ */ jsxDEV("option", { value: "DIGIT_1", children: "1 digit (0–9)" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 346,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("DIGIT_2") ? /* @__PURE__ */ jsxDEV("option", { value: "DIGIT_2", children: "2 digits (10-99)/Duplex Numbers" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 349,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("DIGIT_3") ? /* @__PURE__ */ jsxDEV("option", { value: "DIGIT_3", children: "Max 3 digits (0–999)" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 352,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("SMALL_FRIENDS") ? /* @__PURE__ */ jsxDEV("option", { value: "SMALL_FRIENDS", children: "Small Friends" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 355,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("LOWER_DECK_1_4") ? /* @__PURE__ */ jsxDEV("option", { value: "LOWER_DECK_1_4", children: "Digit (1–4) Lower Deck" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 358,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("LOWER_DECK_TENS_10_40") ? /* @__PURE__ */ jsxDEV("option", { value: "LOWER_DECK_TENS_10_40", children: "Tens Numbers Lower Deck" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 361,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("UPPER_DECK_1_9") ? /* @__PURE__ */ jsxDEV("option", { value: "UPPER_DECK_1_9", children: "Digit (1–9) Upper Deck" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 364,
+                  columnNumber: 15
+                }, this) : null,
+                availableDigitsModes.includes("UPPER_DECK_TENS_50_90") ? /* @__PURE__ */ jsxDEV("option", { value: "UPPER_DECK_TENS_50_90", children: "Tens Numbers Upper Deck" }, void 0, false, {
+                  fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                  lineNumber: 367,
+                  columnNumber: 15
+                }, this) : null
+              ]
+            },
+            void 0,
+            true,
+            {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 340,
+              columnNumber: 15
+            },
+            this
+          )
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 338,
+          columnNumber: 13
+        }, this)
+      ] }, void 0, true, {
+        fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+        lineNumber: 294,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { style: { marginTop: 14 }, children: [
+        /* @__PURE__ */ jsxDEV("div", { style: { display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "baseline" }, children: [
+          /* @__PURE__ */ jsxDEV("div", { className: "form-label", children: "Operations" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 375,
+            columnNumber: 15
+          }, this),
+          /* @__PURE__ */ jsxDEV("div", { style: { display: "flex", gap: 8, flexWrap: "wrap" }, children: [
+            /* @__PURE__ */ jsxDEV("button", { className: "button secondary", type: "button", style: { width: "auto", padding: "6px 10px" }, onClick: selectAllOps, children: "Select all" }, void 0, false, {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 377,
+              columnNumber: 17
+            }, this),
+            /* @__PURE__ */ jsxDEV("button", { className: "button secondary", type: "button", style: { width: "auto", padding: "6px 10px" }, onClick: clearAllOps, children: "Clear" }, void 0, false, {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 380,
+              columnNumber: 17
+            }, this)
+          ] }, void 0, true, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 376,
+            columnNumber: 15
+          }, this)
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 374,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV("div", { className: "chip-row", children: availableOps.map(
+          (op) => /* @__PURE__ */ jsxDEV("label", { className: "chip", children: [
+            /* @__PURE__ */ jsxDEV(
+              "input",
+              {
+                type: "checkbox",
+                disabled: Number(termCount) <= 1,
+                checked: safeSelectedOps.includes(String(op).trim().toUpperCase()),
+                onChange: () => onToggleOp(op)
+              },
+              void 0,
+              false,
+              {
+                fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+                lineNumber: 389,
+                columnNumber: 19
+              },
+              this
+            ),
+            /* @__PURE__ */ jsxDEV("span", { children: opLabel(op) }, void 0, false, {
+              fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+              lineNumber: 395,
+              columnNumber: 19
+            }, this)
+          ] }, op, true, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 388,
+            columnNumber: 13
+          }, this)
+        ) }, void 0, false, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 386,
+          columnNumber: 13
+        }, this),
+        isLowerDeckMode ? /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 8 }, children: [
+          "Lower Deck (1–4) uses only ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Add" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 402,
+            columnNumber: 44
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Less" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 402,
+            columnNumber: 69
+          }, this),
+          ", with answers always > 0."
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 401,
+          columnNumber: 11
+        }, this) : null,
+        isTensLowerDeckMode ? /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 8 }, children: [
+          "Tens Numbers Lower Deck uses only ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Add" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 408,
+            columnNumber: 51
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Less" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 408,
+            columnNumber: 76
+          }, this),
+          ", with answers always between ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "10" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 408,
+            columnNumber: 127
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "40" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 408,
+            columnNumber: 151
+          }, this),
+          "."
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 407,
+          columnNumber: 11
+        }, this) : null,
+        isUpperDeckMode ? /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 8 }, children: [
+          "Upper Deck (1–9) uses only ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Add" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 414,
+            columnNumber: 44
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Less" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 414,
+            columnNumber: 69
+          }, this),
+          ", with answers always between ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "1" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 414,
+            columnNumber: 120
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "9" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 414,
+            columnNumber: 143
+          }, this),
+          "."
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 413,
+          columnNumber: 11
+        }, this) : null,
+        isTensUpperDeckMode ? /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 8 }, children: [
+          "Tens Numbers Upper Deck uses only ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Add" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 420,
+            columnNumber: 51
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Less" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 420,
+            columnNumber: 76
+          }, this),
+          ", with answers always between ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "50" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 420,
+            columnNumber: 127
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "90" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 420,
+            columnNumber: 151
+          }, this),
+          "."
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 419,
+          columnNumber: 11
+        }, this) : null,
+        isSmallFriendsMode ? /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 8 }, children: [
+          "Small Friends uses only ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Add" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 426,
+            columnNumber: 41
+          }, this),
+          " and ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "Less" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 426,
+            columnNumber: 66
+          }, this),
+          " and generates patterns that use friends of ",
+          /* @__PURE__ */ jsxDEV("strong", { children: "5" }, void 0, false, {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 426,
+            columnNumber: 131
+          }, this),
+          " (1↔4, 2↔3)."
+        ] }, void 0, true, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 425,
+          columnNumber: 11
+        }, this) : null,
+        Number(termCount) <= 1 ? /* @__PURE__ */ jsxDEV("div", { className: "muted", style: { fontSize: 12, marginTop: 8 }, children: "Operations are used only when Terms per question is 2 or more." }, void 0, false, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 431,
+          columnNumber: 11
+        }, this) : null
+      ] }, void 0, true, {
+        fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+        lineNumber: 373,
+        columnNumber: 11
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { style: { marginTop: 16, display: "flex", gap: 10 }, children: [
+        /* @__PURE__ */ jsxDEV("button", { className: "btn", type: "submit", disabled: isSubmitting, children: isSubmitting ? "Starting…" : "Start Practice" }, void 0, false, {
+          fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+          lineNumber: 438,
+          columnNumber: 13
+        }, this),
+        /* @__PURE__ */ jsxDEV(
+          "button",
+          {
+            className: "btn btn--secondary",
+            type: "button",
+            onClick: () => navigate("/student/dashboard"),
+            disabled: isSubmitting,
+            children: "Cancel"
+          },
+          void 0,
+          false,
+          {
+            fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+            lineNumber: 441,
+            columnNumber: 13
+          },
+          this
+        )
+      ] }, void 0, true, {
+        fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+        lineNumber: 437,
+        columnNumber: 11
+      }, this)
+    ] }, void 0, true, {
+      fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+      lineNumber: 287,
+      columnNumber: 7
+    }, this)
+  ] }, void 0, true, {
+    fileName: "D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx",
+    lineNumber: 270,
+    columnNumber: 5
+  }, this);
+}
+_s(StudentAbacusPracticeWorksheetPage, "v9bof1NPdv+BTexty8PL96ahXNI=", false, function() {
+  return [useNavigate];
+});
+_c = StudentAbacusPracticeWorksheetPage;
+export { StudentAbacusPracticeWorksheetPage };
+var _c;
+$RefreshReg$(_c, "StudentAbacusPracticeWorksheetPage");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("D:/demo-main/demo-main-push/frontend/src/modules/student/StudentAbacusPracticeWorksheetPage.jsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QWxLRjtBQUFBO0FBQUE7QUFBQTtBQUFBLFdBbUtBO0FBQUEsT0FwTEo7QUFBQTtBQUFBO0FBQUE7QUFBQSxTQXNMQTtBQUVKO0FBQUNOLEdBL1pRRCxvQ0FBa0M7QUFBQSxVQUN4QlosV0FBVztBQUFBO0FBQUEsS0FEckJZO0FBaWFULFNBQVNBO0FBQXFDLElBQUErRztBQUFBLGFBQUFBLElBQUEiLCJuYW1lcyI6WyJ1c2VDb250ZXh0IiwidXNlRWZmZWN0IiwidXNlTWVtbyIsInVzZVN0YXRlIiwidXNlTmF2aWdhdGUiLCJjcmVhdGVTdHVkZW50QWJhY3VzUHJhY3RpY2VXb3Jrc2hlZXQiLCJnZXRTdHVkZW50UHJhY3RpY2VGZWF0dXJlU3RhdHVzIiwiZ2V0U3R1ZGVudEFiYWN1c1ByYWN0aWNlV29ya3NoZWV0T3B0aW9ucyIsIkF1dGhDb250ZXh0IiwiZ2V0RnJpZW5kbHlFcnJvck1lc3NhZ2UiLCJvcExhYmVsIiwib3AiLCJub3JtYWxpemVkIiwiU3RyaW5nIiwidHJpbSIsInRvVXBwZXJDYXNlIiwiU3R1ZGVudEFiYWN1c1ByYWN0aWNlV29ya3NoZWV0UGFnZSIsIl9zIiwibmF2aWdhdGUiLCJhdXRoIiwibG9nb3V0IiwiaXNMb2FkaW5nIiwic2V0SXNMb2FkaW5nIiwiaXNTdWJtaXR0aW5nIiwic2V0SXNTdWJtaXR0aW5nIiwiZXJyb3IiLCJzZXRFcnJvciIsImhhc0FiYWN1c1ByYWN0aWNlQWNjZXNzIiwic2V0SGFzQWJhY3VzUHJhY3RpY2VBY2Nlc3MiLCJsZXZlbCIsInNldExldmVsIiwiYXZhaWxhYmxlT3BzIiwic2V0QXZhaWxhYmxlT3BzIiwiYXZhaWxhYmxlRGlnaXRzTW9kZXMiLCJzZXRBdmFpbGFibGVEaWdpdHNNb2RlcyIsIm1heFRvdGFsUXVlc3Rpb25zIiwic2V0TWF4VG90YWxRdWVzdGlvbnMiLCJ0b3RhbFF1ZXN0aW9ucyIsInNldFRvdGFsUXVlc3Rpb25zIiwibWludXRlcyIsInNldE1pbnV0ZXMiLCJ0ZXJtQ291bnQiLCJzZXRUZXJtQ291bnQiLCJkaWdpdHNNb2RlIiwic2V0RGlnaXRzTW9kZSIsInNlbGVjdGVkT3BzIiwic2V0U2VsZWN0ZWRPcHMiLCJjYW5jZWxsZWQiLCJzdGF0dXNSZXNwIiwic3RhdHVzUGF5bG9hZCIsImRhdGEiLCJhYmFjdXNFbmFibGVkIiwiQm9vbGVhbiIsIkFCQUNVU19QUkFDVElDRSIsInJlc3AiLCJwYXlsb2FkIiwib3BzIiwiQXJyYXkiLCJpc0FycmF5Iiwib3BlcmF0aW9ucyIsImRtIiwiZGlnaXRzTW9kZXMiLCJsZW5ndGgiLCJpbmNsdWRlcyIsIm1heFEiLCJOdW1iZXIiLCJpc0Zpbml0ZSIsImRlZlEiLCJkZWZhdWx0VG90YWxRdWVzdGlvbnMiLCJzYWZlVGVybUNvdW50cyIsInRlcm1Db3VudHMiLCJlIiwic2FmZVNlbGVjdGVkT3BzIiwiYWxsb3dlZCIsIlNldCIsIm1hcCIsIngiLCJmaWx0ZXIiLCJoYXMiLCJpc0xvd2VyRGVja01vZGUiLCJpc1NtYWxsRnJpZW5kc01vZGUiLCJpc1RlbnNMb3dlckRlY2tNb2RlIiwiaXNVcHBlckRlY2tNb2RlIiwiaXNUZW5zVXBwZXJEZWNrTW9kZSIsInByZXYiLCJuIiwib25Ub2dnbGVPcCIsImV4aXN0cyIsInNlbGVjdEFsbE9wcyIsImNsZWFyQWxsT3BzIiwib25TdGFydCIsInByZXZlbnREZWZhdWx0IiwibWlucyIsImlzSW50ZWdlciIsInFDb3VudCIsInRDb3VudCIsInRpbWVMaW1pdFNlY29uZHMiLCJ3b3Jrc2hlZXRJZCIsIkVycm9yIiwiZTIiLCJzdGF0dXMiLCJyZXNwb25zZSIsImNvZGUiLCJlcnJvcl9jb2RlIiwibG9jYWxTdG9yYWdlIiwicmVtb3ZlSXRlbSIsInJlcGxhY2UiLCJzdGF0ZSIsImZyb20iLCJtZXNzYWdlIiwicmFuayIsIm5hbWUiLCJtYXJnaW5Cb3R0b20iLCJ0YXJnZXQiLCJ2YWx1ZSIsImZvbnRTaXplIiwibWFyZ2luVG9wIiwiZTMiLCJlNCIsImU1IiwiZGlzcGxheSIsImp1c3RpZnlDb250ZW50IiwiZ2FwIiwiZmxleFdyYXAiLCJhbGlnbkl0ZW1zIiwid2lkdGgiLCJwYWRkaW5nIiwiX2MiXSwiaWdub3JlTGlzdCI6W10sInNvdXJjZXMiOlsiU3R1ZGVudEFiYWN1c1ByYWN0aWNlV29ya3NoZWV0UGFnZS5qc3giXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IHsgdXNlQ29udGV4dCwgdXNlRWZmZWN0LCB1c2VNZW1vLCB1c2VTdGF0ZSB9IGZyb20gXCJyZWFjdFwiO1xuaW1wb3J0IHsgdXNlTmF2aWdhdGUgfSBmcm9tIFwicmVhY3Qtcm91dGVyLWRvbVwiO1xuaW1wb3J0IHtcbiAgY3JlYXRlU3R1ZGVudEFiYWN1c1ByYWN0aWNlV29ya3NoZWV0LFxuICBnZXRTdHVkZW50UHJhY3RpY2VGZWF0dXJlU3RhdHVzLFxuICBnZXRTdHVkZW50QWJhY3VzUHJhY3RpY2VXb3Jrc2hlZXRPcHRpb25zXG59IGZyb20gXCIuLi8uLi9zZXJ2aWNlcy9zdHVkZW50UG9ydGFsU2VydmljZVwiO1xuaW1wb3J0IHsgQXV0aENvbnRleHQgfSBmcm9tIFwiLi4vLi4vYXV0aC9BdXRoQ29udGV4dFwiO1xuaW1wb3J0IHsgZ2V0RnJpZW5kbHlFcnJvck1lc3NhZ2UgfSBmcm9tIFwiLi4vLi4vdXRpbHMvYXBpRXJyb3JzXCI7XG5cbmZ1bmN0aW9uIG9wTGFiZWwob3ApIHtcbiAgY29uc3Qgbm9ybWFsaXplZCA9IFN0cmluZyhvcCB8fCBcIlwiKS50cmltKCkudG9VcHBlckNhc2UoKTtcbiAgaWYgKG5vcm1hbGl6ZWQgPT09IFwiQUREXCIpIHJldHVybiBcIkFkZCAoKylcIjtcbiAgaWYgKG5vcm1hbGl6ZWQgPT09IFwiU1VCXCIpIHJldHVybiBcIkxlc3MgKC0pXCI7XG4gIGlmIChub3JtYWxpemVkID09PSBcIk1VTFwiKSByZXR1cm4gXCJNdWx0aXBseSAow5cpXCI7XG4gIGlmIChub3JtYWxpemVkID09PSBcIkRJVlwiKSByZXR1cm4gXCJEaXZpZGUgKMO3KVwiO1xuICByZXR1cm4gbm9ybWFsaXplZDtcbn1cblxuZnVuY3Rpb24gU3R1ZGVudEFiYWN1c1ByYWN0aWNlV29ya3NoZWV0UGFnZSgpIHtcbiAgY29uc3QgbmF2aWdhdGUgPSB1c2VOYXZpZ2F0ZSgpO1xuICBjb25zdCBhdXRoID0gdXNlQ29udGV4dChBdXRoQ29udGV4dCk7XG4gIGNvbnN0IGxvZ291dCA9IGF1dGg/LmxvZ291dDtcblxuICBjb25zdCBbaXNMb2FkaW5nLCBzZXRJc0xvYWRpbmddID0gdXNlU3RhdGUodHJ1ZSk7XG4gIGNvbnN0IFtpc1N1Ym1pdHRpbmcsIHNldElzU3VibWl0dGluZ10gPSB1c2VTdGF0ZShmYWxzZSk7XG4gIGNvbnN0IFtlcnJvciwgc2V0RXJyb3JdID0gdXNlU3RhdGUobnVsbCk7XG4gIGNvbnN0IFtoYXNBYmFjdXNQcmFjdGljZUFjY2Vzcywgc2V0SGFzQWJhY3VzUHJhY3RpY2VBY2Nlc3NdID0gdXNlU3RhdGUodHJ1ZSk7XG5cbiAgY29uc3QgW2xldmVsLCBzZXRMZXZlbF0gPSB1c2VTdGF0ZShudWxsKTtcbiAgY29uc3QgW2F2YWlsYWJsZU9wcywgc2V0QXZhaWxhYmxlT3BzXSA9IHVzZVN0YXRlKFtdKTtcbiAgY29uc3QgW2F2YWlsYWJsZURpZ2l0c01vZGVzLCBzZXRBdmFpbGFibGVEaWdpdHNNb2Rlc10gPSB1c2VTdGF0ZShbXG4gICAgXCJESUdJVF8xXCIsXG4gICAgXCJESUdJVF8yXCIsXG4gICAgXCJESUdJVF8zXCIsXG4gICAgXCJTTUFMTF9GUklFTkRTXCIsXG4gICAgXCJMT1dFUl9ERUNLXzFfNFwiLFxuICAgIFwiTE9XRVJfREVDS19URU5TXzEwXzQwXCIsXG4gICAgXCJVUFBFUl9ERUNLXzFfOVwiLFxuICAgIFwiVVBQRVJfREVDS19URU5TXzUwXzkwXCJcbiAgXSk7XG5cbiAgY29uc3QgW21heFRvdGFsUXVlc3Rpb25zLCBzZXRNYXhUb3RhbFF1ZXN0aW9uc10gPSB1c2VTdGF0ZSg1MDApO1xuICBjb25zdCBbdG90YWxRdWVzdGlvbnMsIHNldFRvdGFsUXVlc3Rpb25zXSA9IHVzZVN0YXRlKDIwMCk7XG4gIGNvbnN0IFttaW51dGVzLCBzZXRNaW51dGVzXSA9IHVzZVN0YXRlKDEwKTtcbiAgY29uc3QgW3Rlcm1Db3VudCwgc2V0VGVybUNvdW50XSA9IHVzZVN0YXRlKDMpO1xuICBjb25zdCBbZGlnaXRzTW9kZSwgc2V0RGlnaXRzTW9kZV0gPSB1c2VTdGF0ZShcIkRJR0lUXzNcIik7XG4gIGNvbnN0IFtzZWxlY3RlZE9wcywgc2V0U2VsZWN0ZWRPcHNdID0gdXNlU3RhdGUoW10pO1xuXG4gIHVzZUVmZmVjdCgoKSA9PiB7XG4gICAgbGV0IGNhbmNlbGxlZCA9IGZhbHNlO1xuICAgIChhc3luYyAoKSA9PiB7XG4gICAgICB0cnkge1xuICAgICAgICBzZXRJc0xvYWRpbmcodHJ1ZSk7XG4gICAgICAgIHNldEVycm9yKG51bGwpO1xuICAgICAgICBjb25zdCBzdGF0dXNSZXNwID0gYXdhaXQgZ2V0U3R1ZGVudFByYWN0aWNlRmVhdHVyZVN0YXR1cygpO1xuICAgICAgICBjb25zdCBzdGF0dXNQYXlsb2FkID0gc3RhdHVzUmVzcD8uZGF0YT8uZGF0YTtcbiAgICAgICAgY29uc3QgYWJhY3VzRW5hYmxlZCA9IEJvb2xlYW4oc3RhdHVzUGF5bG9hZD8uQUJBQ1VTX1BSQUNUSUNFKTtcbiAgICAgICAgaWYgKGNhbmNlbGxlZCkgcmV0dXJuO1xuICAgICAgICBzZXRIYXNBYmFjdXNQcmFjdGljZUFjY2VzcyhhYmFjdXNFbmFibGVkKTtcbiAgICAgICAgaWYgKCFhYmFjdXNFbmFibGVkKSB7XG4gICAgICAgICAgc2V0RXJyb3IoXCJUaGlzIGZlYXR1cmUgaXMgbm90IGVuYWJsZWQgZm9yIHlvdXIgc3R1ZGVudCBhY2NvdW50LiBBc2sgeW91ciBjZW50ZXIgdG8gYXNzaWduIGl0IGZpcnN0LlwiKTtcbiAgICAgICAgICByZXR1cm47XG4gICAgICAgIH1cbiAgICAgICAgY29uc3QgcmVzcCA9IGF3YWl0IGdldFN0dWRlbnRBYmFjdXNQcmFjdGljZVdvcmtzaGVldE9wdGlvbnMoKTtcbiAgICAgICAgY29uc3QgcGF5bG9hZCA9IHJlc3A/LmRhdGE/LmRhdGE7XG4gICAgICAgIGlmIChjYW5jZWxsZWQpIHJldHVybjtcblxuICAgICAgICBzZXRMZXZlbChwYXlsb2FkPy5sZXZlbCB8fCBudWxsKTtcbiAgICAgICAgY29uc3Qgb3BzID0gQXJyYXkuaXNBcnJheShwYXlsb2FkPy5vcGVyYXRpb25zKSA/IHBheWxvYWQub3BlcmF0aW9ucyA6IFtdO1xuICAgICAgICBzZXRBdmFpbGFibGVPcHMob3BzKTtcbiAgICAgICAgc2V0U2VsZWN0ZWRPcHMoWy4uLm9wc10pO1xuXG4gICAgICAgIGNvbnN0IGRtID0gQXJyYXkuaXNBcnJheShwYXlsb2FkPy5kaWdpdHNNb2RlcykgPyBwYXlsb2FkLmRpZ2l0c01vZGVzIDogbnVsbDtcbiAgICAgICAgaWYgKGRtPy5sZW5ndGgpIHtcbiAgICAgICAgICBzZXRBdmFpbGFibGVEaWdpdHNNb2RlcyhkbSk7XG4gICAgICAgICAgaWYgKGRtLmluY2x1ZGVzKFwiRElHSVRfM1wiKSkgc2V0RGlnaXRzTW9kZShcIkRJR0lUXzNcIik7XG4gICAgICAgICAgZWxzZSBzZXREaWdpdHNNb2RlKFN0cmluZyhkbVswXSkpO1xuICAgICAgICB9XG5cbiAgICAgICAgY29uc3QgbWF4USA9IE51bWJlcihwYXlsb2FkPy5tYXhUb3RhbFF1ZXN0aW9ucyk7XG4gICAgICAgIHNldE1heFRvdGFsUXVlc3Rpb25zKE51bWJlci5pc0Zpbml0ZShtYXhRKSAmJiBtYXhRID4gMCA/IG1heFEgOiA1MDApO1xuICAgICAgICBjb25zdCBkZWZRID0gTnVtYmVyKHBheWxvYWQ/LmRlZmF1bHRUb3RhbFF1ZXN0aW9ucyk7XG4gICAgICAgIHNldFRvdGFsUXVlc3Rpb25zKE51bWJlci5pc0Zpbml0ZShkZWZRKSAmJiBkZWZRID4gMCA/IGRlZlEgOiAyMDApO1xuXG4gICAgICAgIGNvbnN0IHNhZmVUZXJtQ291bnRzID0gQXJyYXkuaXNBcnJheShwYXlsb2FkPy50ZXJtQ291bnRzKSA/IHBheWxvYWQudGVybUNvdW50cyA6IG51bGw7XG4gICAgICAgIGlmIChzYWZlVGVybUNvdW50cz8uaW5jbHVkZXMoMykpIHNldFRlcm1Db3VudCgzKTtcblxuICAgICAgICAvLyBkaWdpdHNNb2RlcyBoYW5kbGVkIGFib3ZlXG4gICAgICB9IGNhdGNoIChlKSB7XG4gICAgICAgIGlmIChjYW5jZWxsZWQpIHJldHVybjtcbiAgICAgICAgc2V0RXJyb3IoZ2V0RnJpZW5kbHlFcnJvck1lc3NhZ2UoZSkgfHwgXCJGYWlsZWQgdG8gbG9hZCBhYmFjdXMgcHJhY3RpY2Ugb3B0aW9uc1wiKTtcbiAgICAgIH0gZmluYWxseSB7XG4gICAgICAgIGlmICghY2FuY2VsbGVkKSBzZXRJc0xvYWRpbmcoZmFsc2UpO1xuICAgICAgfVxuICAgIH0pKCk7XG5cbiAgICByZXR1cm4gKCkgPT4ge1xuICAgICAgY2FuY2VsbGVkID0gdHJ1ZTtcbiAgICB9O1xuICB9LCBbXSk7XG5cbiAgY29uc3Qgc2FmZVNlbGVjdGVkT3BzID0gdXNlTWVtbygoKSA9PiB7XG4gICAgY29uc3QgYWxsb3dlZCA9IG5ldyBTZXQoYXZhaWxhYmxlT3BzLm1hcCgoeCkgPT4gU3RyaW5nKHgpLnRyaW0oKS50b1VwcGVyQ2FzZSgpKSk7XG4gICAgcmV0dXJuIHNlbGVjdGVkT3BzXG4gICAgICAubWFwKCh4KSA9PiBTdHJpbmcoeCkudHJpbSgpLnRvVXBwZXJDYXNlKCkpXG4gICAgICAuZmlsdGVyKCh4KSA9PiBhbGxvd2VkLmhhcyh4KSk7XG4gIH0sIFthdmFpbGFibGVPcHMsIHNlbGVjdGVkT3BzXSk7XG5cbiAgY29uc3QgaXNMb3dlckRlY2tNb2RlID0gdXNlTWVtbygoKSA9PiB7XG4gICAgcmV0dXJuIFN0cmluZyhkaWdpdHNNb2RlIHx8IFwiXCIpLnRyaW0oKS50b1VwcGVyQ2FzZSgpID09PSBcIkxPV0VSX0RFQ0tfMV80XCI7XG4gIH0sIFtkaWdpdHNNb2RlXSk7XG5cbiAgY29uc3QgaXNTbWFsbEZyaWVuZHNNb2RlID0gdXNlTWVtbygoKSA9PiB7XG4gICAgcmV0dXJuIFN0cmluZyhkaWdpdHNNb2RlIHx8IFwiXCIpLnRyaW0oKS50b1VwcGVyQ2FzZSgpID09PSBcIlNNQUxMX0ZSSUVORFNcIjtcbiAgfSwgW2RpZ2l0c01vZGVdKTtcblxuICBjb25zdCBpc1RlbnNMb3dlckRlY2tNb2RlID0gdXNlTWVtbygoKSA9PiB7XG4gICAgcmV0dXJuIFN0cmluZyhkaWdpdHNNb2RlIHx8IFwiXCIpLnRyaW0oKS50b1VwcGVyQ2FzZSgpID09PSBcIkxPV0VSX0RFQ0tfVEVOU18xMF80MFwiO1xuICB9LCBbZGlnaXRzTW9kZV0pO1xuXG4gIGNvbnN0IGlzVXBwZXJEZWNrTW9kZSA9IHVzZU1lbW8oKCkgPT4ge1xuICAgIHJldHVybiBTdHJpbmcoZGlnaXRzTW9kZSB8fCBcIlwiKS50cmltKCkudG9VcHBlckNhc2UoKSA9PT0gXCJVUFBFUl9ERUNLXzFfOVwiO1xuICB9LCBbZGlnaXRzTW9kZV0pO1xuXG4gIGNvbnN0IGlzVGVuc1VwcGVyRGVja01vZGUgPSB1c2VNZW1vKCgpID0+IHtcbiAgICByZXR1cm4gU3RyaW5nKGRpZ2l0c01vZGUgfHwgXCJcIikudHJpbSgpLnRvVXBwZXJDYXNlKCkgPT09IFwiVVBQRVJfREVDS19URU5TXzUwXzkwXCI7XG4gIH0sIFtkaWdpdHNNb2RlXSk7XG5cbiAgdXNlRWZmZWN0KCgpID0+IHtcbiAgICBpZiAoIWlzU21hbGxGcmllbmRzTW9kZSAmJiAhaXNMb3dlckRlY2tNb2RlICYmICFpc1RlbnNMb3dlckRlY2tNb2RlICYmICFpc1VwcGVyRGVja01vZGUgJiYgIWlzVGVuc1VwcGVyRGVja01vZGUpIHJldHVybjtcbiAgICAvLyBFbmZvcmNlIFVJLWxldmVsIHJlc3RyaWN0aW9uIHRvbyAoYmFja2VuZCB2YWxpZGF0ZXMgYXMgd2VsbCkuXG4gICAgc2V0U2VsZWN0ZWRPcHMoKHByZXYpID0+IHByZXYuZmlsdGVyKChvcCkgPT4ge1xuICAgICAgY29uc3QgbiA9IFN0cmluZyhvcCB8fCBcIlwiKS50cmltKCkudG9VcHBlckNhc2UoKTtcbiAgICAgIHJldHVybiBuID09PSBcIkFERFwiIHx8IG4gPT09IFwiU1VCXCI7XG4gICAgfSkpO1xuICB9LCBbaXNTbWFsbEZyaWVuZHNNb2RlLCBpc0xvd2VyRGVja01vZGUsIGlzVGVuc0xvd2VyRGVja01vZGUsIGlzVXBwZXJEZWNrTW9kZSwgaXNUZW5zVXBwZXJEZWNrTW9kZV0pO1xuXG4gIGNvbnN0IG9uVG9nZ2xlT3AgPSAob3ApID0+IHtcbiAgICBjb25zdCBub3JtYWxpemVkID0gU3RyaW5nKG9wIHx8IFwiXCIpLnRyaW0oKS50b1VwcGVyQ2FzZSgpO1xuICAgIGlmICgoaXNTbWFsbEZyaWVuZHNNb2RlIHx8IGlzTG93ZXJEZWNrTW9kZSB8fCBpc1RlbnNMb3dlckRlY2tNb2RlIHx8IGlzVXBwZXJEZWNrTW9kZSB8fCBpc1RlbnNVcHBlckRlY2tNb2RlKSAmJiAobm9ybWFsaXplZCA9PT0gXCJNVUxcIiB8fCBub3JtYWxpemVkID09PSBcIkRJVlwiKSkge1xuICAgICAgcmV0dXJuO1xuICAgIH1cbiAgICBzZXRTZWxlY3RlZE9wcygocHJldikgPT4ge1xuICAgICAgY29uc3QgZXhpc3RzID0gcHJldi5tYXAoKHgpID0+IFN0cmluZyh4KS50cmltKCkudG9VcHBlckNhc2UoKSkuaW5jbHVkZXMobm9ybWFsaXplZCk7XG4gICAgICBpZiAoZXhpc3RzKSByZXR1cm4gcHJldi5maWx0ZXIoKHgpID0+IFN0cmluZyh4KS50cmltKCkudG9VcHBlckNhc2UoKSAhPT0gbm9ybWFsaXplZCk7XG4gICAgICByZXR1cm4gWy4uLnByZXYsIG5vcm1hbGl6ZWRdO1xuICAgIH0pO1xuICB9O1xuXG4gIGNvbnN0IHNlbGVjdEFsbE9wcyA9ICgpID0+IHtcbiAgICBzZXRTZWxlY3RlZE9wcyhbLi4uYXZhaWxhYmxlT3BzXSk7XG4gIH07XG5cbiAgY29uc3QgY2xlYXJBbGxPcHMgPSAoKSA9PiB7XG4gICAgc2V0U2VsZWN0ZWRPcHMoW10pO1xuICB9O1xuXG4gIGNvbnN0IG9uU3RhcnQgPSBhc3luYyAoZSkgPT4ge1xuICAgIGUucHJldmVudERlZmF1bHQoKTtcbiAgICBpZiAoaXNTdWJtaXR0aW5nKSByZXR1cm47XG5cbiAgICBpZiAoIWhhc0FiYWN1c1ByYWN0aWNlQWNjZXNzKSB7XG4gICAgICBzZXRFcnJvcihcIlRoaXMgZmVhdHVyZSBpcyBub3QgZW5hYmxlZCBmb3IgeW91ciBzdHVkZW50IGFjY291bnQuIEFzayB5b3VyIGNlbnRlciB0byBhc3NpZ24gaXQgZmlyc3QuXCIpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIHNldEVycm9yKG51bGwpO1xuXG4gICAgY29uc3QgbWlucyA9IE51bWJlcihtaW51dGVzKTtcbiAgICBpZiAoIU51bWJlci5pc0Zpbml0ZShtaW5zKSB8fCBtaW5zIDw9IDAgfHwgIU51bWJlci5pc0ludGVnZXIobWlucykpIHtcbiAgICAgIHNldEVycm9yKFwiVGltZSBtdXN0IGJlIGEgcG9zaXRpdmUgaW50ZWdlciAobWludXRlcylcIik7XG4gICAgICByZXR1cm47XG4gICAgfVxuXG4gICAgY29uc3QgcUNvdW50ID0gTnVtYmVyKHRvdGFsUXVlc3Rpb25zKTtcbiAgICBpZiAoIU51bWJlci5pc0Zpbml0ZShxQ291bnQpIHx8IHFDb3VudCA8PSAwIHx8ICFOdW1iZXIuaXNJbnRlZ2VyKHFDb3VudCkpIHtcbiAgICAgIHNldEVycm9yKFwiTnVtYmVyIG9mIHF1ZXN0aW9ucyBtdXN0IGJlIGEgcG9zaXRpdmUgaW50ZWdlclwiKTtcbiAgICAgIHJldHVybjtcbiAgICB9XG5cbiAgICBpZiAoTnVtYmVyLmlzRmluaXRlKG1heFRvdGFsUXVlc3Rpb25zKSAmJiBxQ291bnQgPiBtYXhUb3RhbFF1ZXN0aW9ucykge1xuICAgICAgc2V0RXJyb3IoYE51bWJlciBvZiBxdWVzdGlvbnMgbXVzdCBiZSAke21heFRvdGFsUXVlc3Rpb25zfSBvciBsZXNzYCk7XG4gICAgICByZXR1cm47XG4gICAgfVxuXG4gICAgY29uc3QgdENvdW50ID0gTnVtYmVyKHRlcm1Db3VudCk7XG4gICAgaWYgKCFOdW1iZXIuaXNGaW5pdGUodENvdW50KSB8fCAhTnVtYmVyLmlzSW50ZWdlcih0Q291bnQpIHx8IHRDb3VudCA8IDEgfHwgdENvdW50ID4gMTIpIHtcbiAgICAgIHNldEVycm9yKFwiVGVybXMgcGVyIHF1ZXN0aW9uIG11c3QgYmUgYW4gaW50ZWdlciBiZXR3ZWVuIDEgYW5kIDEyXCIpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIGNvbnN0IGRtID0gU3RyaW5nKGRpZ2l0c01vZGUgfHwgXCJcIikudHJpbSgpLnRvVXBwZXJDYXNlKCk7XG4gICAgaWYgKCFkbSkge1xuICAgICAgc2V0RXJyb3IoXCJTZWxlY3QgYSBkaWdpdCBtb2RlXCIpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIGlmICh0Q291bnQgPiAxICYmICFzYWZlU2VsZWN0ZWRPcHMubGVuZ3RoKSB7XG4gICAgICBzZXRFcnJvcihcIlNlbGVjdCBhdCBsZWFzdCBvbmUgb3BlcmF0aW9uXCIpO1xuICAgICAgcmV0dXJuO1xuICAgIH1cblxuICAgIHNldElzU3VibWl0dGluZyh0cnVlKTtcbiAgICB0cnkge1xuICAgICAgY29uc3QgcmVzcCA9IGF3YWl0IGNyZWF0ZVN0dWRlbnRBYmFjdXNQcmFjdGljZVdvcmtzaGVldCh7XG4gICAgICAgIHRpbWVMaW1pdFNlY29uZHM6IG1pbnMgKiA2MCxcbiAgICAgICAgdGVybUNvdW50OiB0Q291bnQsXG4gICAgICAgIGRpZ2l0c01vZGU6IGRtLFxuICAgICAgICBvcGVyYXRpb25zOiB0Q291bnQgPiAxID8gc2FmZVNlbGVjdGVkT3BzIDogW10sXG4gICAgICAgIHRvdGFsUXVlc3Rpb25zOiBxQ291bnRcbiAgICAgIH0pO1xuXG4gICAgICBjb25zdCB3b3Jrc2hlZXRJZCA9IHJlc3A/LmRhdGE/LmRhdGE/LndvcmtzaGVldElkO1xuICAgICAgaWYgKCF3b3Jrc2hlZXRJZCkge1xuICAgICAgICB0aHJvdyBuZXcgRXJyb3IoXCJQcmFjdGljZSB3b3Jrc2hlZXQgY3JlYXRlZCBidXQgd29ya3NoZWV0SWQgbWlzc2luZ1wiKTtcbiAgICAgIH1cblxuICAgICAgbmF2aWdhdGUoYC9zdHVkZW50L3dvcmtzaGVldHMvJHt3b3Jrc2hlZXRJZH1gKTtcbiAgICB9IGNhdGNoIChlMikge1xuICAgICAgY29uc3Qgc3RhdHVzID0gZTI/LnJlc3BvbnNlPy5zdGF0dXM7XG4gICAgICBjb25zdCBjb2RlID0gZTI/LnJlc3BvbnNlPy5kYXRhPy5lcnJvcl9jb2RlO1xuXG4gICAgICBpZiAoc3RhdHVzID09PSA0MDEgfHwgY29kZSA9PT0gXCJJTlZBTElEX0FDQ0VTU19UT0tFTlwiIHx8IGNvZGUgPT09IFwiQVVUSF9SRVFVSVJFRFwiKSB7XG4gICAgICAgIC8vIE1hdGNoIGF0dGVtcHQgcGFnZSBiZWhhdmlvcjogc3RvcCByZXRyeSBsb29wcyBhbmQgZm9yY2UgYSBjbGVhbiByZS1sb2dpbi5cbiAgICAgICAgdHJ5IHtcbiAgICAgICAgICBsb2NhbFN0b3JhZ2UucmVtb3ZlSXRlbShcImFiYWN1c19hY2Nlc3NfdG9rZW5cIik7XG4gICAgICAgICAgbG9jYWxTdG9yYWdlLnJlbW92ZUl0ZW0oXCJhYmFjdXNfcmVmcmVzaF90b2tlblwiKTtcbiAgICAgICAgfSBjYXRjaCB7XG4gICAgICAgICAgLy8gaWdub3JlXG4gICAgICAgIH1cbiAgICAgICAgaWYgKHR5cGVvZiBsb2dvdXQgPT09IFwiZnVuY3Rpb25cIikge1xuICAgICAgICAgIHRyeSB7XG4gICAgICAgICAgICBhd2FpdCBsb2dvdXQoKTtcbiAgICAgICAgICB9IGNhdGNoIHtcbiAgICAgICAgICAgIC8vIGlnbm9yZVxuICAgICAgICAgIH1cbiAgICAgICAgfVxuICAgICAgICBzZXRFcnJvcihcIlNlc3Npb24gZXhwaXJlZC4gUGxlYXNlIGxvZyBpbiBhZ2Fpbi5cIik7XG4gICAgICAgIG5hdmlnYXRlKFwiL2xvZ2luXCIsIHsgcmVwbGFjZTogdHJ1ZSwgc3RhdGU6IHsgZnJvbTogXCIvc3R1ZGVudC9hYmFjdXMtcHJhY3RpY2VcIiB9IH0pO1xuICAgICAgICByZXR1cm47XG4gICAgICB9XG5cbiAgICAgIHNldEVycm9yKGUyPy5yZXNwb25zZT8uZGF0YT8ubWVzc2FnZSB8fCBlMj8ubWVzc2FnZSB8fCBcIkZhaWxlZCB0byBzdGFydCBhYmFjdXMgcHJhY3RpY2VcIik7XG4gICAgfSBmaW5hbGx5IHtcbiAgICAgIHNldElzU3VibWl0dGluZyhmYWxzZSk7XG4gICAgfVxuICB9O1xuXG4gIHJldHVybiAoXG4gICAgPGRpdiBjbGFzc05hbWU9XCJjb250YWluZXJcIj5cbiAgICAgIDxkaXYgY2xhc3NOYW1lPVwicGFnZS1oZWFkXCI+XG4gICAgICAgIDxkaXY+XG4gICAgICAgICAgPGgxPkFiYWN1cyBQcmFjdGljZSAoQXV0byk8L2gxPlxuICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIj57bGV2ZWwgPyBgTGV2ZWwgJHtsZXZlbC5yYW5rfTogJHtsZXZlbC5uYW1lfWAgOiBcIlwifTwvZGl2PlxuICAgICAgICA8L2Rpdj5cbiAgICAgIDwvZGl2PlxuXG4gICAgICB7aXNMb2FkaW5nID8gKFxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImNhcmRcIj5Mb2FkaW5n4oCmPC9kaXY+XG4gICAgICApIDogIWhhc0FiYWN1c1ByYWN0aWNlQWNjZXNzID8gKFxuICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImNhcmRcIj5cbiAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cImJhbm5lciBiYW5uZXItLWVycm9yXCI+XG4gICAgICAgICAgICB7ZXJyb3IgfHwgXCJUaGlzIGZlYXR1cmUgaXMgbm90IGVuYWJsZWQgZm9yIHlvdXIgc3R1ZGVudCBhY2NvdW50LiBBc2sgeW91ciBjZW50ZXIgdG8gYXNzaWduIGl0IGZpcnN0LlwifVxuICAgICAgICAgIDwvZGl2PlxuICAgICAgICA8L2Rpdj5cbiAgICAgICkgOiAoXG4gICAgICAgIDxmb3JtIGNsYXNzTmFtZT1cImNhcmRcIiBvblN1Ym1pdD17b25TdGFydH0+XG4gICAgICAgICAge2Vycm9yID8gKFxuICAgICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJiYW5uZXIgYmFubmVyLS1lcnJvclwiIHN0eWxlPXt7IG1hcmdpbkJvdHRvbTogMTIgfX0+XG4gICAgICAgICAgICAgIHtlcnJvcn1cbiAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICkgOiBudWxsfVxuXG4gICAgICAgICAgPGRpdiBjbGFzc05hbWU9XCJmb3JtLWdyaWRcIj5cbiAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJmb3JtLWZpZWxkXCI+XG4gICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImZvcm0tbGFiZWxcIj5OdW1iZXIgb2YgcXVlc3Rpb25zPC9zcGFuPlxuICAgICAgICAgICAgICA8aW5wdXRcbiAgICAgICAgICAgICAgICBjbGFzc05hbWU9XCJpbnB1dFwiXG4gICAgICAgICAgICAgICAgdHlwZT1cIm51bWJlclwiXG4gICAgICAgICAgICAgICAgbWluPXsxfVxuICAgICAgICAgICAgICAgIHN0ZXA9ezF9XG4gICAgICAgICAgICAgICAgdmFsdWU9e3RvdGFsUXVlc3Rpb25zfVxuICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZTIpID0+IHNldFRvdGFsUXVlc3Rpb25zKGUyLnRhcmdldC52YWx1ZSl9XG4gICAgICAgICAgICAgIC8+XG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIiBzdHlsZT17eyBmb250U2l6ZTogMTIsIG1hcmdpblRvcDogNiB9fT5cbiAgICAgICAgICAgICAgICBNYXg6IDxzdHJvbmc+e21heFRvdGFsUXVlc3Rpb25zfTwvc3Ryb25nPlxuICAgICAgICAgICAgICA8L2Rpdj5cbiAgICAgICAgICAgIDwvbGFiZWw+XG5cbiAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJmb3JtLWZpZWxkXCI+XG4gICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImZvcm0tbGFiZWxcIj5UaW1lIChtaW51dGVzKTwvc3Bhbj5cbiAgICAgICAgICAgICAgPGlucHV0XG4gICAgICAgICAgICAgICAgY2xhc3NOYW1lPVwiaW5wdXRcIlxuICAgICAgICAgICAgICAgIHR5cGU9XCJudW1iZXJcIlxuICAgICAgICAgICAgICAgIG1pbj17MX1cbiAgICAgICAgICAgICAgICBzdGVwPXsxfVxuICAgICAgICAgICAgICAgIHZhbHVlPXttaW51dGVzfVxuICAgICAgICAgICAgICAgIG9uQ2hhbmdlPXsoZTMpID0+IHNldE1pbnV0ZXMoZTMudGFyZ2V0LnZhbHVlKX1cbiAgICAgICAgICAgICAgLz5cbiAgICAgICAgICAgIDwvbGFiZWw+XG5cbiAgICAgICAgICAgIDxsYWJlbCBjbGFzc05hbWU9XCJmb3JtLWZpZWxkXCI+XG4gICAgICAgICAgICAgIDxzcGFuIGNsYXNzTmFtZT1cImZvcm0tbGFiZWxcIj5UZXJtcyBwZXIgcXVlc3Rpb248L3NwYW4+XG4gICAgICAgICAgICAgIDxpbnB1dFxuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT1cImlucHV0XCJcbiAgICAgICAgICAgICAgICB0eXBlPVwibnVtYmVyXCJcbiAgICAgICAgICAgICAgICBtaW49ezF9XG4gICAgICAgICAgICAgICAgbWF4PXsxMn1cbiAgICAgICAgICAgICAgICBzdGVwPXsxfVxuICAgICAgICAgICAgICAgIHZhbHVlPXt0ZXJtQ291bnR9XG4gICAgICAgICAgICAgICAgb25DaGFuZ2U9eyhlNCkgPT4gc2V0VGVybUNvdW50KGU0LnRhcmdldC52YWx1ZSl9XG4gICAgICAgICAgICAgIC8+XG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIiBzdHlsZT17eyBmb250U2l6ZTogMTIsIG1hcmdpblRvcDogNiB9fT5cbiAgICAgICAgICAgICAgICBFeGFtcGxlczogMyDihpIgPHN0cm9uZz4yMiArIDIzICsgMjQ8L3N0cm9uZz4sIDUg4oaSIDxzdHJvbmc+NTYgKyAxICsgMTUgKyA0NSArIDg1PC9zdHJvbmc+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgPC9sYWJlbD5cblxuICAgICAgICAgICAgPGxhYmVsIGNsYXNzTmFtZT1cImZvcm0tZmllbGRcIj5cbiAgICAgICAgICAgICAgPHNwYW4gY2xhc3NOYW1lPVwiZm9ybS1sYWJlbFwiPkRpZ2l0czwvc3Bhbj5cbiAgICAgICAgICAgICAgPHNlbGVjdFxuICAgICAgICAgICAgICAgIGNsYXNzTmFtZT1cImlucHV0XCJcbiAgICAgICAgICAgICAgICB2YWx1ZT17ZGlnaXRzTW9kZX1cbiAgICAgICAgICAgICAgICBvbkNoYW5nZT17KGU1KSA9PiBzZXREaWdpdHNNb2RlKGU1LnRhcmdldC52YWx1ZSl9XG4gICAgICAgICAgICAgID5cbiAgICAgICAgICAgICAgICB7YXZhaWxhYmxlRGlnaXRzTW9kZXMuaW5jbHVkZXMoXCJESUdJVF8xXCIpID8gKFxuICAgICAgICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cIkRJR0lUXzFcIj4xIGRpZ2l0ICgw4oCTOSk8L29wdGlvbj5cbiAgICAgICAgICAgICAgICApIDogbnVsbH1cbiAgICAgICAgICAgICAgICB7YXZhaWxhYmxlRGlnaXRzTW9kZXMuaW5jbHVkZXMoXCJESUdJVF8yXCIpID8gKFxuICAgICAgICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cIkRJR0lUXzJcIj4yIGRpZ2l0cyAoMTAtOTkpL0R1cGxleCBOdW1iZXJzPC9vcHRpb24+XG4gICAgICAgICAgICAgICAgKSA6IG51bGx9XG4gICAgICAgICAgICAgICAge2F2YWlsYWJsZURpZ2l0c01vZGVzLmluY2x1ZGVzKFwiRElHSVRfM1wiKSA/IChcbiAgICAgICAgICAgICAgICAgIDxvcHRpb24gdmFsdWU9XCJESUdJVF8zXCI+TWF4IDMgZGlnaXRzICgw4oCTOTk5KTwvb3B0aW9uPlxuICAgICAgICAgICAgICAgICkgOiBudWxsfVxuICAgICAgICAgICAgICAgIHthdmFpbGFibGVEaWdpdHNNb2Rlcy5pbmNsdWRlcyhcIlNNQUxMX0ZSSUVORFNcIikgPyAoXG4gICAgICAgICAgICAgICAgICA8b3B0aW9uIHZhbHVlPVwiU01BTExfRlJJRU5EU1wiPlNtYWxsIEZyaWVuZHM8L29wdGlvbj5cbiAgICAgICAgICAgICAgICApIDogbnVsbH1cbiAgICAgICAgICAgICAgICB7YXZhaWxhYmxlRGlnaXRzTW9kZXMuaW5jbHVkZXMoXCJMT1dFUl9ERUNLXzFfNFwiKSA/IChcbiAgICAgICAgICAgICAgICAgIDxvcHRpb24gdmFsdWU9XCJMT1dFUl9ERUNLXzFfNFwiPkRpZ2l0ICgx4oCTNCkgTG93ZXIgRGVjazwvb3B0aW9uPlxuICAgICAgICAgICAgICAgICkgOiBudWxsfVxuICAgICAgICAgICAgICAgIHthdmFpbGFibGVEaWdpdHNNb2Rlcy5pbmNsdWRlcyhcIkxPV0VSX0RFQ0tfVEVOU18xMF80MFwiKSA/IChcbiAgICAgICAgICAgICAgICAgIDxvcHRpb24gdmFsdWU9XCJMT1dFUl9ERUNLX1RFTlNfMTBfNDBcIj5UZW5zIE51bWJlcnMgTG93ZXIgRGVjazwvb3B0aW9uPlxuICAgICAgICAgICAgICAgICkgOiBudWxsfVxuICAgICAgICAgICAgICAgIHthdmFpbGFibGVEaWdpdHNNb2Rlcy5pbmNsdWRlcyhcIlVQUEVSX0RFQ0tfMV85XCIpID8gKFxuICAgICAgICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cIlVQUEVSX0RFQ0tfMV85XCI+RGlnaXQgKDHigJM5KSBVcHBlciBEZWNrPC9vcHRpb24+XG4gICAgICAgICAgICAgICAgKSA6IG51bGx9XG4gICAgICAgICAgICAgICAge2F2YWlsYWJsZURpZ2l0c01vZGVzLmluY2x1ZGVzKFwiVVBQRVJfREVDS19URU5TXzUwXzkwXCIpID8gKFxuICAgICAgICAgICAgICAgICAgPG9wdGlvbiB2YWx1ZT1cIlVQUEVSX0RFQ0tfVEVOU181MF85MFwiPlRlbnMgTnVtYmVycyBVcHBlciBEZWNrPC9vcHRpb24+XG4gICAgICAgICAgICAgICAgKSA6IG51bGx9XG4gICAgICAgICAgICAgIDwvc2VsZWN0PlxuICAgICAgICAgICAgPC9sYWJlbD5cbiAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgIDxkaXYgc3R5bGU9e3sgbWFyZ2luVG9wOiAxNCB9fT5cbiAgICAgICAgICAgIDxkaXYgc3R5bGU9e3sgZGlzcGxheTogXCJmbGV4XCIsIGp1c3RpZnlDb250ZW50OiBcInNwYWNlLWJldHdlZW5cIiwgZ2FwOiAxMCwgZmxleFdyYXA6IFwid3JhcFwiLCBhbGlnbkl0ZW1zOiBcImJhc2VsaW5lXCIgfX0+XG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiZm9ybS1sYWJlbFwiPk9wZXJhdGlvbnM8L2Rpdj5cbiAgICAgICAgICAgICAgPGRpdiBzdHlsZT17eyBkaXNwbGF5OiBcImZsZXhcIiwgZ2FwOiA4LCBmbGV4V3JhcDogXCJ3cmFwXCIgfX0+XG4gICAgICAgICAgICAgICAgPGJ1dHRvbiBjbGFzc05hbWU9XCJidXR0b24gc2Vjb25kYXJ5XCIgdHlwZT1cImJ1dHRvblwiIHN0eWxlPXt7IHdpZHRoOiBcImF1dG9cIiwgcGFkZGluZzogXCI2cHggMTBweFwiIH19IG9uQ2xpY2s9e3NlbGVjdEFsbE9wc30+XG4gICAgICAgICAgICAgICAgICBTZWxlY3QgYWxsXG4gICAgICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgICAgICAgPGJ1dHRvbiBjbGFzc05hbWU9XCJidXR0b24gc2Vjb25kYXJ5XCIgdHlwZT1cImJ1dHRvblwiIHN0eWxlPXt7IHdpZHRoOiBcImF1dG9cIiwgcGFkZGluZzogXCI2cHggMTBweFwiIH19IG9uQ2xpY2s9e2NsZWFyQWxsT3BzfT5cbiAgICAgICAgICAgICAgICAgIENsZWFyXG4gICAgICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgPC9kaXY+XG5cbiAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwiY2hpcC1yb3dcIj5cbiAgICAgICAgICAgICAge2F2YWlsYWJsZU9wcy5tYXAoKG9wKSA9PiAoXG4gICAgICAgICAgICAgICAgPGxhYmVsIGtleT17b3B9IGNsYXNzTmFtZT1cImNoaXBcIj5cbiAgICAgICAgICAgICAgICAgIDxpbnB1dFxuICAgICAgICAgICAgICAgICAgICB0eXBlPVwiY2hlY2tib3hcIlxuICAgICAgICAgICAgICAgICAgICBkaXNhYmxlZD17TnVtYmVyKHRlcm1Db3VudCkgPD0gMX1cbiAgICAgICAgICAgICAgICAgICAgY2hlY2tlZD17c2FmZVNlbGVjdGVkT3BzLmluY2x1ZGVzKFN0cmluZyhvcCkudHJpbSgpLnRvVXBwZXJDYXNlKCkpfVxuICAgICAgICAgICAgICAgICAgICBvbkNoYW5nZT17KCkgPT4gb25Ub2dnbGVPcChvcCl9XG4gICAgICAgICAgICAgICAgICAvPlxuICAgICAgICAgICAgICAgICAgPHNwYW4+e29wTGFiZWwob3ApfTwvc3Bhbj5cbiAgICAgICAgICAgICAgICA8L2xhYmVsPlxuICAgICAgICAgICAgICApKX1cbiAgICAgICAgICAgIDwvZGl2PlxuXG4gICAgICAgICAgICB7aXNMb3dlckRlY2tNb2RlID8gKFxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm11dGVkXCIgc3R5bGU9e3sgZm9udFNpemU6IDEyLCBtYXJnaW5Ub3A6IDggfX0+XG4gICAgICAgICAgICAgICAgTG93ZXIgRGVjayAoMeKAkzQpIHVzZXMgb25seSA8c3Ryb25nPkFkZDwvc3Ryb25nPiBhbmQgPHN0cm9uZz5MZXNzPC9zdHJvbmc+LCB3aXRoIGFuc3dlcnMgYWx3YXlzICZndDsgMC5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICApIDogbnVsbH1cblxuICAgICAgICAgICAge2lzVGVuc0xvd2VyRGVja01vZGUgPyAoXG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIiBzdHlsZT17eyBmb250U2l6ZTogMTIsIG1hcmdpblRvcDogOCB9fT5cbiAgICAgICAgICAgICAgICBUZW5zIE51bWJlcnMgTG93ZXIgRGVjayB1c2VzIG9ubHkgPHN0cm9uZz5BZGQ8L3N0cm9uZz4gYW5kIDxzdHJvbmc+TGVzczwvc3Ryb25nPiwgd2l0aCBhbnN3ZXJzIGFsd2F5cyBiZXR3ZWVuIDxzdHJvbmc+MTA8L3N0cm9uZz4gYW5kIDxzdHJvbmc+NDA8L3N0cm9uZz4uXG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKSA6IG51bGx9XG5cbiAgICAgICAgICAgIHtpc1VwcGVyRGVja01vZGUgPyAoXG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIiBzdHlsZT17eyBmb250U2l6ZTogMTIsIG1hcmdpblRvcDogOCB9fT5cbiAgICAgICAgICAgICAgICBVcHBlciBEZWNrICgx4oCTOSkgdXNlcyBvbmx5IDxzdHJvbmc+QWRkPC9zdHJvbmc+IGFuZCA8c3Ryb25nPkxlc3M8L3N0cm9uZz4sIHdpdGggYW5zd2VycyBhbHdheXMgYmV0d2VlbiA8c3Ryb25nPjE8L3N0cm9uZz4gYW5kIDxzdHJvbmc+OTwvc3Ryb25nPi5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICApIDogbnVsbH1cblxuICAgICAgICAgICAge2lzVGVuc1VwcGVyRGVja01vZGUgPyAoXG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIiBzdHlsZT17eyBmb250U2l6ZTogMTIsIG1hcmdpblRvcDogOCB9fT5cbiAgICAgICAgICAgICAgICBUZW5zIE51bWJlcnMgVXBwZXIgRGVjayB1c2VzIG9ubHkgPHN0cm9uZz5BZGQ8L3N0cm9uZz4gYW5kIDxzdHJvbmc+TGVzczwvc3Ryb25nPiwgd2l0aCBhbnN3ZXJzIGFsd2F5cyBiZXR3ZWVuIDxzdHJvbmc+NTA8L3N0cm9uZz4gYW5kIDxzdHJvbmc+OTA8L3N0cm9uZz4uXG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKSA6IG51bGx9XG5cbiAgICAgICAgICAgIHtpc1NtYWxsRnJpZW5kc01vZGUgPyAoXG4gICAgICAgICAgICAgIDxkaXYgY2xhc3NOYW1lPVwibXV0ZWRcIiBzdHlsZT17eyBmb250U2l6ZTogMTIsIG1hcmdpblRvcDogOCB9fT5cbiAgICAgICAgICAgICAgICBTbWFsbCBGcmllbmRzIHVzZXMgb25seSA8c3Ryb25nPkFkZDwvc3Ryb25nPiBhbmQgPHN0cm9uZz5MZXNzPC9zdHJvbmc+IGFuZCBnZW5lcmF0ZXMgcGF0dGVybnMgdGhhdCB1c2UgZnJpZW5kcyBvZiA8c3Ryb25nPjU8L3N0cm9uZz4gKDHihpQ0LCAy4oaUMykuXG4gICAgICAgICAgICAgIDwvZGl2PlxuICAgICAgICAgICAgKSA6IG51bGx9XG5cbiAgICAgICAgICAgIHtOdW1iZXIodGVybUNvdW50KSA8PSAxID8gKFxuICAgICAgICAgICAgICA8ZGl2IGNsYXNzTmFtZT1cIm11dGVkXCIgc3R5bGU9e3sgZm9udFNpemU6IDEyLCBtYXJnaW5Ub3A6IDggfX0+XG4gICAgICAgICAgICAgICAgT3BlcmF0aW9ucyBhcmUgdXNlZCBvbmx5IHdoZW4gVGVybXMgcGVyIHF1ZXN0aW9uIGlzIDIgb3IgbW9yZS5cbiAgICAgICAgICAgICAgPC9kaXY+XG4gICAgICAgICAgICApIDogbnVsbH1cbiAgICAgICAgICA8L2Rpdj5cblxuICAgICAgICAgIDxkaXYgc3R5bGU9e3sgbWFyZ2luVG9wOiAxNiwgZGlzcGxheTogXCJmbGV4XCIsIGdhcDogMTAgfX0+XG4gICAgICAgICAgICA8YnV0dG9uIGNsYXNzTmFtZT1cImJ0blwiIHR5cGU9XCJzdWJtaXRcIiBkaXNhYmxlZD17aXNTdWJtaXR0aW5nfT5cbiAgICAgICAgICAgICAge2lzU3VibWl0dGluZyA/IFwiU3RhcnRpbmfigKZcIiA6IFwiU3RhcnQgUHJhY3RpY2VcIn1cbiAgICAgICAgICAgIDwvYnV0dG9uPlxuICAgICAgICAgICAgPGJ1dHRvblxuICAgICAgICAgICAgICBjbGFzc05hbWU9XCJidG4gYnRuLS1zZWNvbmRhcnlcIlxuICAgICAgICAgICAgICB0eXBlPVwiYnV0dG9uXCJcbiAgICAgICAgICAgICAgb25DbGljaz17KCkgPT4gbmF2aWdhdGUoXCIvc3R1ZGVudC9kYXNoYm9hcmRcIil9XG4gICAgICAgICAgICAgIGRpc2FibGVkPXtpc1N1Ym1pdHRpbmd9XG4gICAgICAgICAgICA+XG4gICAgICAgICAgICAgIENhbmNlbFxuICAgICAgICAgICAgPC9idXR0b24+XG4gICAgICAgICAgPC9kaXY+XG4gICAgICAgIDwvZm9ybT5cbiAgICAgICl9XG4gICAgPC9kaXY+XG4gICk7XG59XG5cbmV4cG9ydCB7IFN0dWRlbnRBYmFjdXNQcmFjdGljZVdvcmtzaGVldFBhZ2UgfTtcbiJdLCJmaWxlIjoiRDovZGVtby1tYWluL2RlbW8tbWFpbi1wdXNoL2Zyb250ZW5kL3NyYy9tb2R1bGVzL3N0dWRlbnQvU3R1ZGVudEFiYWN1c1ByYWN0aWNlV29ya3NoZWV0UGFnZS5qc3gifQ==

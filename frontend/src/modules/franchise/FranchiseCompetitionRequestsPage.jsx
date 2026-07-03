@@ -5,7 +5,7 @@ import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusBadge } from "../../components/StatusBadge";
 import { InputDialog } from "../../components/InputDialog";
-import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { getApiErrorCode, getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   forwardFranchiseCompetitionRequest,
   getMyFranchise,
@@ -27,6 +27,10 @@ function normalizeCompetitionRequestRows(payload) {
   if (Array.isArray(payload?.items)) return payload.items;
   if (Array.isArray(payload)) return payload;
   return [];
+}
+
+function isFranchiseActionableStage(stage) {
+  return String(stage || "").toUpperCase() === "FRANCHISE_REVIEW";
 }
 
 function FranchiseCompetitionRequestsPage() {
@@ -80,15 +84,26 @@ function FranchiseCompetitionRequestsPage() {
   };
 
   const handleApprove = async (row) => {
+    if (!isFranchiseActionableStage(row?.workflowStage)) {
+      toast.error("This request is no longer in Franchise Review stage. Refresh to get latest status.");
+      return;
+    }
     try {
       await forwardFranchiseCompetitionRequest(row.id);
       await load({ limit, offset, stage });
     } catch (err) {
+      if (getApiErrorCode(err) === "WORKFLOW_STAGE_CONFLICT") {
+        await load({ limit, offset, stage });
+      }
       toast.error(getFriendlyErrorMessage(err) || "Failed to approve request.");
     }
   };
 
   const handleReturn = (row) => {
+    if (!isFranchiseActionableStage(row?.workflowStage)) {
+      toast.error("This request is no longer in Franchise Review stage. Refresh to get latest status.");
+      return;
+    }
     setRejectTarget(row);
   };
 
@@ -152,19 +167,22 @@ function FranchiseCompetitionRequestsPage() {
     {
       key: "actions",
       header: "Actions",
-      render: (r) => (
+      render: (r) => {
+        const canReview = isFranchiseActionableStage(r?.workflowStage);
+        return (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button className="button secondary" style={{ width: "auto" }} onClick={() => handleView(r)}>
             View
           </button>
-          <button className="button secondary" style={{ width: "auto" }} onClick={() => handleApprove(r)}>
+          <button className="button secondary" style={{ width: "auto" }} onClick={() => handleApprove(r)} disabled={!canReview} title={!canReview ? "Available only in Franchise Review stage" : ""}>
             Approve
           </button>
-          <button className="button secondary" style={{ width: "auto" }} onClick={() => handleReturn(r)}>
+          <button className="button secondary" style={{ width: "auto" }} onClick={() => handleReturn(r)} disabled={!canReview} title={!canReview ? "Available only in Franchise Review stage" : ""}>
             Return
           </button>
         </div>
-      )
+      );
+      }
     }
   ];
 

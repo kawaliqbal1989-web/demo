@@ -565,7 +565,23 @@ const reviewLateEnrollmentRequest = asyncHandler(async (req, res) => {
             id: true,
             studentId: true,
             levelId: true,
-            status: true
+            status: true,
+            student: {
+              select: {
+                currentTeacherUserId: true,
+                batchEnrollments: {
+                  where: {
+                    tenantId: req.auth.tenantId,
+                    status: "ACTIVE"
+                  },
+                  select: {
+                    assignedTeacherUserId: true
+                  },
+                  orderBy: { createdAt: "desc" },
+                  take: 1
+                }
+              }
+            }
           }
         }
       }
@@ -617,8 +633,12 @@ const reviewLateEnrollmentRequest = asyncHandler(async (req, res) => {
             studentId: row.studentId
           }
         },
-        select: { id: true }
+        select: { id: true, sourceTeacherUserId: true }
       });
+      const sourceTeacherUserId =
+        row.student?.currentTeacherUserId ||
+        row.student?.batchEnrollments?.[0]?.assignedTeacherUserId ||
+        null;
 
       const reusable = await resolveReusableExamPackage({
         tx,
@@ -635,9 +655,14 @@ const reviewLateEnrollmentRequest = asyncHandler(async (req, res) => {
             studentId: row.studentId,
             enrolledLevelId: row.levelId,
             isTemporary: false,
-            sourceTeacherUserId: null,
+            sourceTeacherUserId,
             createdByUserId: req.auth.userId
           }
+        });
+      } else if (!existingEnrollment.sourceTeacherUserId && sourceTeacherUserId) {
+        await tx.examEnrollmentEntry.update({
+          where: { id: existingEnrollment.id },
+          data: { sourceTeacherUserId }
         });
       }
 

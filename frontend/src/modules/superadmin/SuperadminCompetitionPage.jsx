@@ -363,9 +363,11 @@ function SuperadminCompetitionPage() {
     setError("");
     try {
       const data = await listCompetitions(next);
-      const nextRows = data?.data?.items || data?.data || [];
+      const payload = data?.data ?? data;
+      const nextRows = normalizeArrayResponse(payload);
       setRows(nextRows);
-      setTotal(data?.data?.total ?? nextRows.length);
+      const nextTotal = Number(payload?.total ?? data?.headers?.["x-pagination-total"] ?? nextRows.length);
+      setTotal(Number.isFinite(nextTotal) ? nextTotal : nextRows.length);
       setLimit(next.limit);
       setOffset(next.offset);
     } catch (err) {

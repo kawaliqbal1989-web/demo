@@ -154,7 +154,7 @@ const submitBpCompetition = asyncHandler(async (req, res) => {
 
   const updated = await prisma.competition.update({ where: { id: competitionId }, data: { workflowStage: "SUPERADMIN_APPROVAL" } });
 
-  await prisma.competitionStageTransition.create({ data: { tenantId: req.auth.tenantId, competitionId, fromStage: "BUSINESS_PARTNER_REVIEW", toStage: "SUPERADMIN_APPROVAL", action: "FORWARD", reason: null, actedByUserId: req.auth.userId } });
+  await prisma.competitionStageTransition.create({ data: { tenantId: req.auth.tenantId, competitionId, fromStage: "BP_REVIEW", toStage: "SUPERADMIN_APPROVAL", action: "FORWARD", reason: null, actedByUserId: req.auth.userId } });
 
   return res.apiSuccess("Business partner submitted competition to super admin", updated);
 });

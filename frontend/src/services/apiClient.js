@@ -110,6 +110,8 @@ function setupApiInterceptors({ getAccessToken, refreshToken, logout, onForbidde
           isNetworkDown ||
           (errorCode === "SESSION_ALREADY_EXISTS" && method === "post" && url === "/teacher/attendance/sessions") ||
           (errorCode === "DUPLICATE_PENDING" && method === "post" && url === "/student/reassignment-requests") ||
+          (errorCode === "COMPETITION_RESULTS_NOT_PUBLISHED" && method === "get" && typeof url === "string" && /\/competitions\/[^/]+\/certificates$/.test(url)) ||
+          (errorCode === "WORKFLOW_STAGE_CONFLICT" && method === "post" && typeof url === "string" && /\/franchise\/competition_requests\/[^/]+\/forward$/.test(url)) ||
           (errorCode === "FEATURE_NOT_ASSIGNED" && method === "get" && url === "/student/practice-worksheets/options") ||
           (errorCode === "FEATURE_NOT_ASSIGNED" && method === "get" && url === "/student/abacus-practice-worksheets/options") ||
           isStudentDuplicateConflict;

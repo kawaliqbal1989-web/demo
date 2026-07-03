@@ -124,6 +124,8 @@ function logApiError(error) {
     isNetworkDown ||
     (code === "SESSION_ALREADY_EXISTS" && method === "post" && path === "/teacher/attendance/sessions") ||
     (code === "DUPLICATE_PENDING" && method === "post" && path === "/student/reassignment-requests") ||
+    (code === "COMPETITION_RESULTS_NOT_PUBLISHED" && method === "get" && typeof path === "string" && /\/competitions\/[^/]+\/certificates$/.test(path)) ||
+    (code === "WORKFLOW_STAGE_CONFLICT" && method === "post" && typeof path === "string" && /\/franchise\/competition_requests\/[^/]+\/forward$/.test(path)) ||
     (code === "FEATURE_NOT_ASSIGNED" && method === "get" && path === "/student/practice-worksheets/options") ||
     (code === "FEATURE_NOT_ASSIGNED" && method === "get" && path === "/student/abacus-practice-worksheets/options") ||
     isStudentDuplicateConflict

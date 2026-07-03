@@ -105,6 +105,12 @@ function buildCompetitionCertificateDetails({ competition, leaderboardRow, certi
   ];
 }
 
+function canManageCompetitionCertificates(competition) {
+  if (!competition) return false;
+  if (competition.legacyResultStatus) return true;
+  return String(competition.resultStatus || "").toUpperCase() === "PUBLISHED";
+}
+
 function SuperadminCompetitionDetailsPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -180,7 +186,9 @@ function SuperadminCompetitionDetailsPage() {
           setCompetitionLeaderboard(Array.isArray(leaderboardResponse?.data?.leaderboard) ? leaderboardResponse.data.leaderboard : []);
           setCompetitionLevelLeaderboards(Array.isArray(leaderboardResponse?.data?.levelLeaderboards) ? leaderboardResponse.data.levelLeaderboards : []);
         }
-        const certificatesResponse = await listCompetitionCertificates(competitionId).catch(() => null);
+        const certificatesResponse = canManageCompetitionCertificates(item)
+          ? await listCompetitionCertificates(competitionId).catch(() => null)
+          : null;
         if (!ignore) {
           setCompetitionCertificates(Array.isArray(certificatesResponse?.data?.data?.items) ? certificatesResponse.data.data.items : []);
         }
@@ -528,6 +536,10 @@ function SuperadminCompetitionDetailsPage() {
   };
 
   const refreshCompetitionCertificates = async () => {
+    if (!canManageCompetitionCertificates(competition)) {
+      setCompetitionCertificates([]);
+      return;
+    }
     const response = await listCompetitionCertificates(competitionId).catch(() => null);
     setCompetitionCertificates(Array.isArray(response?.data?.data?.items) ? response.data.data.items : []);
   };
@@ -757,6 +769,7 @@ function SuperadminCompetitionDetailsPage() {
 
   const bankNumbersParsed = useMemo(() => normalizeBankNumbers(bankCreateForm.numbers), [bankCreateForm.numbers]);
   const bankCalculatedAnswer = useMemo(() => computeBankAnswer(bankCreateForm.operation, bankNumbersParsed, bankCreateForm.operators), [bankCreateForm.operation, bankNumbersParsed, bankCreateForm.operators]);
+  const certificatesEnabled = useMemo(() => canManageCompetitionCertificates(competition), [competition]);
 
   const onCreateBankQuestion = async (event) => {
     event.preventDefault();
@@ -1436,14 +1449,16 @@ function SuperadminCompetitionDetailsPage() {
                 <div>
                   <h3 style={{ margin: 0 }}>Competition Certificates</h3>
                   <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
-                    Generate drafts from finalized awards, preview them here, and publish only when ready.
+                    {certificatesEnabled
+                      ? "Generate drafts from finalized awards, preview them here, and publish only when ready."
+                      : "Certificates unlock after results are published."}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void handleGenerateCompetitionCertificates()} disabled={certificateSubmitting || !leaderboardDisplayRows.filter((row) => row?.awardFinalizedAt).length}>
+                  <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void handleGenerateCompetitionCertificates()} disabled={!certificatesEnabled || certificateSubmitting || !leaderboardDisplayRows.filter((row) => row?.awardFinalizedAt).length}>
                     {certificateSubmitting ? "Working..." : "Generate All"}
                   </button>
-                  <button className="button" type="button" style={{ width: "auto" }} onClick={() => void handlePublishCompetitionCertificates({ certificateIds: certificateSelectedKeys })} disabled={certificateSubmitting || !certificateSelectedKeys.length}>
+                  <button className="button" type="button" style={{ width: "auto" }} onClick={() => void handlePublishCompetitionCertificates({ certificateIds: certificateSelectedKeys })} disabled={!certificatesEnabled || certificateSubmitting || !certificateSelectedKeys.length}>
                     Publish Selected
                   </button>
                 </div>
@@ -1476,7 +1491,7 @@ function SuperadminCompetitionDetailsPage() {
                               type="checkbox"
                               checked={certificateSelectedKeys.includes(key)}
                               onChange={() => handleToggleCertificateSelection(key)}
-                              disabled={!cert || Boolean(cert.publishedAt)}
+                              disabled={!certificatesEnabled || !cert || Boolean(cert.publishedAt)}
                             />
                           </td>
                           <td style={{ padding: 10 }}>{row.studentName || row.studentId}</td>
@@ -1491,11 +1506,11 @@ function SuperadminCompetitionDetailsPage() {
                                 Preview
                               </button>
                               {!cert ? (
-                                <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void handleGenerateCompetitionCertificates({ certificateIds: [key] })} disabled={certificateSubmitting}>
+                                <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void handleGenerateCompetitionCertificates({ certificateIds: [key] })} disabled={!certificatesEnabled || certificateSubmitting}>
                                   Generate
                                 </button>
                               ) : cert.publishedAt ? null : (
-                                <button className="button" type="button" style={{ width: "auto" }} onClick={() => void handlePublishCompetitionCertificates({ certificateIds: [key] })} disabled={certificateSubmitting}>
+                                <button className="button" type="button" style={{ width: "auto" }} onClick={() => void handlePublishCompetitionCertificates({ certificateIds: [key] })} disabled={!certificatesEnabled || certificateSubmitting}>
                                   Publish
                                 </button>
                               )}

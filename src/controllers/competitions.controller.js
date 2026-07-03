@@ -66,6 +66,17 @@ function isCompetitionResultStatusSchemaMissing(error) {
   return error?.code === "P2022" || msg.includes("resultstatus") || msg.includes("resultpublishedat");
 }
 
+function isOptionalCompetitionSchemaDriftError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return (
+    error?.code === "P2021" ||
+    error?.code === "P2022" ||
+    message.includes("unknown field") ||
+    message.includes("does not exist in the current database") ||
+    message.includes("table") && message.includes("does not exist")
+  );
+}
+
 function buildCompetitionSelect({ includeResultMeta = true, includeStageTransitions = false } = {}) {
   const select = {
     id: true,
@@ -788,32 +799,34 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
   }
 
   if (req.auth?.role === "SUPERADMIN") {
-    const [competitionEnrollmentsDetailed, competitionWorksheetsDetailed, competitionWorksheetAssignments] = await Promise.all([
-      prisma.competitionEnrollment.findMany({
-        where: { competitionId: id, tenantId: req.auth.tenantId, isActive: true },
-        orderBy: [{ enrolledAt: "asc" }],
-        select: {
-          competitionId: true,
-          studentId: true,
-          levelId: true,
-          isActive: true,
-          enrolledAt: true,
-          student: {
-            select: {
-              id: true,
-              admissionNo: true,
-              firstName: true,
-              lastName: true,
-              email: true,
-              hierarchyNodeId: true,
-              levelId: true,
-              level: { select: { id: true, name: true, rank: true } }
-            }
-          },
-          level: { select: { id: true, name: true, rank: true } }
-        }
-      }),
-      prisma.competitionWorksheet.findMany({
+    const competitionEnrollmentsDetailed = await prisma.competitionEnrollment.findMany({
+      where: { competitionId: id, tenantId: req.auth.tenantId, isActive: true },
+      orderBy: [{ enrolledAt: "asc" }],
+      select: {
+        competitionId: true,
+        studentId: true,
+        levelId: true,
+        isActive: true,
+        enrolledAt: true,
+        student: {
+          select: {
+            id: true,
+            admissionNo: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            hierarchyNodeId: true,
+            levelId: true,
+            level: { select: { id: true, name: true, rank: true } }
+          }
+        },
+        level: { select: { id: true, name: true, rank: true } }
+      }
+    });
+
+    let competitionWorksheetsDetailed = [];
+    try {
+      competitionWorksheetsDetailed = await prisma.competitionWorksheet.findMany({
         where: { competitionId: id, tenantId: req.auth.tenantId },
         orderBy: [{ assignedAt: "desc" }],
         select: {
@@ -850,8 +863,16 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
           competitionPaper: { select: { id: true, title: true, code: true, status: true } },
           competitionPaperBlueprint: { select: { id: true, title: true, version: true, status: true } }
         }
-      }),
-      prisma.competitionWorksheetAssignment.findMany({
+      });
+    } catch (error) {
+      if (!isOptionalCompetitionSchemaDriftError(error)) {
+        throw error;
+      }
+    }
+
+    let competitionWorksheetAssignments = [];
+    try {
+      competitionWorksheetAssignments = await prisma.competitionWorksheetAssignment.findMany({
         where: { competitionId: id, tenantId: req.auth.tenantId },
         orderBy: [{ assignedAt: "desc" }],
         select: {
@@ -890,13 +911,19 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
             }
           }
         }
-      })
-    ]);
+      });
+    } catch (error) {
+      if (!isOptionalCompetitionSchemaDriftError(error)) {
+        throw error;
+      }
+    }
 
     const worksheetIds = [...new Set(competitionWorksheetAssignments.map((row) => row.worksheetId).filter(Boolean))];
     const studentIds = [...new Set(competitionWorksheetAssignments.map((row) => row.studentId).filter(Boolean))];
-    const competitionWorksheetSubmissions = worksheetIds.length && studentIds.length
-      ? await prisma.worksheetSubmission.findMany({
+    let competitionWorksheetSubmissions = [];
+    if (worksheetIds.length && studentIds.length) {
+      try {
+        competitionWorksheetSubmissions = await prisma.worksheetSubmission.findMany({
           where: {
             tenantId: req.auth.tenantId,
             worksheetId: { in: worksheetIds },
@@ -908,7 +935,6 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
             worksheetId: true,
             studentId: true,
             score: true,
-            totalMarks: true,
             earnedMarks: true,
             percentage: true,
             correctCount: true,
@@ -927,8 +953,13 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
             status: true,
             remarks: true
           }
-        })
-      : [];
+        });
+      } catch (error) {
+        if (!isOptionalCompetitionSchemaDriftError(error)) {
+          throw error;
+        }
+      }
+    }
 
     const submissionByKey = new Map(
       competitionWorksheetSubmissions.map((submission) => [`${submission.worksheetId}:${submission.studentId}`, submission])
@@ -947,7 +978,7 @@ const getCompetitionDetail = asyncHandler(async (req, res) => {
                 id: submission.id,
                 status: submission.status,
                 score: submission.score === null || submission.score === undefined ? null : Number(submission.score),
-                totalMarks: submission.totalMarks === null || submission.totalMarks === undefined ? null : Number(submission.totalMarks),
+                totalMarks: null,
                 earnedMarks: submission.earnedMarks === null || submission.earnedMarks === undefined ? null : Number(submission.earnedMarks),
                 percentage: submission.percentage === null || submission.percentage === undefined ? null : Number(submission.percentage),
                 correctCount: submission.correctCount ?? null,
@@ -1771,7 +1802,6 @@ const publishCompetitionWorksheetResults = asyncHandler(async (req, res) => {
           publishedByUserId: true,
           evaluatedAt: true,
           score: true,
-          totalMarks: true,
           earnedMarks: true,
           percentage: true,
           correctCount: true,
@@ -1869,11 +1899,50 @@ const publishCompetitionResults = asyncHandler(async (req, res) => {
     return res.apiError(409, "Apply competition result status migration first", "COMPETITION_RESULT_STATUS_MIGRATION_REQUIRED");
   }
 
+  const leaderboard = await getCompetitionLeaderboard({
+    competitionId,
+    tenantId: req.auth.tenantId,
+    skipApprovalCheck: true,
+    includeAll: true
+  });
+
+  const rankedRows = Array.isArray(leaderboard?.leaderboard) ? leaderboard.leaderboard : [];
+  const publishedAt = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.competitionEnrollment.updateMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        competitionId,
+        isActive: true
+      },
+      data: {
+        rank: null,
+        totalScore: null
+      }
+    });
+
+    if (rankedRows.length) {
+      await Promise.all(rankedRows.map((row) => tx.competitionEnrollment.updateMany({
+        where: {
+          tenantId: req.auth.tenantId,
+          competitionId,
+          studentId: row.studentId,
+          levelId: row.levelId ?? null
+        },
+        data: {
+          rank: row.rank ?? null,
+          totalScore: row.score ?? null
+        }
+      })));
+    }
+  });
+
   const updated = await prisma.competition.update({
     where: { id: competition.id },
     data: {
       resultStatus: "PUBLISHED",
-      resultPublishedAt: new Date()
+      resultPublishedAt: publishedAt
     }
   });
 

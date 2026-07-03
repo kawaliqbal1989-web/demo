@@ -408,6 +408,21 @@ describe("EXAM LATE ENROLLMENT", () => {
     expect(approvedEnrollment).not.toBeNull();
     expect(rejectedEnrollment).toBeNull();
 
+    const resultsRes = await http
+      .get(`/api/exam-cycles/${examCycleId}/results`)
+      .set(authHeader(saToken));
+
+    expect(resultsRes.status).toBe(200);
+    expect(resultsRes.body.data.resultRules.passFailDisplayed).toBe(false);
+    const resultRows = resultsRes.body.data.results || [];
+    const approvedLateResult = resultRows.find((row) => row.studentId === lateApprove.id);
+    const rejectedLateResult = resultRows.find((row) => row.studentId === lateReject.id);
+
+    expect(approvedLateResult).toBeTruthy();
+    expect(approvedLateResult.isLateEnrollment).toBe(true);
+    expect(["PASS", "FAIL"]).not.toContain(approvedLateResult.resultOutcome);
+    expect(rejectedLateResult).toBeFalsy();
+
     const auditRes = await http
       .get(`/api/exam-cycles/${examCycleId}/late-enrollment/audit`)
       .set(authHeader(saToken));

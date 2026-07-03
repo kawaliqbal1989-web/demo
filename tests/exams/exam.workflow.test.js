@@ -257,6 +257,82 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
     expect(response.body.error_code).toBe("ROLE_FORBIDDEN");
   });
 
+  test("Scoped exam-cycle list exposes role summaries and available actions", async () => {
+    const { examCycleId } = await createExamCycleForWorkflow();
+    await moveExamCycleToSuperadmin(examCycleId);
+
+    async function getCycleForRole(token) {
+      const response = await http
+        .get("/api/exam-cycles?limit=100&offset=0")
+        .set(authHeader(token));
+
+      expect(response.status).toBe(200);
+      expect(Array.isArray(response.body.data.items)).toBe(true);
+
+      const cycle = response.body.data.items.find((item) => item.id === examCycleId);
+      expect(cycle).toBeTruthy();
+      return cycle;
+    }
+
+    const [superadminCycle, bpCycle, franchiseCycle, centerCycle, teacherCycle] = await Promise.all([
+      getCycleForRole(saToken),
+      getCycleForRole(bpToken),
+      getCycleForRole(franchiseToken),
+      getCycleForRole(centerToken),
+      getCycleForRole(teacherToken)
+    ]);
+
+    expect(superadminCycle.enrollmentCounts).toMatchObject({
+      normalEnrollmentCount: 1,
+      lateEnrollmentCount: 0,
+      totalEnrollmentCount: 1
+    });
+    expect(superadminCycle.enrollmentListSummary.currentOwnerRole).toBe("SUPERADMIN");
+    expect(superadminCycle.enrollmentListSummary.hierarchy.businessPartnerSubmittedToSuperadmin).toBeGreaterThanOrEqual(1);
+    expect(superadminCycle.availableActions).toMatchObject({
+      manageEnrollment: false,
+      pendingLists: true,
+      lateEnrollment: true,
+      results: true,
+      resultsLockedReason: null
+    });
+
+    expect(bpCycle.enrollmentCounts.totalEnrollmentCount).toBe(1);
+    expect(bpCycle.enrollmentListSummary.currentOwnerRole).toBe("SUPERADMIN");
+    expect(bpCycle.availableActions).toMatchObject({
+      manageEnrollment: false,
+      pendingLists: true,
+      lateEnrollment: true,
+      results: false
+    });
+    expect(bpCycle.availableActions.resultsLockedReason).toBeTruthy();
+
+    expect(franchiseCycle.enrollmentCounts.totalEnrollmentCount).toBe(1);
+    expect(franchiseCycle.availableActions).toMatchObject({
+      manageEnrollment: false,
+      pendingLists: true,
+      lateEnrollment: true,
+      results: false
+    });
+
+    expect(centerCycle.enrollmentCounts.totalEnrollmentCount).toBe(1);
+    expect(centerCycle.availableActions).toMatchObject({
+      manageEnrollment: true,
+      pendingLists: false,
+      lateEnrollment: true,
+      results: false
+    });
+
+    expect(teacherCycle.enrollmentCounts.totalEnrollmentCount).toBe(1);
+    expect(teacherCycle.enrollmentListSummary.teacherListCount).toBeGreaterThanOrEqual(1);
+    expect(teacherCycle.availableActions).toMatchObject({
+      manageEnrollment: true,
+      pendingLists: false,
+      lateEnrollment: false,
+      results: false
+    });
+  });
+
   test("End-to-end list approval + worksheet assignment", async () => {
     const { examCycleId, practiceStartAtIso } = await createExamCycleForWorkflow();
     const { listId } = await moveExamCycleToSuperadmin(examCycleId);

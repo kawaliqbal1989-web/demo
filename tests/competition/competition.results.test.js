@@ -132,6 +132,108 @@ describe("COMPETITION RESULTS", () => {
     expect(response.text).toContain(student.id);
   });
 
+  test("Published competition results stay frozen after submission changes", async () => {
+    const competition = await createCompetition();
+    const student = await prisma.student.findFirstOrThrow({
+      where: { tenantId: tenant.id, isActive: true },
+      orderBy: { createdAt: "asc" }
+    });
+    const worksheet = await prisma.worksheet.create({
+      data: {
+        tenantId: tenant.id,
+        title: `Worksheet ${randomId("competition-results")}`,
+        description: "results freezing test",
+        levelId: level1.id,
+        createdByUserId: superadmin.id,
+        isPublished: true,
+        timeLimitSeconds: 600
+      }
+    });
+
+    await prisma.competitionEnrollment.create({
+      data: {
+        tenantId: tenant.id,
+        competitionId: competition.id,
+        studentId: student.id,
+        levelId: level1.id,
+        isActive: true
+      }
+    });
+
+    await prisma.competitionWorksheetAssignment.create({
+      data: {
+        tenantId: tenant.id,
+        competitionId: competition.id,
+        worksheetId: worksheet.id,
+        studentId: student.id,
+        status: "SUBMITTED",
+        startedAt: new Date(Date.now() - 60 * 1000),
+        submittedAt: new Date(Date.now() - 30 * 1000)
+      }
+    });
+
+    const submission = await prisma.worksheetSubmission.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: worksheet.id,
+        studentId: student.id,
+        status: "PUBLISHED",
+        publishedAt: new Date(),
+        finalSubmittedAt: new Date(),
+        earnedMarks: 100,
+        totalMarks: 100,
+        percentage: 100,
+        correctCount: 10,
+        wrongCount: 0,
+        unansweredCount: 0,
+        totalQuestions: 10,
+        completionTimeSeconds: 45,
+        submittedAt: new Date()
+      }
+    });
+
+    const publishResponse = await http
+      .post(`/api/competitions/${competition.id}/results/publish`)
+      .set(authHeader(superadminToken));
+
+    expect(publishResponse.status).toBe(200);
+
+    await prisma.worksheetSubmission.update({
+      where: { id: submission.id },
+      data: {
+        earnedMarks: 0,
+        totalMarks: 100,
+        percentage: 0,
+        correctCount: 0,
+        wrongCount: 10,
+        unansweredCount: 0,
+        completionTimeSeconds: 120
+      }
+    });
+
+    const resultsResponse = await http
+      .get(`/api/competitions/${competition.id}/results`)
+      .set(authHeader(superadminToken));
+
+    expect(resultsResponse.status).toBe(200);
+    expect(resultsResponse.body?.data?.leaderboard).toHaveLength(1);
+    expect(resultsResponse.body?.data?.leaderboard[0]?.studentId).toBe(student.id);
+    expect(resultsResponse.body?.data?.leaderboard[0]?.score).toBe(100);
+    expect(resultsResponse.body?.data?.leaderboard[0]?.rank).toBe(1);
+
+    const frozenEnrollment = await prisma.competitionEnrollment.findUniqueOrThrow({
+      where: {
+        competitionId_studentId: {
+          competitionId: competition.id,
+          studentId: student.id
+        }
+      }
+    });
+
+    expect(frozenEnrollment.rank).toBe(1);
+    expect(Number(frozenEnrollment.totalScore)).toBe(100);
+  });
+
   test("Center cannot publish competition results", async () => {
     const competition = await createCompetition();
 

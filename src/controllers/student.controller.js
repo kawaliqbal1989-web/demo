@@ -119,6 +119,49 @@ function buildCompetitionResultPendingPayload({ status = "SUBMITTED", submittedA
   };
 }
 
+async function buildLockedExamAttemptPayload({ tenantId, worksheet, attempt, now = new Date() }) {
+  const timing = getAttemptTiming({
+    startedAt: attempt?.submittedAt || now,
+    timeLimitSeconds: worksheet?.timeLimitSeconds
+  });
+  const publicationState = await getExamResultPublicationState({ tenantId, worksheet });
+  const resultPayload = buildAttemptResultPayload(attempt);
+  const visibleResultPayload = publicationState.isExamWorksheet && !publicationState.isPublished && resultPayload
+    ? buildEmbargoedAttemptPayload({
+        status: resultPayload.status,
+        submittedAt: resultPayload.submittedAt
+      })
+    : resultPayload;
+  const draft = getAttemptDraftFromSubmission(attempt);
+
+  return {
+    attemptId: attempt.id,
+    worksheetId: worksheet.id,
+    status: attempt.remarks === "Timed out" ? "TIMED_OUT" : "SUBMITTED",
+    worksheetKind: "EXAM",
+    attemptTimerMode: deriveAttemptTimerMode("EXAM", worksheet.timeLimitSeconds),
+    startedAt: attempt.submittedAt || null,
+    endsAt: timing.endsAt,
+    serverNow: now,
+    version: draft.version,
+    savedAt: draft.savedAt,
+    answersByQuestionId: {},
+    result: visibleResultPayload,
+    worksheet: {
+      id: worksheet.id,
+      title: worksheet.title,
+      worksheetKind: "EXAM",
+      attemptTimerMode: deriveAttemptTimerMode("EXAM", worksheet.timeLimitSeconds),
+      generationMode: worksheet.generationMode,
+      examCycleId: worksheet.examCycleId,
+      timeLimitSeconds: worksheet.timeLimitSeconds,
+      isCompetitionWorksheet: false,
+      competitionAssignmentStatus: null,
+      questions: []
+    }
+  };
+}
+
 async function getExamResultPublicationState({ tenantId, worksheet }) {
   const isExamWorksheet = String(worksheet?.generationMode || "").trim().toUpperCase() === "EXAM" && Boolean(worksheet?.examCycleId);
 
@@ -185,8 +228,13 @@ function deriveStudentWorksheetKind(worksheet) {
   return "WORKSHEET";
 }
 
-function deriveAttemptTimerMode(worksheetKind) {
-  return worksheetKind === "PRACTICE" || worksheetKind === "ABACUS_PRACTICE" ? "COUNTDOWN" : "ELAPSED";
+function deriveAttemptTimerMode(worksheetKind, timeLimitSeconds) {
+  const hasTimeLimit = Number.isFinite(Number(timeLimitSeconds)) && Number(timeLimitSeconds) > 0;
+  if (!hasTimeLimit) {
+    return "ELAPSED";
+  }
+
+  return ["EXAM", "PRACTICE", "ABACUS_PRACTICE"].includes(worksheetKind) ? "COUNTDOWN" : "ELAPSED";
 }
 
 const COMPETITION_ASSIGNMENT_ACTIVE_STATUSES = ["ASSIGNED", "STARTED", "SUBMITTED"];
@@ -706,6 +754,31 @@ async function assertWorksheetAccessibleForStudent({ tenantId, student, workshee
     }
 
     if (worksheet.generationMode === "EXAM") {
+      const enrollment = await prisma.examEnrollmentEntry.findFirst({
+        where: {
+          tenantId,
+          examCycleId: worksheet.examCycleId,
+          studentId: student.id
+        },
+        select: {
+          enrolledLevelId: true
+        }
+      });
+
+      if (!enrollment) {
+        const error = new Error("Student is not enrolled in this exam cycle");
+        error.statusCode = 404;
+        error.errorCode = "EXAM_ENROLLMENT_NOT_FOUND";
+        throw error;
+      }
+
+      if (worksheet.levelId !== enrollment.enrolledLevelId) {
+        const error = new Error("Requested worksheet level does not match enrolled exam level");
+        error.statusCode = 409;
+        error.errorCode = "EXAM_LEVEL_MISMATCH";
+        throw error;
+      }
+
       if (now.getTime() < examStartsAt.getTime()) {
         const error = new Error("Exam is not live");
         error.statusCode = 403;
@@ -884,6 +957,70 @@ function mapDraftAnswersToSubmissionAnswers({ answersByQuestionId, questions }) 
     out.push({ questionNumber, answer: value });
   }
   return out;
+}
+
+async function finalizeExpiredStudentWorksheetAttempt({ attempt, worksheet, tenantId, studentId, now = new Date() }) {
+  if (!attempt || attempt.finalSubmittedAt) {
+    return attempt;
+  }
+
+  if (String(worksheet?.generationMode || "").trim().toUpperCase() !== "EXAM") {
+    return attempt;
+  }
+
+  const timing = getAttemptTiming({
+    startedAt: attempt.submittedAt || now,
+    timeLimitSeconds: worksheet.timeLimitSeconds
+  });
+
+  if (!timing.endsAt || now.getTime() < timing.endsAt.getTime()) {
+    return attempt;
+  }
+
+  const draft = getAttemptDraftFromSubmission(attempt, worksheet.questions || []);
+  const answers = mapDraftAnswersToSubmissionAnswers({
+    answersByQuestionId: draft.answersByQuestionId,
+    questions: worksheet.questions || []
+  });
+
+  if (answers.length) {
+    try {
+      await submitWorksheet({
+        worksheetId: worksheet.id,
+        studentId,
+        tenantId,
+        answers,
+        allowExpired: true,
+        remarksOverride: "Timed out"
+      });
+    } catch (error) {
+      const latest = await prisma.worksheetSubmission.findFirst({
+        where: { id: attempt.id, tenantId, studentId },
+        select: STUDENT_ATTEMPT_SELECT
+      });
+      if (!latest?.finalSubmittedAt) {
+        throw error;
+      }
+    }
+  }
+
+  await prisma.worksheetSubmission.updateMany({
+    where: {
+      id: attempt.id,
+      tenantId,
+      studentId
+    },
+    data: {
+      finalSubmittedAt: timing.endsAt,
+      completionTimeSeconds: timing.timeLimitSeconds,
+      remarks: "Timed out"
+    }
+  });
+
+  return prisma.worksheetSubmission.findFirst({
+    where: { id: attempt.id, tenantId, studentId },
+    select: STUDENT_ATTEMPT_SELECT
+  });
 }
 
 const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
@@ -1090,16 +1227,49 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
       }
     }
 
+    if (worksheet.generationMode === "EXAM" && attempt?.finalSubmittedAt) {
+      return res.apiSuccess("Exam already submitted", await buildLockedExamAttemptPayload({
+        tenantId: req.auth.tenantId,
+        worksheet,
+        attempt,
+        now
+      }));
+    }
+
     // Enforce device/session lock for EXAM attempts.
     attempt = await enforceExamAttemptDeviceLock({ req, attempt, worksheet });
 
     const startedAt = attempt.submittedAt || now;
     const timing = getAttemptTiming({ startedAt, timeLimitSeconds: worksheet.timeLimitSeconds });
-    const status = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
+    let status = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
+
+    if (!isCompetitionAttempt && status === "TIMED_OUT" && !attempt.finalSubmittedAt) {
+      attempt = await finalizeExpiredStudentWorksheetAttempt({
+        attempt,
+        worksheet,
+        tenantId: req.auth.tenantId,
+        studentId: req.student.id,
+        now
+      });
+      status = attempt?.remarks === "Timed out" ? "TIMED_OUT" : deriveAttemptStatus({
+        finalSubmittedAt: attempt?.finalSubmittedAt,
+        endsAt: timing.endsAt,
+        now
+      });
+    }
+
+    if (worksheet.generationMode === "EXAM" && attempt?.finalSubmittedAt) {
+      return res.apiSuccess("Exam already submitted", await buildLockedExamAttemptPayload({
+        tenantId: req.auth.tenantId,
+        worksheet,
+        attempt,
+        now
+      }));
+    }
 
     const draft = getAttemptDraftFromSubmission(attempt, worksheet.questions);
     const worksheetKind = isCompetitionAttempt ? "COMPETITION" : deriveStudentWorksheetKind(worksheet);
-    const attemptTimerMode = isCompetitionAttempt ? "COUNTDOWN" : deriveAttemptTimerMode(worksheetKind);
+    const attemptTimerMode = isCompetitionAttempt ? "COUNTDOWN" : deriveAttemptTimerMode(worksheetKind, worksheet.timeLimitSeconds);
     const publicationState = await getExamResultPublicationState({
       tenantId: req.auth.tenantId,
       worksheet
@@ -1494,6 +1664,29 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     worksheet: worksheetDetails
   });
+
+  if (attempt.finalSubmittedAt) {
+    if (worksheetDetails.generationMode === "EXAM") {
+      return res.apiError(409, "Exam already submitted", "EXAM_ALREADY_SUBMITTED");
+    }
+
+    const existingResult = buildAttemptResultPayload(attempt);
+    const visibleResult = publicationState.isExamWorksheet && !publicationState.isPublished
+      ? buildEmbargoedAttemptPayload({
+          status: existingResult?.status || (attempt.remarks === "Timed out" ? "TIMED_OUT" : "SUBMITTED"),
+          submittedAt: attempt.finalSubmittedAt
+        })
+      : existingResult;
+
+    return res.apiSuccess("Attempt already submitted", {
+      receiptId: attempt.id,
+      serverNow: now,
+      ...(visibleResult || {
+        status: attempt.remarks === "Timed out" ? "TIMED_OUT" : "SUBMITTED",
+        submittedAt: attempt.finalSubmittedAt
+      })
+    });
+  }
 
   try {
     await enforceExamAttemptDeviceLock({ req, attempt, worksheet: worksheetDetails });
@@ -3752,7 +3945,7 @@ const getStudentExamResult = asyncHandler(async (req, res) => {
       examCycleId,
       studentId: req.student.id
     },
-    select: { id: true }
+    select: { id: true, enrolledLevelId: true }
   });
 
   if (!enrollment) {
@@ -3783,7 +3976,8 @@ const getStudentExamResult = asyncHandler(async (req, res) => {
       worksheet: {
         is: {
           examCycleId,
-          generationMode: "EXAM"
+          generationMode: "EXAM",
+          levelId: enrollment.enrolledLevelId
         }
       }
     },
@@ -3846,6 +4040,7 @@ const listStudentExamEnrollments = asyncHandler(async (req, res) => {
     select: {
       id: true,
       examCycleId: true,
+      enrolledLevelId: true,
       createdAt: true,
       examCycle: {
         select: {
@@ -3934,6 +4129,7 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
     select: {
       id: true,
       examCycleId: true,
+      enrolledLevelId: true,
       createdAt: true,
       examCycle: {
         select: {
@@ -3999,8 +4195,13 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
               id: true,
               title: true,
               generationMode: true,
+              levelId: true,
               timeLimitSeconds: true,
-              examCycleId: true
+              examCycleId: true,
+              questions: {
+                orderBy: { questionNumber: "asc" },
+                select: { id: true, questionNumber: true }
+              }
             }
           }
         }
@@ -4018,16 +4219,30 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
           worksheetId: { in: worksheetIds }
         },
         orderBy: { submittedAt: "desc" },
-        select: {
-          worksheetId: true,
-          id: true,
-          finalSubmittedAt: true
-        }
+        select: STUDENT_ATTEMPT_SELECT
       })
     : [];
 
+  const worksheetById = new Map(assignedWorksheets.map((worksheet) => [worksheet.id, worksheet]));
+  const reconciledSubmissions = await Promise.all(
+    submissions.map(async (submission) => {
+      const worksheet = worksheetById.get(submission.worksheetId);
+      if (!worksheet || submission.finalSubmittedAt) {
+        return submission;
+      }
+
+      return finalizeExpiredStudentWorksheetAttempt({
+        attempt: submission,
+        worksheet,
+        tenantId,
+        studentId,
+        now: new Date()
+      });
+    })
+  );
+
   const latestByWorksheetId = new Map();
-  for (const s of submissions) {
+  for (const s of reconciledSubmissions.filter(Boolean)) {
     if (!latestByWorksheetId.has(s.worksheetId)) {
       latestByWorksheetId.set(s.worksheetId, s);
     }
@@ -4035,9 +4250,10 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
 
   const worksheetsByExamCycleId = new Map();
   for (const w of assignedWorksheets) {
-    const current = worksheetsByExamCycleId.get(w.examCycleId) || { EXAM: null };
+    const key = `${w.examCycleId}:${w.levelId || ""}`;
+    const current = worksheetsByExamCycleId.get(key) || { EXAM: null };
     if (w.generationMode === "EXAM" && !current.EXAM) current.EXAM = w;
-    worksheetsByExamCycleId.set(w.examCycleId, current);
+    worksheetsByExamCycleId.set(key, current);
   }
 
   const payload = entries
@@ -4049,12 +4265,12 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
           : "NOT_SELECTED"
         : "NOT_IN_COMBINED_LIST";
 
-      const ws = worksheetsByExamCycleId.get(e.examCycleId) || { PRACTICE: null, EXAM: null };
+      const ws = worksheetsByExamCycleId.get(`${e.examCycleId}:${e.enrolledLevelId || ""}`) || { PRACTICE: null, EXAM: null };
 
       const mapWorksheet = (worksheet) => {
         if (!worksheet) return null;
         const sub = latestByWorksheetId.get(worksheet.id) || null;
-        const status = sub ? (sub.finalSubmittedAt ? "SUBMITTED" : "IN_PROGRESS") : "NOT_STARTED";
+        const status = sub ? (sub.finalSubmittedAt ? (sub.remarks === "Timed out" ? "TIMED_OUT" : "SUBMITTED") : "IN_PROGRESS") : "NOT_STARTED";
         return {
           worksheetId: worksheet.id,
           title: worksheet.title,

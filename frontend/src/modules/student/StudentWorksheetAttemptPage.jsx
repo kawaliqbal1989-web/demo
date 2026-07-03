@@ -12,12 +12,40 @@ import {
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { VirtualAbacus } from "../../components/VirtualAbacus";
 import { generateWorksheetResultPdf } from "../../utils/pdfExport";
+import { baseURL } from "../../services/apiClient";
+import { getStoredAccessToken } from "../../auth/tokenStorage";
+import { getOrCreateClientSessionId } from "../../utils/clientSession";
 
 const QUESTION_FONT_MIN_PX = 12;
 const QUESTION_FONT_MAX_PX = 28;
 
 function draftKey(attemptId) {
   return `student_attempt_draft_${attemptId}`;
+}
+
+function submitAttemptWithKeepalive({ attemptId, answersByQuestionId }) {
+  const accessToken = getStoredAccessToken();
+  if (!attemptId || !accessToken || typeof fetch !== "function") {
+    return false;
+  }
+
+  try {
+    void fetch(`${baseURL}/student/attempts/${encodeURIComponent(attemptId)}/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${accessToken}`,
+        "x-client-session": getOrCreateClientSessionId()
+      },
+      body: JSON.stringify({
+        answersByQuestionId: answersByQuestionId && typeof answersByQuestionId === "object" ? answersByQuestionId : {}
+      }),
+      keepalive: true
+    }).catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function formatSeconds(secs) {
@@ -191,6 +219,19 @@ function StudentWorksheetAttemptPage() {
       return 16;
     }
   });
+  const [timerPosition, setTimerPosition] = useState(() => {
+    try {
+      const raw = localStorage.getItem("student_ws_timer_position");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed && Number.isFinite(Number(parsed.x)) && Number.isFinite(Number(parsed.y))) {
+        return { x: Number(parsed.x), y: Number(parsed.y) };
+      }
+    } catch {
+      // ignore
+    }
+    const width = typeof window !== "undefined" ? window.innerWidth : 1024;
+    return { x: Math.max(12, width - 190), y: 84 };
+  });
 
   const attemptId = attempt?.attemptId || null;
   const serverOffsetMsRef = useRef(0);
@@ -204,6 +245,8 @@ function StudentWorksheetAttemptPage() {
   const autoSubmitRetryTimerRef = useRef(null);
   const latestAnswersRef = useRef({});
   const tabIdRef = useRef(`${Date.now()}_${Math.floor(Math.random() * 100000)}`);
+  const exitSubmitSentRef = useRef(false);
+  const timerDragRef = useRef(null);
 
   useEffect(() => {
     latestAnswersRef.current = answersByQuestionId;
@@ -228,6 +271,7 @@ function StudentWorksheetAttemptPage() {
     submittingRef.current = false;
     pendingSaveRef.current = false;
     inflightSaveRef.current = false;
+    exitSubmitSentRef.current = false;
     if (autoSubmitRetryTimerRef.current) {
       window.clearTimeout(autoSubmitRetryTimerRef.current);
       autoSubmitRetryTimerRef.current = null;
@@ -345,7 +389,8 @@ function StudentWorksheetAttemptPage() {
         }
         const status = e?.response?.status;
         if (status === 409) {
-          setError("This worksheet is already submitted.");
+          const code = e?.response?.data?.errorCode || e?.response?.data?.error_code;
+          setError(code === "EXAM_LEVEL_MISMATCH" ? "This exam worksheet does not match your enrolled exam level." : "This worksheet is already submitted.");
           return;
         }
 
@@ -379,6 +424,14 @@ function StudentWorksheetAttemptPage() {
       // ignore
     }
   }, [questionFontPx]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("student_ws_timer_position", JSON.stringify(timerPosition));
+    } catch {
+      // ignore
+    }
+  }, [timerPosition]);
 
   const questionRows = useMemo(() => {
     return Array.isArray(worksheet?.questions) ? worksheet.questions : [];
@@ -568,6 +621,8 @@ function StudentWorksheetAttemptPage() {
   };
 
   const attemptStatus = attempt?.status ? String(attempt.status) : "NOT_STARTED";
+  const isExamWorksheet = String(worksheet?.generationMode || "").trim().toUpperCase() === "EXAM";
+  const shouldSubmitOnExit = Boolean(attemptId && isExamWorksheet && !result && attemptStatus === "IN_PROGRESS");
   const isLocked = Boolean(result) || multiTabLocked || attemptStatus === "SUBMITTED" || attemptStatus === "TIMED_OUT";
   const timeLimitSeconds = Number.isFinite(Number(worksheet?.timeLimitSeconds)) && Number(worksheet.timeLimitSeconds) > 0
     ? Number(worksheet.timeLimitSeconds)
@@ -783,14 +838,59 @@ function StudentWorksheetAttemptPage() {
   }, [attemptId, isLocked]);
 
   useEffect(() => {
-    const onBeforeUnload = () => {
-      if (pendingSaveRef.current) {
+    const submitCurrentExam = () => {
+      if (!shouldSubmitOnExit || exitSubmitSentRef.current) {
+        return false;
+      }
+
+      exitSubmitSentRef.current = submitAttemptWithKeepalive({
+        attemptId,
+        answersByQuestionId: latestAnswersRef.current
+      });
+      return exitSubmitSentRef.current;
+    };
+
+    const onPageExit = () => {
+      if (!submitCurrentExam() && pendingSaveRef.current) {
         void flushSave();
       }
     };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [attemptId, isLocked]);
+
+    const onPopState = () => {
+      submitCurrentExam();
+    };
+
+    const onDocumentClick = (event) => {
+      if (!shouldSubmitOnExit || event.defaultPrevented) return;
+      const target = event.target instanceof Element ? event.target : null;
+      if (!target) return;
+
+      const anchor = target.closest("a[href]");
+      const button = target.closest("button");
+      const isInternalNavigation = Boolean(
+        anchor &&
+        !anchor.hasAttribute("download") &&
+        (!anchor.target || anchor.target === "_self") &&
+        new URL(anchor.href, window.location.href).origin === window.location.origin
+      );
+      const isLogoutAction = Boolean(button && /^(log\s*out|logout|sign\s*out)$/i.test(String(button.textContent || "").trim()));
+
+      if (isInternalNavigation || isLogoutAction) {
+        submitCurrentExam();
+      }
+    };
+
+    window.addEventListener("pagehide", onPageExit);
+    window.addEventListener("beforeunload", onPageExit);
+    window.addEventListener("popstate", onPopState);
+    document.addEventListener("click", onDocumentClick, true);
+    return () => {
+      window.removeEventListener("pagehide", onPageExit);
+      window.removeEventListener("beforeunload", onPageExit);
+      window.removeEventListener("popstate", onPopState);
+      document.removeEventListener("click", onDocumentClick, true);
+    };
+  }, [attemptId, shouldSubmitOnExit]);
 
   useEffect(() => {
     if (!attemptId || !isCountdownMode || result) {
@@ -801,8 +901,8 @@ function StudentWorksheetAttemptPage() {
     }
   }, [attemptId, attemptStatus, isCountdownMode, result]);
 
-  const runSubmit = async ({ dueToTimeout = false } = {}) => {
-    if (!attemptId || submittingRef.current) return;
+  const runSubmit = async ({ dueToTimeout = false, dueToExit = false } = {}) => {
+    if (!attemptId || submittingRef.current) return false;
 
     submittingRef.current = true;
     setConfirmOpen(false);
@@ -817,7 +917,7 @@ function StudentWorksheetAttemptPage() {
       setResult(payload);
       setAttempt((prev) => (prev ? { ...prev, status: payload?.status || (dueToTimeout ? "TIMED_OUT" : "SUBMITTED") } : prev));
       autoSubmitRetryCountRef.current = 0;
-      setSaveMessage(dueToTimeout ? "Auto-submitted" : "Submitted");
+      setSaveMessage(dueToTimeout ? "Auto-submitted" : dueToExit ? "Submitted before leaving" : "Submitted");
       pendingSaveRef.current = false;
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
@@ -832,6 +932,8 @@ function StudentWorksheetAttemptPage() {
       } catch {
         // ignore
       }
+      exitSubmitSentRef.current = true;
+      return true;
     } catch (e) {
       const code = e?.response?.data?.errorCode || e?.response?.data?.error_code;
       if (code === "ATTEMPT_ENDED") {
@@ -854,10 +956,23 @@ function StudentWorksheetAttemptPage() {
           setError(dueToTimeout ? "Time is up. Auto-submit failed. Refresh the page." : "Submit failed. Please try again.");
         }
       }
+      return false;
     } finally {
       submittingRef.current = false;
       setSubmitting(false);
     }
+  };
+
+  const handleBackToWorksheets = async () => {
+    if (shouldSubmitOnExit) {
+      setSaveMessage("Submitting before leaving…");
+      const submitted = await runSubmit({ dueToExit: true });
+      if (!submitted) {
+        return;
+      }
+    }
+
+    navigate("/student/worksheets", { replace: true });
   };
 
   const onSubmit = async () => {
@@ -943,7 +1058,7 @@ function StudentWorksheetAttemptPage() {
             By starting this worksheet, you confirm that you are ready to begin now, you will complete it yourself, and the timer will continue once the worksheet starts.
           </div>
           <div style={{ color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-            Do not refresh, close the tab, or open the worksheet in multiple tabs while attempting it.
+            Leaving, refreshing, closing, or logging out during an exam will submit your current answers. Do not open the worksheet in multiple tabs.
           </div>
         </div>
 
@@ -999,6 +1114,34 @@ function StudentWorksheetAttemptPage() {
   const timerText = result ? takenTimeText : countdownTimeText;
   const timerLabel = result ? "Taken Time" : (isCountdownMode ? "Count Down" : "Timer");
   const timerSummaryLabel = result ? "Taken Time" : (isCountdownMode ? "Count Down" : "Time Used");
+  const showFloatingTimer = Boolean(attemptId && timeLimitSeconds && !result && attemptStatus === "IN_PROGRESS");
+  const clampTimerPosition = (nextX, nextY) => {
+    const width = typeof window !== "undefined" ? window.innerWidth : 1024;
+    const height = typeof window !== "undefined" ? window.innerHeight : 768;
+    return {
+      x: Math.min(Math.max(8, nextX), Math.max(8, width - 176)),
+      y: Math.min(Math.max(8, nextY), Math.max(8, height - 64))
+    };
+  };
+  const onTimerPointerDown = (event) => {
+    timerDragRef.current = {
+      pointerId: event.pointerId,
+      dx: event.clientX - timerPosition.x,
+      dy: event.clientY - timerPosition.y
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const onTimerPointerMove = (event) => {
+    const drag = timerDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setTimerPosition(clampTimerPosition(event.clientX - drag.dx, event.clientY - drag.dy));
+  };
+  const onTimerPointerUp = (event) => {
+    if (timerDragRef.current?.pointerId === event.pointerId) {
+      timerDragRef.current = null;
+    }
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
   const totalTimeText = timeLimitSeconds ? formatSeconds(timeLimitSeconds) : "—";
   const statusText = multiTabLocked
     ? "OPEN_IN_ANOTHER_TAB"
@@ -1033,7 +1176,6 @@ function StudentWorksheetAttemptPage() {
       setQuestionFontPx((prev) => Math.min(QUESTION_FONT_MAX_PX, prev + 1));
     };
 
-  const isExamWorksheet = String(worksheet?.generationMode || "").toUpperCase() === "EXAM";
   const isCompetitionWorksheet = Boolean(worksheet?.isCompetitionWorksheet || worksheetPreview?.isCompetitionWorksheet);
   const showCompetitionPendingPublication = isCompetitionWorksheet && (isResultEmbargoed || (attemptStatus === "SUBMITTED" && !result));
   const useExamPageStyling = isColumnSumGrid;
@@ -1119,6 +1261,39 @@ function StudentWorksheetAttemptPage() {
 
   return (
     <div className={useExamPageStyling ? "ws-attempt-page ws-attempt-page--exam" : "ws-attempt-page"}>
+      {showFloatingTimer ? (
+        <div
+          role="timer"
+          aria-live="polite"
+          onPointerDown={onTimerPointerDown}
+          onPointerMove={onTimerPointerMove}
+          onPointerUp={onTimerPointerUp}
+          onPointerCancel={onTimerPointerUp}
+          style={{
+            position: "fixed",
+            left: timerPosition.x,
+            top: timerPosition.y,
+            zIndex: 50,
+            minWidth: 156,
+            padding: "8px 12px",
+            borderRadius: 10,
+            border: "1px solid var(--color-border-strong)",
+            background: "var(--color-surface)",
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.18)",
+            cursor: "grab",
+            touchAction: "none",
+            userSelect: "none"
+          }}
+          title="Drag timer"
+        >
+          <div style={{ fontSize: 11, color: "var(--color-text-muted)", fontWeight: 700 }}>
+            {timerLabel}
+          </div>
+          <div style={{ fontSize: 20, fontWeight: 800, lineHeight: 1.1 }}>
+            {timerText}
+          </div>
+        </div>
+      ) : null}
       <div className={useExamPageStyling ? "ws-attempt-page__panel" : ""} style={{ display: "grid", gap: 12, paddingBottom: 110 }}>
         <div className={useExamPageStyling ? "ws-exam-shell" : ""}>
         <div
@@ -1139,7 +1314,7 @@ function StudentWorksheetAttemptPage() {
             <button
               className={useExamPageStyling ? "button secondary" : "button secondary"}
               style={useExamPageStyling ? { width: "36px", height: "36px", padding: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" } : { width: "auto" }}
-              onClick={() => navigate("/student/worksheets") }
+              onClick={() => void handleBackToWorksheets()}
               aria-label="Back to worksheets"
             >
               {useExamPageStyling ? (

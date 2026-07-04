@@ -3433,19 +3433,25 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
       })
     : [];
 
-  const latestByWorksheetId = new Map();
+  const submissionStateByWorksheetId = new Map();
   for (const s of submissions) {
-    if (!latestByWorksheetId.has(s.worksheetId)) {
-      latestByWorksheetId.set(s.worksheetId, s);
+    const current = submissionStateByWorksheetId.get(s.worksheetId) || {
+      hasSubmission: false,
+      hasFinalSubmission: false
+    };
+    current.hasSubmission = true;
+    if (s.finalSubmittedAt) {
+      current.hasFinalSubmission = true;
     }
+    submissionStateByWorksheetId.set(s.worksheetId, current);
   }
 
   const getWorksheetStatus = (worksheetId) => {
-    const submission = latestByWorksheetId.get(worksheetId) || null;
-    if (!submission) {
+    const submissionState = submissionStateByWorksheetId.get(worksheetId) || null;
+    if (!submissionState?.hasSubmission) {
       return "NOT_STARTED";
     }
-    return submission.finalSubmittedAt ? "SUBMITTED" : "IN_PROGRESS";
+    return submissionState.hasFinalSubmission ? "SUBMITTED" : "IN_PROGRESS";
   };
 
   const worksheetStatusRank = {

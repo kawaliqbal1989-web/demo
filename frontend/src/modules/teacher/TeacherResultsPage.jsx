@@ -393,6 +393,10 @@ function TeacherResultsPage() {
 
   const exportRows = filteredRows;
 
+  if (loading) {
+    return <LoadingState label="Loading student results..." />;
+  }
+
   const handleCopy = async () => {
     const text = buildDashboardText(summaryCards, exportRows);
     let ok = false;

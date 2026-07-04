@@ -84,8 +84,24 @@ function normalizeExamCompletionTime(completionTimeSeconds, timeLimitSeconds) {
 
 function deriveCandidateStatus(submission) {
   if (!submission) return "ABSENT";
-  if (!submission.finalSubmittedAt) return "IN_PROGRESS";
-  return String(submission.remarks || "").trim().toLowerCase() === "timed out" ? "TIMED_OUT" : "SUBMITTED";
+  const remark = String(submission.remarks || "").trim().toLowerCase();
+  const completionTimeSeconds = toNullableNumber(submission.completionTimeSeconds);
+  const timeLimitSeconds = toNullableNumber(submission?.worksheet?.timeLimitSeconds);
+  const hasReachedTimeLimit =
+    completionTimeSeconds !== null &&
+    timeLimitSeconds !== null &&
+    timeLimitSeconds > 0 &&
+    completionTimeSeconds >= timeLimitSeconds;
+
+  if (submission.finalSubmittedAt) {
+    return remark === "timed out" || hasReachedTimeLimit ? "TIMED_OUT" : "SUBMITTED";
+  }
+
+  if (remark === "timed out" || hasReachedTimeLimit) {
+    return "TIMED_OUT";
+  }
+
+  return "IN_PROGRESS";
 }
 
 const EXAM_RESULT_RULES = Object.freeze({

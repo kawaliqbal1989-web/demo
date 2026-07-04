@@ -3400,6 +3400,7 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
         },
         orderBy: { assignedAt: "desc" },
         select: {
+          assignedAt: true,
           worksheet: {
             select: {
               id: true,
@@ -3439,10 +3440,53 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
     }
   }
 
+  const getWorksheetStatus = (worksheetId) => {
+    const submission = latestByWorksheetId.get(worksheetId) || null;
+    if (!submission) {
+      return "NOT_STARTED";
+    }
+    return submission.finalSubmittedAt ? "SUBMITTED" : "IN_PROGRESS";
+  };
+
+  const worksheetStatusRank = {
+    SUBMITTED: 3,
+    IN_PROGRESS: 2,
+    NOT_STARTED: 1
+  };
+
   const worksheetsByExamCycleId = new Map();
-  for (const w of assignedWorksheets) {
+  for (const assignment of assignments) {
+    const w = assignment?.worksheet;
+    if (!w?.examCycleId || w.generationMode !== "EXAM") {
+      continue;
+    }
+
+    const candidate = {
+      ...w,
+      assignedAt: assignment.assignedAt || null
+    };
+
     const current = worksheetsByExamCycleId.get(w.examCycleId) || { EXAM: null };
-    if (w.generationMode === "EXAM" && !current.EXAM) current.EXAM = w;
+    const currentStatus = current.EXAM ? getWorksheetStatus(current.EXAM.id) : null;
+    const candidateStatus = getWorksheetStatus(candidate.id);
+
+    if (!current.EXAM) {
+      current.EXAM = candidate;
+    } else {
+      const currentRank = worksheetStatusRank[currentStatus] || 0;
+      const candidateRank = worksheetStatusRank[candidateStatus] || 0;
+
+      if (candidateRank > currentRank) {
+        current.EXAM = candidate;
+      } else if (candidateRank === currentRank) {
+        const currentAssignedAt = current.EXAM.assignedAt ? new Date(current.EXAM.assignedAt).getTime() : 0;
+        const candidateAssignedAt = candidate.assignedAt ? new Date(candidate.assignedAt).getTime() : 0;
+        if (candidateAssignedAt > currentAssignedAt) {
+          current.EXAM = candidate;
+        }
+      }
+    }
+
     worksheetsByExamCycleId.set(w.examCycleId, current);
   }
 
@@ -3459,8 +3503,7 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
 
       const mapWorksheet = (worksheet) => {
         if (!worksheet) return null;
-        const sub = latestByWorksheetId.get(worksheet.id) || null;
-        const status = sub ? (sub.finalSubmittedAt ? "SUBMITTED" : "IN_PROGRESS") : "NOT_STARTED";
+        const status = getWorksheetStatus(worksheet.id);
         return {
           worksheetId: worksheet.id,
           title: worksheet.title,

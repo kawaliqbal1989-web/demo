@@ -30,7 +30,7 @@ function computeExamAvailability(examCycle) {
 function formatWsActionLabel(ws) {
   if (!ws) return "—";
   if (ws.status === "IN_PROGRESS") return "Resume";
-  if (ws.status === "SUBMITTED") return "View";
+  if (ws.status === "SUBMITTED") return "Submitted";
   return "Start";
 }
 
@@ -121,7 +121,11 @@ function StudentExamsPage() {
                       <td>{formatStatus(r?.enrollmentStatus)}</td>
 
                       <td>
-                        {exam?.worksheetId && examAvail.canStart ? (
+                        {exam?.worksheetId && exam?.status === "SUBMITTED" ? (
+                          <button className="button secondary" style={{ width: "auto" }} type="button" disabled>
+                            {formatWsActionLabel(exam)}
+                          </button>
+                        ) : exam?.worksheetId && examAvail.canStart ? (
                           <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${exam.worksheetId}`}>
                             {formatWsActionLabel(exam)}
                           </Link>

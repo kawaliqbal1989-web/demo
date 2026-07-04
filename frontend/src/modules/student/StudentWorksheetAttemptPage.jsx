@@ -924,13 +924,16 @@ function StudentWorksheetAttemptPage() {
     const previewTimeLimit = Number.isFinite(Number(worksheetPreview.timeLimitSeconds))
       ? formatSeconds(worksheetPreview.timeLimitSeconds)
       : "No limit";
+    const isExamWorksheetAlreadySubmitted = alreadySubmitted;
 
     return (
       <div className="card" style={{ display: "grid", gap: 16, maxWidth: 760, margin: "0 auto" }}>
         <div>
           <h2 style={{ marginTop: 0, marginBottom: 8 }}>{worksheetPreview.title || "Worksheet"}</h2>
           <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
-            Read the instructions before you start. The worksheet timer and attempt will begin only after you continue.
+            {isExamWorksheetAlreadySubmitted
+              ? "This worksheet was already submitted. Starting a new attempt is not available."
+              : "Read the instructions before you start. The worksheet timer and attempt will begin only after you continue."}
           </p>
         </div>
 
@@ -940,15 +943,17 @@ function StudentWorksheetAttemptPage() {
           {worksheetPreview.description ? <div><strong>Description:</strong> {worksheetPreview.description}</div> : null}
         </div>
 
-        <div style={{ display: "grid", gap: 8 }}>
-          <div style={{ fontWeight: 700 }}>Disclaimer</div>
-          <div style={{ color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-            By starting this worksheet, you confirm that you are ready to begin now, you will complete it yourself, and the timer will continue once the worksheet starts.
+        {!isExamWorksheetAlreadySubmitted ? (
+          <div style={{ display: "grid", gap: 8 }}>
+            <div style={{ fontWeight: 700 }}>Disclaimer</div>
+            <div style={{ color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+              By starting this worksheet, you confirm that you are ready to begin now, you will complete it yourself, and the timer will continue once the worksheet starts.
+            </div>
+            <div style={{ color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+              Do not refresh, close the tab, or open the worksheet in multiple tabs while attempting it.
+            </div>
           </div>
-          <div style={{ color: "var(--color-text-muted)", lineHeight: 1.5 }}>
-            Do not refresh, close the tab, or open the worksheet in multiple tabs while attempting it.
-          </div>
-        </div>
+        ) : null}
 
         {error ? (
           <p className="error" style={{ margin: 0 }}>
@@ -960,9 +965,11 @@ function StudentWorksheetAttemptPage() {
           <button className="button secondary" style={{ width: "auto" }} onClick={() => navigate("/student/worksheets")}>
             Back
           </button>
-          <button className="button" style={{ width: "auto" }} onClick={() => setStartConfirmed(true)} disabled={alreadySubmitted}>
-            I Understand, Start Worksheet
-          </button>
+          {!isExamWorksheetAlreadySubmitted ? (
+            <button className="button" style={{ width: "auto" }} onClick={() => setStartConfirmed(true)} disabled={alreadySubmitted}>
+              I Understand, Start Worksheet
+            </button>
+          ) : null}
         </div>
       </div>
     );

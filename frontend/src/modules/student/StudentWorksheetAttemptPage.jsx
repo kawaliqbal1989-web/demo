@@ -5,6 +5,7 @@ import {
   getStudentMe,
   getStudentMyCourse,
   getStudentWorksheet,
+  listStudentWorksheetAttempts,
   startOrResumeStudentWorksheetAttempt,
   saveStudentAttemptAnswers,
   submitStudentAttempt
@@ -181,6 +182,7 @@ function StudentWorksheetAttemptPage() {
   const [elapsedSeconds, setElapsedSeconds] = useState(null);
   const [showAbacus, setShowAbacus] = useState(false);
   const [startConfirmed, setStartConfirmed] = useState(false);
+  const [alreadySubmitted, setAlreadySubmitted] = useState(false);
   const [questionFontPx, setQuestionFontPx] = useState(() => {
     try {
       const raw = localStorage.getItem("student_ws_question_font_px");
@@ -223,6 +225,7 @@ function StudentWorksheetAttemptPage() {
     setAttempt(null);
     setAnswersByQuestionId({});
     setStartConfirmed(false);
+    setAlreadySubmitted(false);
     autoSubmitTriggeredRef.current = false;
     autoSubmitRetryCountRef.current = 0;
     submittingRef.current = false;
@@ -233,12 +236,26 @@ function StudentWorksheetAttemptPage() {
       autoSubmitRetryTimerRef.current = null;
     }
 
-    getStudentWorksheet(worksheetId)
-      .then((worksheetRes) => {
+    Promise.allSettled([getStudentWorksheet(worksheetId), listStudentWorksheetAttempts(worksheetId)])
+      .then(([worksheetRes, attemptsRes]) => {
         if (cancelled) {
           return;
         }
-        setWorksheetPreview(worksheetRes.data?.data || null);
+
+        if (worksheetRes.status === "fulfilled") {
+          setWorksheetPreview(worksheetRes.value?.data?.data || null);
+        } else {
+          throw worksheetRes.reason;
+        }
+
+        const attempts = attemptsRes.status === "fulfilled" && Array.isArray(attemptsRes.value?.data?.data)
+          ? attemptsRes.value.data.data
+          : [];
+        const hasSubmittedAttempt = attempts.some((item) => String(item?.status || "").toUpperCase() === "SUBMITTED");
+        setAlreadySubmitted(hasSubmittedAttempt);
+        if (hasSubmittedAttempt) {
+          setError("This worksheet is already submitted.");
+        }
       })
       .catch((e) => {
         if (cancelled) {
@@ -291,6 +308,12 @@ function StudentWorksheetAttemptPage() {
 
   useEffect(() => {
     if (!startConfirmed) {
+      return;
+    }
+
+    if (alreadySubmitted) {
+      setError("This worksheet is already submitted.");
+      setLoading(false);
       return;
     }
 
@@ -361,7 +384,7 @@ function StudentWorksheetAttemptPage() {
     return () => {
       cancelled = true;
     };
-  }, [startConfirmed, worksheetId, worksheetPreview]);
+  }, [alreadySubmitted, startConfirmed, worksheetId, worksheetPreview]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -937,7 +960,7 @@ function StudentWorksheetAttemptPage() {
           <button className="button secondary" style={{ width: "auto" }} onClick={() => navigate("/student/worksheets")}>
             Back
           </button>
-          <button className="button" style={{ width: "auto" }} onClick={() => setStartConfirmed(true)}>
+          <button className="button" style={{ width: "auto" }} onClick={() => setStartConfirmed(true)} disabled={alreadySubmitted}>
             I Understand, Start Worksheet
           </button>
         </div>

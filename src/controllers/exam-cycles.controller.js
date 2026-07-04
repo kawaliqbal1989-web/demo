@@ -1888,12 +1888,8 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
           id: true,
           studentId: true,
           score: true,
-          totalMarks: true,
-          earnedMarks: true,
-          percentage: true,
           correctCount: true,
-          wrongCount: true,
-          unansweredCount: true,
+          submittedAnswers: true,
           totalQuestions: true,
           completionTimeSeconds: true,
           finalSubmittedAt: true,
@@ -1945,19 +1941,25 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     const finalizedMatches = candidates.filter((candidate) => candidate.finalSubmittedAt);
     const correctCount = toNullableNumber(sub?.correctCount);
     const totalQuestions = toNullableNumber(sub?.totalQuestions);
-    const unansweredCount = toNullableNumber(sub?.unansweredCount);
-    const wrongCount = sub?.wrongCount !== null && sub?.wrongCount !== undefined
-      ? toNullableNumber(sub.wrongCount)
-      : totalQuestions !== null && correctCount !== null
+    const submittedAnswerCount = Array.isArray(sub?.submittedAnswers)
+      ? sub.submittedAnswers.length
+      : sub?.submittedAnswers && typeof sub.submittedAnswers === "object"
+        ? Object.keys(sub.submittedAnswers).length
+        : null;
+    const unansweredCount =
+      totalQuestions !== null && submittedAnswerCount !== null
+        ? Math.max(0, totalQuestions - submittedAnswerCount)
+        : null;
+    const wrongCount =
+      totalQuestions !== null && correctCount !== null
         ? Math.max(0, totalQuestions - correctCount - (unansweredCount || 0))
         : null;
     const calculatedPercentage =
       totalQuestions && totalQuestions > 0 && correctCount !== null && correctCount !== undefined
         ? roundPercentage((Number(correctCount) / Number(totalQuestions)) * 100)
         : null;
-    const storedPercentage = toNullableNumber(sub?.percentage ?? sub?.score);
-    const percentage = calculatedPercentage ?? storedPercentage;
-    const score = toNullableNumber(sub?.earnedMarks ?? sub?.score ?? percentage);
+    const percentage = calculatedPercentage;
+    const score = toNullableNumber(sub?.score ?? percentage);
     const candidateStatus = deriveCandidateStatus(statusSubmission);
     const teacher =
       e.sourceTeacherUser ||

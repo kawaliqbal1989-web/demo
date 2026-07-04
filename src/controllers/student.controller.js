@@ -23,16 +23,26 @@ function fullName(student) {
   return [first, last].filter(Boolean).join(" ").trim();
 }
 
-function mapSubmissionToAttempt(submission) {
+function mapSubmissionToAttempt(submission, { timeLimitSeconds = null, now = new Date() } = {}) {
   if (!submission) {
     return [];
   }
+
+  const timing = getAttemptTiming({
+    startedAt: submission.submittedAt || now,
+    timeLimitSeconds
+  });
+  const derivedStatus = deriveAttemptStatus({
+    finalSubmittedAt: submission.finalSubmittedAt,
+    endsAt: timing.endsAt,
+    now
+  });
 
   return [
     {
       attemptId: submission.id,
       attemptNo: 1,
-      status: submission.finalSubmittedAt ? "SUBMITTED" : "IN_PROGRESS",
+      status: derivedStatus,
       score: submission.score === null ? null : Number(submission.score),
       total: submission.totalQuestions ?? null,
       submittedAt: submission.finalSubmittedAt || null,
@@ -1477,7 +1487,10 @@ const listStudentWorksheetAttempts = asyncHandler(async (req, res) => {
     }
   });
 
-  const mapped = mapSubmissionToAttempt(submission).map((attempt) => {
+  const mapped = mapSubmissionToAttempt(submission, {
+    timeLimitSeconds: access.worksheet?.timeLimitSeconds,
+    now: new Date()
+  }).map((attempt) => {
     if (!publicationState.isExamWorksheet || publicationState.isPublished) {
       return attempt;
     }
@@ -3428,34 +3441,52 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
         select: {
           worksheetId: true,
           id: true,
+          submittedAt: true,
           finalSubmittedAt: true
         }
       })
     : [];
 
-  const submissionStateByWorksheetId = new Map();
+  const latestSubmissionByWorksheetId = new Map();
   for (const s of submissions) {
-    const current = submissionStateByWorksheetId.get(s.worksheetId) || {
-      hasSubmission: false,
-      hasFinalSubmission: false
-    };
-    current.hasSubmission = true;
-    if (s.finalSubmittedAt) {
-      current.hasFinalSubmission = true;
+    const current = latestSubmissionByWorksheetId.get(s.worksheetId);
+    if (!current) {
+      latestSubmissionByWorksheetId.set(s.worksheetId, s);
+      continue;
     }
-    submissionStateByWorksheetId.set(s.worksheetId, current);
+
+    const currentTime = new Date(current.finalSubmittedAt || current.submittedAt || 0).getTime();
+    const nextTime = new Date(s.finalSubmittedAt || s.submittedAt || 0).getTime();
+    if (nextTime > currentTime) {
+      latestSubmissionByWorksheetId.set(s.worksheetId, s);
+    }
   }
 
-  const getWorksheetStatus = (worksheetId) => {
-    const submissionState = submissionStateByWorksheetId.get(worksheetId) || null;
-    if (!submissionState?.hasSubmission) {
+  const getWorksheetStatus = (worksheet) => {
+    if (!worksheet?.id) {
       return "NOT_STARTED";
     }
-    return submissionState.hasFinalSubmission ? "SUBMITTED" : "IN_PROGRESS";
+
+    const submission = latestSubmissionByWorksheetId.get(worksheet.id) || null;
+    if (!submission) {
+      return "NOT_STARTED";
+    }
+
+    const timing = getAttemptTiming({
+      startedAt: submission.submittedAt || new Date(),
+      timeLimitSeconds: worksheet.timeLimitSeconds
+    });
+
+    return deriveAttemptStatus({
+      finalSubmittedAt: submission.finalSubmittedAt,
+      endsAt: timing.endsAt,
+      now: new Date()
+    });
   };
 
   const worksheetStatusRank = {
-    SUBMITTED: 3,
+    SUBMITTED: 4,
+    TIMED_OUT: 3,
     IN_PROGRESS: 2,
     NOT_STARTED: 1
   };
@@ -3473,8 +3504,8 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
     };
 
     const current = worksheetsByExamCycleId.get(w.examCycleId) || { EXAM: null };
-    const currentStatus = current.EXAM ? getWorksheetStatus(current.EXAM.id) : null;
-    const candidateStatus = getWorksheetStatus(candidate.id);
+    const currentStatus = current.EXAM ? getWorksheetStatus(current.EXAM) : null;
+    const candidateStatus = getWorksheetStatus(candidate);
 
     if (!current.EXAM) {
       current.EXAM = candidate;
@@ -3509,7 +3540,7 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
 
       const mapWorksheet = (worksheet) => {
         if (!worksheet) return null;
-        const status = getWorksheetStatus(worksheet.id);
+        const status = getWorksheetStatus(worksheet);
         return {
           worksheetId: worksheet.id,
           title: worksheet.title,

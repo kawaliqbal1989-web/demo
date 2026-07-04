@@ -10,7 +10,7 @@ import {
   saveStudentAttemptAnswers,
   submitStudentAttempt
 } from "../../services/studentPortalService";
-import { getFriendlyErrorMessage } from "../../utils/apiErrors";
+import { getApiErrorCode, getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { VirtualAbacus } from "../../components/VirtualAbacus";
 import { generateWorksheetResultPdf } from "../../utils/pdfExport";
 
@@ -251,10 +251,15 @@ function StudentWorksheetAttemptPage() {
         const attempts = attemptsRes.status === "fulfilled" && Array.isArray(attemptsRes.value?.data?.data)
           ? attemptsRes.value.data.data
           : [];
-        const hasSubmittedAttempt = attempts.some((item) => String(item?.status || "").toUpperCase() === "SUBMITTED");
-        setAlreadySubmitted(hasSubmittedAttempt);
-        if (hasSubmittedAttempt) {
-          setError("This worksheet is already submitted.");
+        const terminalAttempt = attempts.find((item) => ["SUBMITTED", "TIMED_OUT"].includes(String(item?.status || "").toUpperCase())) || null;
+        const isTerminalAttempt = Boolean(terminalAttempt);
+        setAlreadySubmitted(isTerminalAttempt);
+        if (isTerminalAttempt) {
+          setError(
+            String(terminalAttempt?.status || "").toUpperCase() === "TIMED_OUT"
+              ? "This worksheet attempt has already ended."
+              : "This worksheet is already submitted."
+          );
         }
       })
       .catch((e) => {
@@ -312,7 +317,7 @@ function StudentWorksheetAttemptPage() {
     }
 
     if (alreadySubmitted) {
-      setError("This worksheet is already submitted.");
+      setError("This worksheet attempt is no longer available.");
       setLoading(false);
       return;
     }
@@ -366,9 +371,15 @@ function StudentWorksheetAttemptPage() {
         if (cancelled) {
           return;
         }
-        const status = e?.response?.status;
-        if (status === 409) {
+        const code = getApiErrorCode(e);
+        if (code === "SUBMISSION_ALREADY_FINALIZED") {
+          setAlreadySubmitted(true);
           setError("This worksheet is already submitted.");
+          return;
+        }
+        if (code === "ATTEMPT_ENDED") {
+          setAlreadySubmitted(true);
+          setError("This worksheet attempt has already ended.");
           return;
         }
 

@@ -30,6 +30,7 @@ function computeExamAvailability(examCycle) {
 function formatWsActionLabel(ws) {
   if (!ws) return "—";
   if (ws.status === "IN_PROGRESS") return "Resume";
+  if (ws.status === "TIMED_OUT") return "Time Up";
   if (ws.status === "SUBMITTED") return "Submitted";
   return "Start";
 }
@@ -121,7 +122,7 @@ function StudentExamsPage() {
                       <td>{formatStatus(r?.enrollmentStatus)}</td>
 
                       <td>
-                        {exam?.worksheetId && exam?.status === "SUBMITTED" ? (
+                        {exam?.worksheetId && ["SUBMITTED", "TIMED_OUT"].includes(String(exam?.status || "").toUpperCase()) ? (
                           <button className="button secondary" style={{ width: "auto" }} type="button" disabled>
                             {formatWsActionLabel(exam)}
                           </button>

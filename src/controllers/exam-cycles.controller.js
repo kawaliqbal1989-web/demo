@@ -1866,7 +1866,7 @@ const exportEnrollmentListCsv = asyncHandler(async (req, res) => {
 async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {} }) {
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
-    select: { id: true, resultStatus: true }
+    select: { id: true, resultStatus: true, isArchived: true }
   });
 
   if (!examCycle) {
@@ -1943,6 +1943,10 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     studentId: true,
     enrolledLevelId: true,
     isTemporary: true,
+    allowSecondAttempt: true,
+    attemptOverride: true,
+    secondAttemptGrantedAt: true,
+    secondAttemptGrantedByUserId: true,
     sourceTeacherUserId: true,
     enrolledLevel: { select: { id: true, name: true, rank: true } },
     sourceTeacherUser: { select: teacherSelect },
@@ -2105,12 +2109,12 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
 
   const sortSubmissions = (bucket) => {
     bucket.sort((a, b) => {
-      const aFinal = a.finalSubmittedAt ? 1 : 0;
-      const bFinal = b.finalSubmittedAt ? 1 : 0;
-      if (aFinal !== bFinal) return bFinal - aFinal;
       const aAttemptNo = Number(a.attemptNo || 1);
       const bAttemptNo = Number(b.attemptNo || 1);
       if (aAttemptNo !== bAttemptNo) return bAttemptNo - aAttemptNo;
+      const aFinal = a.finalSubmittedAt ? 1 : 0;
+      const bFinal = b.finalSubmittedAt ? 1 : 0;
+      if (aFinal !== bFinal) return bFinal - aFinal;
       const aTime = new Date(a.finalSubmittedAt || a.submittedAt || a.createdAt || 0).getTime();
       const bTime = new Date(b.finalSubmittedAt || b.submittedAt || b.createdAt || 0).getTime();
       if (aTime !== bTime) return bTime - aTime;
@@ -2126,9 +2130,40 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     const candidates = submissionsByStudentAndLevel.get(`${e.studentId}:${e.enrolledLevelId}`) || [];
     const sub = candidates[0] || null;
     const fallbackSub = sub ? null : (submissionsByStudent.get(e.studentId) || []).find((candidate) => candidate.finalSubmittedAt) || null;
+    const attempt1 = candidates.find((candidate) => Number(candidate.attemptNo || 1) === 1) || null;
+    const attempt2 = candidates.find((candidate) => Number(candidate.attemptNo || 1) === 2) || null;
+    const hasAttempt1 = Boolean(attempt1);
+    const hasAttempt2 = Boolean(attempt2);
+    const secondAttemptGranted = Boolean(
+      e.secondAttemptGrantedAt ||
+        e.allowSecondAttempt ||
+        e.attemptOverride === "SECOND_ATTEMPT_GRANTED"
+    );
+    const canGrantSecondAttempt = Boolean(
+      actor.role === "SUPERADMIN" &&
+        hasAttempt1 &&
+        !hasAttempt2 &&
+        !secondAttemptGranted &&
+        examCycle.resultStatus !== "PUBLISHED" &&
+        !examCycle.isArchived
+    );
+    const canRevokeSecondAttempt = Boolean(
+      actor.role === "SUPERADMIN" &&
+        secondAttemptGranted &&
+        !hasAttempt2 &&
+        examCycle.resultStatus !== "PUBLISHED" &&
+        !examCycle.isArchived
+    );
     const statusSubmission = sub || fallbackSub;
     const hasLevelMismatchSubmission = Boolean(!sub && fallbackSub);
     const finalizedMatches = candidates.filter((candidate) => candidate.finalSubmittedAt);
+    const finalizedAttemptNoCounts = finalizedMatches.reduce((acc, candidate) => {
+      const attemptNo = Number(candidate.attemptNo || 1);
+      acc.set(attemptNo, (acc.get(attemptNo) || 0) + 1);
+      return acc;
+    }, new Map());
+    const hasDuplicateFinalizedAttemptNo = Array.from(finalizedAttemptNoCounts.values()).some((count) => count > 1);
+    const hasAttemptLimitViolation = candidates.some((candidate) => Number(candidate.attemptNo || 1) > 2);
     const correctCount = toNullableNumber(sub?.correctCount);
     const totalQuestions = toNullableNumber(sub?.totalQuestions);
     const submittedAnswerCount = Array.isArray(sub?.submittedAnswers)
@@ -2179,6 +2214,12 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
       centerCode: centerNode?.code || null,
       isTemporaryCandidate: Boolean(e.isTemporary),
       isLateEnrollment: Boolean(item.isLateEnrollment),
+      enrollmentEntryId: e.id,
+      activeAttemptNo: toNullableNumber(statusSubmission?.attemptNo),
+      secondAttemptGranted,
+      attempt2Status: attempt2 ? deriveCandidateStatus(attempt2) : null,
+      canGrantSecondAttempt,
+      canRevokeSecondAttempt,
       candidateStatus,
       resultOutcome: deriveResultOutcome({ candidateStatus, percentage }),
       rank: null,
@@ -2193,8 +2234,14 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
         : null,
       submittedAt: statusSubmission?.finalSubmittedAt ?? null,
       worksheetId: sub?.worksheet?.id ?? null,
-      resultConflict: finalizedMatches.length > 1 || hasLevelMismatchSubmission,
-      resultConflictReason: hasLevelMismatchSubmission ? "LEVEL_MISMATCH_SUBMISSION" : null
+      resultConflict: hasDuplicateFinalizedAttemptNo || hasLevelMismatchSubmission || hasAttemptLimitViolation,
+      resultConflictReason: hasLevelMismatchSubmission
+        ? "LEVEL_MISMATCH_SUBMISSION"
+        : hasAttemptLimitViolation
+          ? "ATTEMPT_LIMIT_EXCEEDED"
+          : hasDuplicateFinalizedAttemptNo
+            ? "DUPLICATE_FINALIZED_ATTEMPT"
+            : null
     };
   });
 
@@ -2215,6 +2262,30 @@ const grantSecondAttemptToStudent = asyncHandler(async (req, res) => {
     return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
   }
 
+  const examCycle = await prisma.examCycle.findFirst({
+    where: {
+      id: examCycleId,
+      tenantId: req.auth.tenantId
+    },
+    select: {
+      id: true,
+      resultStatus: true,
+      isArchived: true
+    }
+  });
+
+  if (!examCycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  if (examCycle.isArchived) {
+    return res.apiError(409, "Archived exam cycle cannot be modified", "EXAM_CYCLE_ARCHIVED");
+  }
+
+  if (examCycle.resultStatus === "PUBLISHED") {
+    return res.apiError(409, "Published results cannot be modified", "EXAM_RESULTS_PUBLISHED");
+  }
+
   const entry = await prisma.examEnrollmentEntry.findFirst({
     where: {
       tenantId: req.auth.tenantId,
@@ -2223,6 +2294,7 @@ const grantSecondAttemptToStudent = asyncHandler(async (req, res) => {
     },
     select: {
       id: true,
+      enrolledLevelId: true,
       allowSecondAttempt: true,
       attemptOverride: true,
       secondAttemptGrantedAt: true,
@@ -2232,6 +2304,59 @@ const grantSecondAttemptToStudent = asyncHandler(async (req, res) => {
 
   if (!entry) {
     return res.apiError(404, "Enrollment not found", "EXAM_ENROLLMENT_NOT_FOUND");
+  }
+
+  if (
+    entry.allowSecondAttempt ||
+    entry.secondAttemptGrantedAt ||
+    entry.attemptOverride === "SECOND_ATTEMPT_GRANTED"
+  ) {
+    return res.apiError(409, "Second attempt already granted", "SECOND_ATTEMPT_ALREADY_GRANTED");
+  }
+
+  const assignedExamWorksheet = await prisma.worksheetAssignment.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      studentId,
+      isActive: true,
+      worksheet: {
+        is: {
+          tenantId: req.auth.tenantId,
+          examCycleId,
+          generationMode: "EXAM",
+          levelId: entry.enrolledLevelId
+        }
+      }
+    },
+    select: {
+      worksheetId: true
+    }
+  });
+
+  if (!assignedExamWorksheet?.worksheetId) {
+    return res.apiError(409, "Assigned exam worksheet not found", "EXAM_WORKSHEET_NOT_ASSIGNED");
+  }
+
+  const attempts = await prisma.worksheetSubmission.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      studentId,
+      worksheetId: assignedExamWorksheet.worksheetId
+    },
+    select: {
+      attemptNo: true
+    }
+  });
+
+  const hasAttempt1 = attempts.some((attempt) => Number(attempt.attemptNo || 1) === 1);
+  const hasAttempt2 = attempts.some((attempt) => Number(attempt.attemptNo || 1) >= 2);
+
+  if (!hasAttempt1) {
+    return res.apiError(409, "Attempt 1 not found", "FIRST_ATTEMPT_REQUIRED");
+  }
+
+  if (hasAttempt2) {
+    return res.apiError(409, "Attempt 2 already exists", "SECOND_ATTEMPT_ALREADY_EXISTS");
   }
 
   const updated = await prisma.examEnrollmentEntry.update({
@@ -2262,6 +2387,30 @@ const revokeSecondAttemptFromStudent = asyncHandler(async (req, res) => {
     return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
   }
 
+  const examCycle = await prisma.examCycle.findFirst({
+    where: {
+      id: examCycleId,
+      tenantId: req.auth.tenantId
+    },
+    select: {
+      id: true,
+      resultStatus: true,
+      isArchived: true
+    }
+  });
+
+  if (!examCycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  if (examCycle.isArchived) {
+    return res.apiError(409, "Archived exam cycle cannot be modified", "EXAM_CYCLE_ARCHIVED");
+  }
+
+  if (examCycle.resultStatus === "PUBLISHED") {
+    return res.apiError(409, "Published results cannot be modified", "EXAM_RESULTS_PUBLISHED");
+  }
+
   const entry = await prisma.examEnrollmentEntry.findFirst({
     where: {
       tenantId: req.auth.tenantId,
@@ -2271,12 +2420,43 @@ const revokeSecondAttemptFromStudent = asyncHandler(async (req, res) => {
     select: {
       id: true,
       allowSecondAttempt: true,
-      attemptOverride: true
+      attemptOverride: true,
+      secondAttemptGrantedAt: true
     }
   });
 
   if (!entry) {
     return res.apiError(404, "Enrollment not found", "EXAM_ENROLLMENT_NOT_FOUND");
+  }
+
+  const hasGrant = Boolean(
+    entry.allowSecondAttempt ||
+      entry.secondAttemptGrantedAt ||
+      entry.attemptOverride === "SECOND_ATTEMPT_GRANTED"
+  );
+
+  if (!hasGrant) {
+    return res.apiError(409, "Second attempt grant not found", "SECOND_ATTEMPT_NOT_GRANTED");
+  }
+
+  const hasAttempt2 = await prisma.worksheetSubmission.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      studentId,
+      attemptNo: { gte: 2 },
+      worksheet: {
+        is: {
+          tenantId: req.auth.tenantId,
+          examCycleId,
+          generationMode: "EXAM"
+        }
+      }
+    },
+    select: { id: true }
+  });
+
+  if (hasAttempt2) {
+    return res.apiError(409, "Attempt 2 already started", "SECOND_ATTEMPT_ALREADY_STARTED");
   }
 
   const updated = await prisma.examEnrollmentEntry.update({

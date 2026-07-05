@@ -8,10 +8,12 @@ import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import { downloadBlob } from "../../utils/downloadBlob";
 import {
   exportExamResultsCsv,
+  grantSecondAttempt,
   getExamResultPublicationAudit,
   getExamResults,
   getExamResultsReview,
   publishExamResults,
+  revokeSecondAttempt,
   unpublishExamResults
 } from "../../services/examCyclesService";
 
@@ -121,6 +123,13 @@ function getResultOutcomeTone(outcome) {
   if (outcome === "SCORED") return "good";
   if (outcome === "IN_PROGRESS" || outcome === "PENDING") return "warn";
   return "neutral";
+}
+
+function getAttempt2StatusLabel(status) {
+  if (status === "IN_PROGRESS") return "Attempt 2 In Progress";
+  if (status === "SUBMITTED") return "Attempt 2 Submitted";
+  if (status === "TIMED_OUT") return "Attempt 2 Time Up";
+  return "";
 }
 
 function badge(label, tone = "neutral") {
@@ -292,6 +301,11 @@ function SuperadminExamResultsPage() {
     key: "studentName",
     dir: "asc"
   });
+
+  const confirmType =
+    typeof confirmAction === "string"
+      ? confirmAction
+      : confirmAction?.type || null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -468,39 +482,68 @@ function SuperadminExamResultsPage() {
     setConfirmAction("unpublish");
   };
 
+  const doGrantSecondAttempt = (row) => {
+    if (acting || !row?.studentId || !row?.canGrantSecondAttempt) return;
+    setConfirmAction({
+      type: "grant-second-attempt",
+      row
+    });
+  };
+
+  const doRevokeSecondAttempt = (row) => {
+    if (acting || !row?.studentId || !row?.canRevokeSecondAttempt) return;
+    setConfirmAction({
+      type: "revoke-second-attempt",
+      row
+    });
+  };
+
   const executeAction = async () => {
     const action = confirmAction;
     setConfirmAction(null);
 
     if (!action) return;
 
+    const actionType = typeof action === "string" ? action : action.type;
+    const actionRow = action && typeof action === "object" ? action.row : null;
+
     setActing(true);
     setError("");
 
     try {
-      if (action === "publish") {
+      if (actionType === "publish") {
         await publishExamResults(examCycleId, {
           confirmationAccepted: true,
           note: publishNote.trim() || null
         });
-      } else {
+      } else if (actionType === "unpublish") {
         await unpublishExamResults(examCycleId, {
           note: unpublishNote.trim()
         });
+      } else if (actionType === "grant-second-attempt") {
+        await grantSecondAttempt(examCycleId, actionRow?.studentId);
+      } else if (actionType === "revoke-second-attempt") {
+        await revokeSecondAttempt(examCycleId, actionRow?.studentId);
       }
 
-      toast.success(
-        action === "publish"
-          ? "Results published."
-          : "Results unpublished."
-      );
+      if (actionType === "publish") {
+        toast.success("Results published.");
+      } else if (actionType === "unpublish") {
+        toast.success("Results unpublished.");
+      } else if (actionType === "grant-second-attempt") {
+        toast.success("Second attempt granted.");
+      } else if (actionType === "revoke-second-attempt") {
+        toast.success("Second attempt revoked.");
+      }
 
       await load();
     } catch (err) {
-      setError(
+      const message =
         getFriendlyErrorMessage(err) ||
-          `Failed to ${action} results.`
-      );
+        (actionType === "publish" || actionType === "unpublish"
+          ? `Failed to ${actionType} results.`
+          : "Failed to update second attempt.");
+      setError(message);
     } finally {
       setActing(false);
     }
@@ -981,6 +1024,55 @@ function SuperadminExamResultsPage() {
               header: "Submitted At",
               sortable: true,
               render: (row) => formatDateTime(row?.submittedAt)
+            },
+            {
+              key: "actions",
+              header: "Actions",
+              render: (row) => {
+                const attempt2Status = String(row?.attempt2Status || "");
+                const attempt2Label = getAttempt2StatusLabel(attempt2Status);
+
+                if (attempt2Label) {
+                  return badge(attempt2Label, attempt2Status === "TIMED_OUT" ? "warn" : "good");
+                }
+
+                if (row?.canGrantSecondAttempt) {
+                  return (
+                    <button
+                      className="button secondary"
+                      type="button"
+                      onClick={() => doGrantSecondAttempt(row)}
+                      disabled={acting}
+                      style={{ width: "auto" }}
+                    >
+                      Grant 2nd Attempt
+                    </button>
+                  );
+                }
+
+                if (row?.canRevokeSecondAttempt) {
+                  return (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      {badge("2nd Attempt Granted", "warn")}
+                      <button
+                        className="button secondary"
+                        type="button"
+                        onClick={() => doRevokeSecondAttempt(row)}
+                        disabled={acting}
+                        style={{ width: "auto" }}
+                      >
+                        Revoke 2nd Attempt
+                      </button>
+                    </div>
+                  );
+                }
+
+                if (row?.secondAttemptGranted) {
+                  return badge("2nd Attempt Granted", "warn");
+                }
+
+                return "ΓÇö";
+              }
             }
           ]}
           rows={sortedRows}
@@ -1217,22 +1309,34 @@ function SuperadminExamResultsPage() {
       <ConfirmDialog
         open={!!confirmAction}
         title={
-          confirmAction === "publish"
+          confirmType === "publish"
             ? "Publish Results"
-            : "Unpublish Results"
+            : confirmType === "unpublish"
+              ? "Unpublish Results"
+              : confirmType === "grant-second-attempt"
+                ? "Grant 2nd Attempt"
+                : "Revoke 2nd Attempt"
         }
         message={
-          confirmAction === "publish"
+          confirmType === "publish"
             ? "Publish results now? Published results will become visible to permitted hierarchy roles and students."
-            : "Unpublish results? Non-superadmin roles will lose access until republished."
+            : confirmType === "unpublish"
+              ? "Unpublish results? Non-superadmin roles will lose access until republished."
+              : confirmType === "grant-second-attempt"
+                ? "Grant one additional exam attempt to this student?"
+                : "Revoke the additional exam attempt for this student?"
         }
         confirmLabel={
-          confirmAction === "publish"
+          confirmType === "publish"
             ? "Publish"
-            : "Unpublish"
+            : confirmType === "unpublish"
+              ? "Unpublish"
+              : confirmType === "grant-second-attempt"
+                ? "Grant Attempt"
+                : "Revoke Attempt"
         }
         confirmDisabled={
-          confirmAction === "unpublish" &&
+          confirmType === "unpublish" &&
           unpublishNote.trim().length < 8
         }
         onCancel={() => setConfirmAction(null)}

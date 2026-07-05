@@ -336,10 +336,6 @@ function TeacherResultsPage() {
     }
   };
 
-  if (loading) {
-    return <LoadingState label="Loading student results..." />;
-  }
-
   const promotionRows = useMemo(
     () => rows.map((row) => buildPromotionRow(row, student360ById[row.studentId] || null)),
     [rows, student360ById]
@@ -390,6 +386,10 @@ function TeacherResultsPage() {
     const blocked = promotionRows.filter((r) => r.blocked).length;
     return { readyToday, expectedNextWeek, blocked };
   }, [promotionRows]);
+
+  if (loading) {
+    return <LoadingState label="Loading student results..." />;
+  }
 
   const exportRows = filteredRows;
 

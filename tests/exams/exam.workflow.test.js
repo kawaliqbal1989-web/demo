@@ -237,6 +237,29 @@ describe("EXAM MANAGEMENT WORKFLOW", () => {
     });
   });
 
+  test("Teacher can enroll a student when the assigned enrollment has no explicit level", async () => {
+    const examCycleId = (await createExamCycleForWorkflow()).examCycleId;
+
+    await prisma.enrollment.updateMany({
+      where: {
+        tenantId: tenant.id,
+        studentId: student.id,
+        assignedTeacherUserId: teacher.id,
+        status: "ACTIVE"
+      },
+      data: { levelId: null }
+    });
+
+    const response = await http
+      .post(`/api/exam-cycles/${examCycleId}/teacher-list/enroll`)
+      .set(authHeader(teacherToken))
+      .send({ studentIds: [student.id] });
+
+    expect([200, 201]).toContain(response.status);
+    expect(response.body.success).toBe(true);
+    expect(response.body.data?.items?.[0]?.entry?.enrolledLevelId).toBe(student.levelId);
+  });
+
   test("Teacher cannot create exam cycle (403)", async () => {
     const response = await http
       .post("/api/exam-cycles")

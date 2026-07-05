@@ -197,6 +197,16 @@ async function unpublishExamResults(examCycleId, payload = {}) {
   return response.data;
 }
 
+async function grantSecondAttempt(examCycleId, studentId) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/students/${studentId}/second-attempt/grant`);
+  return response.data;
+}
+
+async function revokeSecondAttempt(examCycleId, studentId) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/students/${studentId}/second-attempt/revoke`);
+  return response.data;
+}
+
 async function exportEnrollmentListCsv(examCycleId, listId) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/enrollment-lists/${listId}/export.csv`, {
     responseType: "blob",
@@ -287,6 +297,8 @@ export {
   getExamResultPublicationAudit,
   publishExamResults,
   unpublishExamResults,
+  grantSecondAttempt,
+  revokeSecondAttempt,
   exportEnrollmentListCsv,
   exportExamResultsCsv,
   getLateEnrollmentEligibleStudents,

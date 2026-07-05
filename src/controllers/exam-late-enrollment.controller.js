@@ -162,14 +162,50 @@ async function assertLateEnrollmentAvailabilityForCenter({ tenantId, examCycleId
   throw createHttpError(409, "No approved exam package exists for the selected level.", "LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
 }
 
-async function getEnrollmentCounts({ tenantId, examCycleId }) {
+async function getEnrollmentCounts({ tenantId, examCycleId, centerNodeId = null, teacherUserId = null }) {
+  const teacherStudentScope = teacherUserId
+    ? {
+        isActive: true,
+        ...(centerNodeId ? { hierarchyNodeId: centerNodeId } : {}),
+        OR: [
+          { currentTeacherUserId: teacherUserId },
+          {
+            batchEnrollments: {
+              some: {
+                tenantId,
+                status: "ACTIVE",
+                assignedTeacherUserId: teacherUserId
+              }
+            }
+          }
+        ]
+      }
+    : null;
+
   const [totalEnrollmentCount, lateEnrollmentCount] = await Promise.all([
-    prisma.examEnrollmentEntry.count({ where: { tenantId, examCycleId } }),
+    prisma.examEnrollmentEntry.count({
+      where: {
+        tenantId,
+        examCycleId,
+        ...(teacherUserId ? { sourceTeacherUserId: teacherUserId } : {}),
+        ...(teacherStudentScope
+          ? { student: { is: teacherStudentScope } }
+          : centerNodeId
+            ? { student: { hierarchyNodeId: centerNodeId } }
+            : {})
+      }
+    }),
     prisma.examLateEnrollmentStudent.count({
       where: {
         tenantId,
         status: "APPROVED",
-        request: { is: { examCycleId } }
+        ...(teacherStudentScope ? { student: { is: teacherStudentScope } } : {}),
+        request: {
+          is: {
+            examCycleId,
+            ...(centerNodeId ? { centerId: centerNodeId } : {})
+          }
+        }
       }
     })
   ]);

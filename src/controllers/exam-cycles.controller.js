@@ -454,6 +454,28 @@ const listExamCycles = asyncHandler(async (req, res) => {
   const lifecycleFilter = req.query?.filter || req.query?.lifecycle || "DEFAULT";
 
   const scope = await resolveActorExamScope({ tenantId: req.auth.tenantId, actor: req.auth });
+  const centerNodeId = scope.role === "CENTER" ? (scope.hierarchyNodeIds[0] || null) : null;
+  const teacherNodeId = scope.role === "TEACHER" ? (scope.hierarchyNodeIds[0] || null) : null;
+
+  const teacherStudentScope =
+    scope.role === "TEACHER"
+      ? {
+          isActive: true,
+          ...(teacherNodeId ? { hierarchyNodeId: teacherNodeId } : {}),
+          OR: [
+            { currentTeacherUserId: req.auth.userId },
+            {
+              batchEnrollments: {
+                some: {
+                  tenantId: req.auth.tenantId,
+                  status: "ACTIVE",
+                  assignedTeacherUserId: req.auth.userId
+                }
+              }
+            }
+          ]
+        }
+      : null;
 
   const where = {
     tenantId: req.auth.tenantId,
@@ -461,7 +483,44 @@ const listExamCycles = asyncHandler(async (req, res) => {
     ...(scope.businessPartnerId ? { businessPartnerId: scope.businessPartnerId } : {})
   };
 
-  const [items, total] = await Promise.all([
+  const getStatusCount = (countsByType = {}, type, status) => Number(countsByType?.[type]?.[status] || 0);
+
+  const buildHierarchySummary = (countsByType = {}) => {
+    const teacherDraft = getStatusCount(countsByType, "TEACHER", "DRAFT");
+    const teacherRejected = getStatusCount(countsByType, "TEACHER", "REJECTED");
+    const teacherSubmittedToCenter = getStatusCount(countsByType, "TEACHER", "SUBMITTED_TO_CENTER");
+    const centerDraft = getStatusCount(countsByType, "CENTER_COMBINED", "DRAFT");
+    const centerRejected = getStatusCount(countsByType, "CENTER_COMBINED", "REJECTED");
+    const centerSubmittedToFranchise = getStatusCount(countsByType, "CENTER_COMBINED", "SUBMITTED_TO_FRANCHISE");
+    const franchiseSubmittedToBusinessPartner = getStatusCount(countsByType, "CENTER_COMBINED", "SUBMITTED_TO_BUSINESS_PARTNER");
+    const businessPartnerSubmittedToSuperadmin = getStatusCount(countsByType, "CENTER_COMBINED", "SUBMITTED_TO_SUPERADMIN");
+    const approved = getStatusCount(countsByType, "CENTER_COMBINED", "APPROVED");
+    const rejected = centerRejected;
+
+    return {
+      teacherDraft,
+      teacherRejected,
+      teacherSubmittedToCenter,
+      centerSubmittedToFranchise,
+      franchiseSubmittedToBusinessPartner,
+      businessPartnerSubmittedToSuperadmin,
+      approved,
+      rejected,
+      centerReview: teacherSubmittedToCenter + centerDraft + centerRejected
+    };
+  };
+
+  const resolveCurrentOwnerRole = (hierarchy) => {
+    if ((hierarchy.businessPartnerSubmittedToSuperadmin || 0) > 0) return "SUPERADMIN";
+    if ((hierarchy.franchiseSubmittedToBusinessPartner || 0) > 0) return "BP";
+    if ((hierarchy.centerSubmittedToFranchise || 0) > 0) return "FRANCHISE";
+    if ((hierarchy.teacherDraft || 0) > 0 || (hierarchy.teacherRejected || 0) > 0) return "TEACHER";
+    if ((hierarchy.teacherSubmittedToCenter || 0) > 0 || (hierarchy.centerReview || 0) > 0) return "CENTER";
+    if ((hierarchy.approved || 0) > 0) return "APPROVED";
+    return null;
+  };
+
+  const [items, total, scopedExamCycleIds, publishedResultCycles] = await Promise.all([
     prisma.examCycle.findMany({
       where,
       orderBy,
@@ -472,27 +531,133 @@ const listExamCycles = asyncHandler(async (req, res) => {
         createdBy: { select: { id: true, email: true, role: true } }
       }
     }),
-    prisma.examCycle.count({ where })
+    prisma.examCycle.count({ where }),
+    prisma.examCycle.findMany({
+      where,
+      select: { id: true }
+    }),
+    prisma.examCycle.count({
+      where: {
+        ...where,
+        resultStatus: "PUBLISHED"
+      }
+    })
   ]);
+
+  const scopedCycleIds = scopedExamCycleIds.map((cycle) => cycle.id);
+
+  const [itemWorkflowRows, workflowByStatus, totalEnrollmentCount, lateEnrollmentCount] = scopedCycleIds.length
+    ? await Promise.all([
+        prisma.examEnrollmentList.groupBy({
+          by: ["examCycleId", "type", "status"],
+          where: {
+            tenantId: req.auth.tenantId,
+            examCycleId: { in: items.map((item) => item.id) },
+            ...(centerNodeId ? { hierarchyNodeId: centerNodeId } : {}),
+            ...(scope.role === "TEACHER" ? { teacherUserId: req.auth.userId } : {})
+          },
+          _count: { _all: true }
+        }),
+        prisma.examEnrollmentList.groupBy({
+          by: ["type", "status"],
+          where: {
+            tenantId: req.auth.tenantId,
+            examCycleId: { in: scopedCycleIds },
+            ...(centerNodeId ? { hierarchyNodeId: centerNodeId } : {}),
+            ...(scope.role === "TEACHER" ? { teacherUserId: req.auth.userId } : {})
+          },
+          _count: { _all: true }
+        }),
+        prisma.examEnrollmentEntry.count({
+          where: {
+            tenantId: req.auth.tenantId,
+            examCycleId: { in: scopedCycleIds },
+            ...(scope.role === "TEACHER" ? { sourceTeacherUserId: req.auth.userId } : {}),
+            ...(teacherStudentScope
+              ? { student: { is: teacherStudentScope } }
+              : centerNodeId
+                ? { student: { hierarchyNodeId: centerNodeId } }
+                : {})
+          }
+        }),
+        prisma.examLateEnrollmentStudent.count({
+          where: {
+            tenantId: req.auth.tenantId,
+            status: "APPROVED",
+            ...(teacherStudentScope ? { student: { is: teacherStudentScope } } : {}),
+            request: {
+              is: {
+                examCycleId: { in: scopedCycleIds },
+                ...(centerNodeId || teacherNodeId ? { centerId: centerNodeId || teacherNodeId } : {})
+              }
+            }
+          }
+        })
+      ])
+    : [[], [], 0, 0];
+
+  const statusCountsByCycleId = itemWorkflowRows.reduce((acc, row) => {
+    const key = row.examCycleId;
+    if (!acc[key]) {
+      acc[key] = {};
+    }
+    if (!acc[key][row.type]) {
+      acc[key][row.type] = {};
+    }
+    acc[key][row.type][row.status] = Number(row?._count?._all || 0);
+    return acc;
+  }, {});
+
+  const workflowStatusCounts = workflowByStatus.reduce((acc, row) => {
+    if (!acc[row.type]) {
+      acc[row.type] = {};
+    }
+    acc[row.type][row.status] = Number(row?._count?._all || 0);
+    return acc;
+  }, {});
+
+  const workflowQueue = buildHierarchySummary(workflowStatusCounts);
 
   const itemsWithCounts = await Promise.all(
     items.map(async (item) => {
       const counts = await getEnrollmentCounts({
         tenantId: req.auth.tenantId,
-        examCycleId: item.id
+        examCycleId: item.id,
+        ...(centerNodeId || teacherNodeId ? { centerNodeId: centerNodeId || teacherNodeId } : {}),
+        ...(scope.role === "TEACHER" ? { teacherUserId: req.auth.userId } : {})
       });
+
+      const hierarchy = buildHierarchySummary(statusCountsByCycleId[item.id] || {});
       return {
         ...item,
-        enrollmentCounts: counts
+        enrollmentCounts: counts,
+        enrollmentListSummary: {
+          hierarchy,
+          currentOwnerRole: resolveCurrentOwnerRole(hierarchy),
+          bpActionRequired: (hierarchy.franchiseSubmittedToBusinessPartner || 0) > 0,
+          readOnly: (hierarchy.franchiseSubmittedToBusinessPartner || 0) <= 0
+        }
       };
     })
   );
+
+  const normalEnrollmentCount = Math.max(Number(totalEnrollmentCount || 0) - Number(lateEnrollmentCount || 0), 0);
 
   return res.apiSuccess("Exam cycles fetched", {
     items: itemsWithCounts,
     total,
     limit,
     offset,
+    summary: {
+      totalCycles: total,
+      enrollment: {
+        totalEnrollmentCount: Number(totalEnrollmentCount || 0),
+        normalEnrollmentCount,
+        lateEnrollmentCount: Number(lateEnrollmentCount || 0)
+      },
+      publishedResultCycles
+    },
+    workflowQueue,
     filter: String(lifecycleFilter || "DEFAULT").toUpperCase()
   });
 });
@@ -974,7 +1139,7 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
     select: {
       studentId: true,
       levelId: true,
-      student: { select: { id: true, isActive: true } }
+      student: { select: { id: true, isActive: true, levelId: true } }
     }
   });
 
@@ -982,12 +1147,17 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
   for (const enrollment of activeEnrollments) {
     if (!enrollment?.student?.isActive) continue;
     if (!enrollment?.studentId) continue;
-    if (!enrollment?.levelId) {
+
+    const effectiveLevelId = enrollment?.levelId || enrollment?.student?.levelId;
+    if (!effectiveLevelId) {
       return res.apiError(409, "Active enrollment level is missing for one or more students", "ENROLLMENT_LEVEL_MISSING");
     }
 
     if (!allowedByStudentId.has(enrollment.studentId)) {
-      allowedByStudentId.set(enrollment.studentId, enrollment);
+      allowedByStudentId.set(enrollment.studentId, {
+        ...enrollment,
+        effectiveLevelId
+      });
     }
   }
 
@@ -1031,7 +1201,7 @@ const teacherEnrollStudents = asyncHandler(async (req, res) => {
           tenantId: req.auth.tenantId,
           examCycleId,
           studentId: sid,
-          enrolledLevelId: enrollment.levelId,
+          enrolledLevelId: enrollment.effectiveLevelId,
           isTemporary: false,
           sourceTeacherUserId: req.auth.userId,
           createdByUserId: req.auth.userId
@@ -1903,6 +2073,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
         select: {
           id: true,
           studentId: true,
+          attemptNo: true,
           score: true,
           correctCount: true,
           submittedAnswers: true,
@@ -1937,6 +2108,9 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
       const aFinal = a.finalSubmittedAt ? 1 : 0;
       const bFinal = b.finalSubmittedAt ? 1 : 0;
       if (aFinal !== bFinal) return bFinal - aFinal;
+      const aAttemptNo = Number(a.attemptNo || 1);
+      const bAttemptNo = Number(b.attemptNo || 1);
+      if (aAttemptNo !== bAttemptNo) return bAttemptNo - aAttemptNo;
       const aTime = new Date(a.finalSubmittedAt || a.submittedAt || a.createdAt || 0).getTime();
       const bTime = new Date(b.finalSubmittedAt || b.submittedAt || b.createdAt || 0).getTime();
       if (aTime !== bTime) return bTime - aTime;
@@ -2032,6 +2206,98 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     results: applyExamResultFiltersAndSort(rankedResults, query)
   };
 }
+
+const grantSecondAttemptToStudent = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const studentId = String(req.params.studentId);
+
+  if (!studentId) {
+    return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
+  }
+
+  const entry = await prisma.examEnrollmentEntry.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      examCycleId,
+      studentId
+    },
+    select: {
+      id: true,
+      allowSecondAttempt: true,
+      attemptOverride: true,
+      secondAttemptGrantedAt: true,
+      secondAttemptGrantedByUserId: true
+    }
+  });
+
+  if (!entry) {
+    return res.apiError(404, "Enrollment not found", "EXAM_ENROLLMENT_NOT_FOUND");
+  }
+
+  const updated = await prisma.examEnrollmentEntry.update({
+    where: { id: entry.id },
+    data: {
+      allowSecondAttempt: true,
+      attemptOverride: "SECOND_ATTEMPT_GRANTED",
+      secondAttemptGrantedAt: new Date(),
+      secondAttemptGrantedByUserId: req.auth.userId
+    },
+    select: {
+      id: true,
+      allowSecondAttempt: true,
+      attemptOverride: true,
+      secondAttemptGrantedAt: true,
+      secondAttemptGrantedByUserId: true
+    }
+  });
+
+  return res.apiSuccess("Second attempt granted", updated);
+});
+
+const revokeSecondAttemptFromStudent = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const studentId = String(req.params.studentId);
+
+  if (!studentId) {
+    return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
+  }
+
+  const entry = await prisma.examEnrollmentEntry.findFirst({
+    where: {
+      tenantId: req.auth.tenantId,
+      examCycleId,
+      studentId
+    },
+    select: {
+      id: true,
+      allowSecondAttempt: true,
+      attemptOverride: true
+    }
+  });
+
+  if (!entry) {
+    return res.apiError(404, "Enrollment not found", "EXAM_ENROLLMENT_NOT_FOUND");
+  }
+
+  const updated = await prisma.examEnrollmentEntry.update({
+    where: { id: entry.id },
+    data: {
+      allowSecondAttempt: false,
+      attemptOverride: null,
+      secondAttemptGrantedAt: null,
+      secondAttemptGrantedByUserId: null
+    },
+    select: {
+      id: true,
+      allowSecondAttempt: true,
+      attemptOverride: true,
+      secondAttemptGrantedAt: true,
+      secondAttemptGrantedByUserId: true
+    }
+  });
+
+  return res.apiSuccess("Second attempt revoked", updated);
+});
 
 async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
   const [examCycle, payload] = await Promise.all([
@@ -3532,5 +3798,7 @@ export {
   getExamResultPublicationAuditTrail,
   exportExamResultsCsv,
   publishExamResults,
-  unpublishExamResults
+  unpublishExamResults,
+  grantSecondAttemptToStudent,
+  revokeSecondAttemptFromStudent
 };

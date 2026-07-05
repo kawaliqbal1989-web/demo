@@ -100,7 +100,7 @@ const roleMenus = {
     { label: "🎮 Practice Features", to: "/bp/practice-allocations" },
     { label: "🏅 Certificates", to: "/bp/certificates" },
     { label: "📜 Certificate Template", to: "/bp/certificate-template" },
-    { label: "🎯 Exams", to: "/bp/exam-cycles" },
+    { label: "🎯 Exam Cycles", to: "/bp/exam-cycles" },
     { label: "🧩 Late Enrollment", to: "/bp/exam-cycles?focus=late" },
     { label: "🧾 Question Bank", to: "/bp/question-bank" },
     { label: "🏆 Competition", to: "/bp/competition-requests" },

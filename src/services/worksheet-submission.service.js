@@ -22,7 +22,7 @@ function buildEvaluationHash(payload) {
     .digest("hex");
 }
 
-async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allowExpired = false, remarksOverride } = {}) {
+async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allowExpired = false, remarksOverride, submissionId } = {}) {
   const dedupedByQuestion = new Map();
   for (const answer of normalizeAnswers(answers)) {
     dedupedByQuestion.set(answer.questionNumber, answer.answer);
@@ -77,20 +77,37 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
       throw error;
     }
 
-    const existingSubmission = await tx.worksheetSubmission.findUnique({
-      where: {
-        worksheetId_studentId: {
-          worksheetId,
-          studentId
-        }
-      },
-      select: {
-        id: true,
-        submittedAt: true,
-        finalSubmittedAt: true,
-        status: true
-      }
-    });
+    const existingSubmission = submissionId
+      ? await tx.worksheetSubmission.findFirst({
+          where: {
+            id: submissionId,
+            tenantId,
+            worksheetId,
+            studentId
+          },
+          select: {
+            id: true,
+            submittedAt: true,
+            finalSubmittedAt: true,
+            status: true,
+            attemptNo: true
+          }
+        })
+      : await tx.worksheetSubmission.findFirst({
+          where: {
+            tenantId,
+            worksheetId,
+            studentId
+          },
+          orderBy: { attemptNo: "desc" },
+          select: {
+            id: true,
+            submittedAt: true,
+            finalSubmittedAt: true,
+            status: true,
+            attemptNo: true
+          }
+        });
 
     if (existingSubmission?.finalSubmittedAt) {
       const error = new Error("Worksheet submission already finalized");
@@ -197,6 +214,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
           tenantId,
           worksheetId,
           studentId,
+          attemptNo: existingSubmission?.attemptNo ?? 1,
           score: accuracy,
           status: "REVIEWED",
           submittedAt: now,

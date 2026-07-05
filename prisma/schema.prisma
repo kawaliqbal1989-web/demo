@@ -2141,15 +2141,19 @@ model ExamEnrollmentList {
 }
 
 model ExamEnrollmentEntry {
-  id                  String   @id @default(cuid())
-  tenantId            String
-  examCycleId         String
-  studentId           String
-  enrolledLevelId     String
-  isTemporary         Boolean  @default(false)
-  sourceTeacherUserId String?
-  createdByUserId     String
-  createdAt           DateTime @default(now())
+  id                           String    @id @default(cuid())
+  tenantId                     String
+  examCycleId                  String
+  studentId                    String
+  enrolledLevelId              String
+  isTemporary                  Boolean   @default(false)
+  allowSecondAttempt           Boolean   @default(false)
+  attemptOverride              String?
+  secondAttemptGrantedAt       DateTime?
+  secondAttemptGrantedByUserId String?
+  sourceTeacherUserId          String?
+  createdByUserId              String
+  createdAt                    DateTime  @default(now())
 
   tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   examCycle         ExamCycle @relation(fields: [examCycleId], references: [id], onDelete: Cascade)
@@ -2338,6 +2342,7 @@ model WorksheetSubmission {
   tenantId              String
   worksheetId           String
   studentId             String
+  attemptNo             Int              @default(1)
   score                 Decimal?         @db.Decimal(5, 2)
   submittedAt           DateTime         @default(now())
   status                SubmissionStatus @default(PENDING)
@@ -2349,13 +2354,15 @@ model WorksheetSubmission {
   passed                Boolean?
   evaluationHash        String?
   remarks               String?
+  supersededAt          DateTime?
+  supersededByUserId    String?
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @default(now()) @updatedAt
   tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   worksheet             Worksheet        @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
   student               Student          @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
-  @@unique([worksheetId, studentId])
+  @@unique([worksheetId, studentId, attemptNo], map: "worksheet_submission_attempt_uq")
   @@index([tenantId, studentId])
   @@index([tenantId, createdAt, id])
   @@index([tenantId, studentId, createdAt])

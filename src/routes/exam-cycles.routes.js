@@ -34,7 +34,9 @@ import {
   getExamResultPublicationAuditTrail,
   exportExamResultsCsv,
   publishExamResults,
-  unpublishExamResults
+  unpublishExamResults,
+  grantSecondAttemptToStudent,
+  revokeSecondAttemptFromStudent
 } from "../controllers/exam-cycles.controller.js";
 import {
   listLateEnrollmentEligibleStudents,
@@ -319,6 +321,20 @@ examCyclesRouter.post(
   requireSuperadmin(),
   auditAction("EXAM_RESULTS_UNPUBLISH", "EXAM_CYCLE", (req) => req.params.id),
   unpublishExamResults
+);
+
+examCyclesRouter.post(
+  "/:id/students/:studentId/second-attempt/grant",
+  requireSuperadmin(),
+  auditAction("EXAM_SECOND_ATTEMPT_GRANT", "EXAM_ENROLLMENT_ENTRY", (req) => req.params.studentId),
+  grantSecondAttemptToStudent
+);
+
+examCyclesRouter.post(
+  "/:id/students/:studentId/second-attempt/revoke",
+  requireSuperadmin(),
+  auditAction("EXAM_SECOND_ATTEMPT_REVOKE", "EXAM_ENROLLMENT_ENTRY", (req) => req.params.studentId),
+  revokeSecondAttemptFromStudent
 );
 
 export { examCyclesRouter };

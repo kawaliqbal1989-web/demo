@@ -809,16 +809,64 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     // Prisma upsert can still race on MySQL, so handle unique-constraint collisions explicitly.
     const now = new Date();
 
-    let attempt = await prisma.worksheetSubmission.findUnique({
+    const latestAttempt = await prisma.worksheetSubmission.findFirst({
       where: {
-        worksheetId_studentId: {
-          worksheetId,
-          studentId: req.student.id
-        }
+        tenantId: req.auth.tenantId,
+        worksheetId,
+        studentId: req.student.id
+      },
+      orderBy: { attemptNo: "desc" },
+      select: {
+        id: true,
+        attemptNo: true,
+        status: true,
+        submittedAt: true,
+        finalSubmittedAt: true,
+        submittedAnswers: true,
+        supersededAt: true
       }
     });
 
-    if (!attempt) {
+    const examEnrollment = worksheet.examCycleId
+      ? await prisma.examEnrollmentEntry.findFirst({
+          where: {
+            tenantId: req.auth.tenantId,
+            examCycleId: worksheet.examCycleId,
+            studentId: req.student.id
+          },
+          select: {
+            id: true,
+            allowSecondAttempt: true,
+            attemptOverride: true,
+            secondAttemptGrantedAt: true,
+            secondAttemptGrantedByUserId: true
+          }
+        })
+      : null;
+
+    let attempt = latestAttempt;
+    const canStartAttempt2 = Boolean(
+      worksheet.examCycleId &&
+        examEnrollment?.allowSecondAttempt &&
+        (!latestAttempt || latestAttempt.attemptNo < 2)
+    );
+
+    if (!attempt || (canStartAttempt2 && latestAttempt?.attemptNo === 1 && !latestAttempt?.finalSubmittedAt)) {
+      if (latestAttempt && latestAttempt.attemptNo === 1 && !latestAttempt.finalSubmittedAt && canStartAttempt2) {
+        await prisma.worksheetSubmission.updateMany({
+          where: {
+            tenantId: req.auth.tenantId,
+            worksheetId,
+            studentId: req.student.id,
+            id: latestAttempt.id
+          },
+          data: {
+            supersededAt: now,
+            supersededByUserId: req.auth.userId
+          }
+        });
+      }
+
       try {
         const nowIso = now.toISOString();
         const clientSessionId = worksheet.generationMode === "EXAM" ? getClientSessionId(req) : null;
@@ -831,6 +879,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
             tenantId: req.auth.tenantId,
             worksheetId,
             studentId: req.student.id,
+            attemptNo: canStartAttempt2 ? 2 : 1,
             status: "PENDING",
             submittedAt: now,
             submittedAnswers: {
@@ -849,12 +898,12 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
         });
       } catch (err) {
         if (err?.code === "P2002") {
-          attempt = await prisma.worksheetSubmission.findUnique({
+          attempt = await prisma.worksheetSubmission.findFirst({
             where: {
-              worksheetId_studentId: {
-                worksheetId,
-                studentId: req.student.id
-              }
+              tenantId: req.auth.tenantId,
+              worksheetId,
+              studentId: req.student.id,
+              attemptNo: canStartAttempt2 ? 2 : 1
             }
           });
         }
@@ -889,6 +938,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
     return res.apiSuccess("Attempt fetched", {
       attemptId: attempt.id,
       worksheetId,
+      attemptNo: attempt.attemptNo ?? 1,
       status,
       worksheetKind,
       attemptTimerMode,
@@ -1162,7 +1212,8 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     answers,
     allowExpired: isTimedOut,
-    remarksOverride: isTimedOut ? "Timed out" : undefined
+    remarksOverride: isTimedOut ? "Timed out" : undefined,
+    submissionId: attempt.id
   });
 
   if (publicationState.isExamWorksheet && !publicationState.isPublished) {

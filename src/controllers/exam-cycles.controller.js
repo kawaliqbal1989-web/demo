@@ -171,21 +171,31 @@ function examRankTieKey(row) {
 }
 
 function assignExamResultRanks(rows = []) {
-  const rankedRows = rows
-    .filter((row) => row.resultOutcome === "SCORED")
-    .sort(compareExamRankRows);
-
+  const scoredRows = rows.filter((row) => row.resultOutcome === "SCORED");
   const rankByKey = new Map();
-  let currentRank = 0;
-  let previousTieKey = null;
+  const scoredRowsByLevel = new Map();
 
-  rankedRows.forEach((row, index) => {
-    const tieKey = examRankTieKey(row);
-    if (tieKey !== previousTieKey) {
-      currentRank = index + 1;
-      previousTieKey = tieKey;
+  scoredRows.forEach((row) => {
+    const levelKey = row.enrolledLevelId || "__UNASSIGNED__";
+    if (!scoredRowsByLevel.has(levelKey)) {
+      scoredRowsByLevel.set(levelKey, []);
     }
-    rankByKey.set(`${row.studentId}:${row.enrolledLevelId || ""}`, currentRank);
+    scoredRowsByLevel.get(levelKey).push(row);
+  });
+
+  scoredRowsByLevel.forEach((levelRows) => {
+    const rankedRows = levelRows.sort(compareExamRankRows);
+    let currentRank = 0;
+    let previousTieKey = null;
+
+    rankedRows.forEach((row, index) => {
+      const tieKey = examRankTieKey(row);
+      if (tieKey !== previousTieKey) {
+        currentRank = index + 1;
+        previousTieKey = tieKey;
+      }
+      rankByKey.set(`${row.studentId}:${row.enrolledLevelId || ""}`, currentRank);
+    });
   });
 
   return rows.map((row) => ({
@@ -3623,6 +3633,41 @@ const getExamResults = asyncHandler(async (req, res) => {
   return res.apiSuccess("Exam results", payload);
 });
 
+function formatCsvRank(rank) {
+  const numericRank = toNullableNumber(rank);
+  return numericRank !== null ? `#${numericRank}` : "";
+}
+
+function formatCsvDuration(completionTimeSeconds) {
+  const totalSeconds = toNullableNumber(completionTimeSeconds);
+  if (totalSeconds === null || totalSeconds < 0) return "";
+
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatCsvSecondAttempt(row = {}) {
+  const status = String(row.attempt2Status || "").toUpperCase();
+
+  if (status === "IN_PROGRESS") return "Attempt 2 In Progress";
+  if (status === "SUBMITTED") return "Attempt 2 Submitted";
+  if (status === "TIMED_OUT") return "Attempt 2 Time Up";
+  if (row.secondAttemptGranted) return "2nd Attempt Granted";
+
+  return "";
+}
+
+function formatCsvYesNo(value) {
+  return value ? "YES" : "NO";
+}
+
 const exportExamResultsCsv = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
 
@@ -3641,26 +3686,62 @@ const exportExamResultsCsv = asyncHandler(async (req, res) => {
     { key: "examCode", label: "Exam Code" },
     { key: "examName", label: "Exam Name" },
     { key: "resultStatus", label: "Result Status" },
+    { key: "rank", label: "Rank" },
     { key: "studentCode", label: "Student Code" },
     { key: "studentName", label: "Student Name" },
-    { key: "score", label: "Score" },
+    { key: "candidateType", label: "Candidate Type" },
+    { key: "enrollment", label: "Enrollment" },
+    { key: "level", label: "Level" },
+    { key: "levelOrder", label: "Level Order" },
+    { key: "teacherCode", label: "Teacher Code" },
+    { key: "teacherName", label: "Teacher Name" },
+    { key: "centerCode", label: "Center Code" },
+    { key: "centerName", label: "Center Name" },
+    { key: "status", label: "Status" },
     { key: "correctCount", label: "Correct" },
+    { key: "wrongCount", label: "Wrong" },
+    { key: "unansweredCount", label: "Unanswered" },
     { key: "totalQuestions", label: "Total" },
-    { key: "completionTimeSeconds", label: "Time (sec)" },
-    { key: "submittedAt", label: "Submitted At" }
+    { key: "accuracy", label: "Accuracy %" },
+    { key: "resultState", label: "Result State" },
+    { key: "completionTime", label: "Completion Time" },
+    { key: "completionTimeSeconds", label: "Completion Time (sec)" },
+    { key: "submittedAt", label: "Submitted At" },
+    { key: "attemptNo", label: "Attempt No" },
+    { key: "secondAttempt", label: "Second Attempt" },
+    { key: "resultConflict", label: "Result Conflict" },
+    { key: "resultConflictReason", label: "Result Conflict Reason" }
   ];
 
   const rows = (payload.results || []).map((r) => ({
     examCode: examCycle.code,
     examName: examCycle.name,
     resultStatus: payload.status,
+    rank: formatCsvRank(r.rank),
     studentCode: r.admissionNo,
     studentName: r.studentName,
-    score: r.score,
+    candidateType: r.isTemporaryCandidate ? "Temporary" : "Regular",
+    enrollment: r.isLateEnrollment ? "Late Enrollment" : "Regular",
+    level: r.levelName,
+    levelOrder: r.levelRank,
+    teacherCode: r.teacherCode,
+    teacherName: r.teacherName,
+    centerCode: r.centerCode,
+    centerName: r.centerName,
+    status: r.candidateStatus,
     correctCount: r.correctCount,
+    wrongCount: r.wrongCount,
+    unansweredCount: r.unansweredCount,
     totalQuestions: r.totalQuestions,
+    accuracy: r.percentage,
+    resultState: r.resultOutcome,
+    completionTime: formatCsvDuration(r.completionTimeSeconds),
     completionTimeSeconds: r.completionTimeSeconds,
-    submittedAt: r.submittedAt ? new Date(r.submittedAt).toISOString() : ""
+    submittedAt: r.submittedAt ? new Date(r.submittedAt).toISOString() : "",
+    attemptNo: r.activeAttemptNo,
+    secondAttempt: formatCsvSecondAttempt(r),
+    resultConflict: formatCsvYesNo(r.resultConflict),
+    resultConflictReason: r.resultConflictReason
   }));
 
   const csv = toCsv({ headers, rows });

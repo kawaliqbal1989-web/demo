@@ -932,7 +932,7 @@ function SuperadminExamResultsPage() {
                 twoLine(
                   row?.levelName,
                   isPresent(row?.levelRank)
-                    ? `Rank ${row.levelRank}`
+                    ? `Level order ${row.levelRank}`
                     : ""
                 )
             },
@@ -1106,7 +1106,7 @@ function SuperadminExamResultsPage() {
                 twoLine(
                   row?.levelName || row?.levelId,
                   isPresent(row?.levelRank)
-                    ? `Rank ${row.levelRank}`
+                    ? `Level order ${row.levelRank}`
                     : ""
                 )
             },

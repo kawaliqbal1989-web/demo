@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
+import { QuestionBankWorkspacePage } from "../common/QuestionBankWorkspacePage";
+import { SuperadminExamResultsControlCenterPage } from "./SuperadminExamResultsControlCenterPage";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   listExamCycles,
@@ -154,10 +156,25 @@ function SummaryCard({ label, value, hint, tone = "#2563eb" }) {
   );
 }
 
-function SuperadminExamCyclesPage() {
+const SUPERADMIN_EXAM_TABS = [
+  { key: "exam-cycles", label: "Exam Cycles" },
+  { key: "question-bank", label: "Question Bank" },
+  { key: "paper-builder", label: "Paper Builder" },
+  { key: "worksheets", label: "Worksheets" },
+  { key: "enrollment", label: "Enrollment" },
+  { key: "results", label: "Results" }
+];
+
+function resolveSuperadminExamTab(searchParams) {
+  const tab = String(searchParams.get("tab") || "").trim().toLowerCase();
+  const hasKnownTab = SUPERADMIN_EXAM_TABS.some((entry) => entry.key === tab);
+  if (hasKnownTab) return tab;
+  if (searchParams.get("focus") === "late") return "enrollment";
+  return "exam-cycles";
+}
+
+function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {}) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const routeHierarchyFilter = searchParams.get("focus") === "late" ? "LATE_ONLY" : "ALL";
   const [rows, setRows] = useState([]);
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
@@ -462,7 +479,7 @@ function SuperadminExamCyclesPage() {
           <button
             className="button secondary"
             type="button"
-            onClick={() => navigate("/superadmin/exam-results")}
+            onClick={() => navigate("/superadmin/exam-cycles?tab=results")}
             style={{ width: "auto" }}
           >
             Result Control Center
@@ -1020,6 +1037,78 @@ function SuperadminExamCyclesPage() {
           </div>
         </div>
       ) : null}
+    </section>
+  );
+}
+
+function SuperadminExamCyclesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = useMemo(() => resolveSuperadminExamTab(searchParams), [searchParams]);
+  const routeHierarchyFilter = searchParams.get("focus") === "late" ? "LATE_ONLY" : "ALL";
+
+  const handleTabChange = useCallback((nextTab) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", nextTab);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  return (
+    <section style={{ display: "grid", gap: 12 }}>
+      <div className="card" style={{ display: "grid", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Superadmin Exam Workspace</h2>
+          <div style={{ fontSize: 13, color: "var(--color-text-muted)", marginTop: 4 }}>
+            Consolidated exam cycles, question bank, enrollment, paper planning, worksheets, and results.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {SUPERADMIN_EXAM_TABS.map((tab) => {
+            const isActive = activeTab === tab.key;
+            return (
+              <button
+                key={tab.key}
+                type="button"
+                className={isActive ? "button" : "button secondary"}
+                style={{ width: "auto" }}
+                onClick={() => handleTabChange(tab.key)}
+              >
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {activeTab === "exam-cycles" ? <SuperadminExamCyclesWorkspacePanel routeHierarchyFilter="ALL" /> : null}
+
+      {activeTab === "question-bank" ? <QuestionBankWorkspacePage title="Superadmin Question Bank" /> : null}
+
+      {activeTab === "paper-builder" ? (
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <h3 style={{ margin: 0 }}>Paper Builder (Pending Backend/Schema Audit)</h3>
+          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
+            This workspace will reuse existing exam platform capabilities after backend and schema mapping audit.
+          </p>
+          <div style={{ display: "grid", gap: 6 }}>
+            <div>Manual Paper</div>
+            <div>Rule-wise Paper</div>
+            <div>Hybrid Paper</div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "worksheets" ? (
+        <div className="card" style={{ display: "grid", gap: 8 }}>
+          <h3 style={{ margin: 0 }}>Worksheets</h3>
+          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
+            Worksheet workspace will reuse the existing worksheet builder after backend mapping audit.
+          </p>
+        </div>
+      ) : null}
+
+      {activeTab === "enrollment" ? <SuperadminExamCyclesWorkspacePanel routeHierarchyFilter={routeHierarchyFilter} /> : null}
+
+      {activeTab === "results" ? <SuperadminExamResultsControlCenterPage /> : null}
     </section>
   );
 }

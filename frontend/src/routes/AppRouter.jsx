@@ -33,7 +33,6 @@ import { SuperadminExamCyclesPage } from "../modules/superadmin/SuperadminExamCy
 import { SuperadminCreateExamCyclePage } from "../modules/superadmin/SuperadminCreateExamCyclePage";
 import { SuperadminExamPendingListsPage } from "../modules/superadmin/SuperadminExamPendingListsPage";
 import { SuperadminExamResultsPage } from "../modules/superadmin/SuperadminExamResultsPage";
-import { SuperadminExamResultsControlCenterPage } from "../modules/superadmin/SuperadminExamResultsControlCenterPage";
 import { SuperadminMarginsPage } from "../modules/superadmin/SuperadminMarginsPage";
 import { SuperadminSettlementsPage } from "../modules/superadmin/SuperadminSettlementsPage";
 import { SuperadminLedgerPage } from "../modules/superadmin/SuperadminLedgerPage";
@@ -44,8 +43,6 @@ import { SuperadminCompetitionPage } from "../modules/superadmin/SuperadminCompe
 import { SuperadminCompetitionPendingPage } from "../modules/superadmin/SuperadminCompetitionPendingPage";
 import { SuperadminCompetitionResultsPage } from "../modules/superadmin/SuperadminCompetitionResultsPage";
 import { SuperadminExportOperationsPage } from "../modules/superadmin/SuperadminExportOperationsPage";
-import { SuperadminQuestionBankPage } from "../modules/superadmin/SuperadminQuestionBankPage";
-import { SuperadminExamPlatformPage } from "../modules/superadmin/SuperadminExamPlatformPage";
 import { SuperadminExamLateEnrollmentReviewPage } from "../modules/superadmin/SuperadminExamLateEnrollmentReviewPage";
 
 import { CenterStudentsPage } from "../modules/center/CenterStudentsPage";
@@ -198,7 +195,7 @@ function AppRouter() {
             <Route path="/superadmin/courses/:courseId/levels/:levelNumber/question-bank" element={<SuperadminCourseLevelQuestionBankPage />} />
             <Route path="/superadmin/courses/:courseId/levels/:levelNumber/worksheets" element={<SuperadminCourseLevelWorksheetsPage />} />
             <Route path="/superadmin/exam-cycles" element={<SuperadminExamCyclesPage />} />
-            <Route path="/superadmin/exam-results" element={<SuperadminExamResultsControlCenterPage />} />
+            <Route path="/superadmin/exam-results" element={<Navigate to="/superadmin/exam-cycles?tab=results" replace />} />
             <Route path="/superadmin/exam-cycles/new" element={<SuperadminCreateExamCyclePage />} />
             <Route path="/superadmin/exam-cycles/:examCycleId/pending" element={<SuperadminExamPendingListsPage />} />
             <Route path="/superadmin/exam-cycles/:examCycleId/results" element={<SuperadminExamResultsPage />} />
@@ -216,8 +213,8 @@ function AppRouter() {
             <Route path="/superadmin/competition" element={<SuperadminCompetitionPage />} />
             <Route path="/superadmin/competition/:competitionId/pending" element={<SuperadminCompetitionPendingPage />} />
             <Route path="/superadmin/competition/:competitionId/results" element={<SuperadminCompetitionResultsPage />} />
-            <Route path="/superadmin/question-bank" element={<SuperadminQuestionBankPage />} />
-            <Route path="/superadmin/exam-platform" element={<SuperadminExamPlatformPage />} />
+            <Route path="/superadmin/question-bank" element={<Navigate to="/superadmin/exam-cycles?tab=question-bank" replace />} />
+            <Route path="/superadmin/exam-platform" element={<Navigate to="/superadmin/exam-cycles?tab=paper-builder" replace />} />
             <Route path="/superadmin/release" element={<ReleaseManagement />} />
           </Route>
 

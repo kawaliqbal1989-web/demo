@@ -1071,7 +1071,7 @@ function SuperadminExamResultsPage() {
                   return badge("2nd Attempt Granted", "warn");
                 }
 
-                return "ΓÇö";
+                return "—";
               }
             }
           ]}

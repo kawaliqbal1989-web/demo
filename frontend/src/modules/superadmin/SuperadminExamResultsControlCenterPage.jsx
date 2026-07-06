@@ -136,7 +136,7 @@ function SuperadminExamResultsControlCenterPage() {
             { key: "status", header: "Publication Status", render: (row) => row.resultStatus },
             { key: "normalCount", header: "Normal", render: (row) => String(row?.enrollmentCounts?.normalEnrollmentCount ?? 0) },
             { key: "lateCount", header: "Late", render: (row) => String(row?.enrollmentCounts?.lateEnrollmentCount ?? 0) },
-            { key: "totalCount", header: "Total", render: (row) => String(row?.enrollmentCounts?.totalEnrollmentCount ?? row?.metrics?.enrolledCount ?? 0) },
+            { key: "totalCount", header: "Total", render: (row) => String(row?.metrics?.totalCandidates ?? row?.enrollmentCounts?.totalEnrollmentCount ?? row?.metrics?.enrolledCount ?? 0) },
             { key: "appeared", header: "Appeared", render: (row) => String(row?.metrics?.appearedCount || 0) },
             { key: "publishedAt", header: "Published At", render: (row) => formatDateTime(row.resultPublishedAt) },
             { key: "actions", header: "Actions", render: (row) => (

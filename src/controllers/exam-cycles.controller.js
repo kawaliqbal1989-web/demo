@@ -2699,31 +2699,26 @@ const listExamResultsControlCenter = asyncHandler(async (req, res) => {
 
   const enriched = await Promise.all(
     items.map(async (cycle) => {
-      const enrollmentCounts = await getEnrollmentCounts({
-        tenantId: req.auth.tenantId,
-        examCycleId: cycle.id
-      });
-
-      const submissionsCount = await prisma.worksheetSubmission.count({
-        where: {
+      const [enrollmentCounts, reviewSummary] = await Promise.all([
+        getEnrollmentCounts({
           tenantId: req.auth.tenantId,
-          worksheet: {
-            is: {
-              examCycleId: cycle.id,
-              generationMode: "EXAM"
-            }
-          },
-          finalSubmittedAt: { not: null },
-          score: { not: null }
-        }
-      });
+          examCycleId: cycle.id
+        }),
+        buildExamResultReviewSummary({
+          tenantId: req.auth.tenantId,
+          examCycleId: cycle.id,
+          actor: req.auth
+        })
+      ]);
 
       return {
         ...cycle,
         enrollmentCounts,
         metrics: {
           enrolledCount: cycle._count.enrollmentEntries,
-          appearedCount: submissionsCount,
+          totalCandidates: Number(reviewSummary?.summary?.totalCandidates || 0),
+          appearedCount: Number(reviewSummary?.summary?.appearedCount || 0),
+          scoredCount: Number(reviewSummary?.summary?.scoredCount || 0),
           publicationEvents: cycle._count.resultPublicationAudits
         },
         publication: {
@@ -3317,7 +3312,7 @@ const archiveExamCycle = asyncHandler(async (req, res) => {
     return res.apiError(409, "Exam cycle is already archived", "EXAM_CYCLE_ALREADY_ARCHIVED");
   }
 
-  if (confirmCode.toUpperCase() !== String(impact.examCycle.code || "").toUpperCase()) {
+  if (confirmCode !== String(impact.examCycle.code || "")) {
     return res.apiError(400, "confirmCode must match exam cycle code", "EXAM_CYCLE_CODE_CONFIRMATION_MISMATCH");
   }
 
@@ -3575,7 +3570,7 @@ const deleteExamCycle = asyncHandler(async (req, res) => {
     return res.apiError(400, "confirmCode is required", "VALIDATION_ERROR");
   }
 
-  if (confirmCode.toUpperCase() !== String(impact.examCycle.code || "").toUpperCase()) {
+  if (confirmCode !== String(impact.examCycle.code || "")) {
     return res.apiError(400, "confirmCode must match exam cycle code", "EXAM_CYCLE_CODE_CONFIRMATION_MISMATCH");
   }
 

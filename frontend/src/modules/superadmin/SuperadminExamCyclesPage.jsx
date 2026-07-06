@@ -436,7 +436,7 @@ function SuperadminExamCyclesPage() {
   const isDeleteFormValid =
     Boolean(deletePassword.trim())
     && Boolean(deleteConfirmCode.trim())
-    && deleteConfirmCode.trim().toUpperCase() === deleteCodeTarget.toUpperCase()
+    && deleteConfirmCode.trim() === deleteCodeTarget
     && Boolean(impactFlags?.canDelete)
     && !deleteImpactLoading;
 
@@ -444,7 +444,7 @@ function SuperadminExamCyclesPage() {
   const isArchiveValid =
     archiveReason.trim().length >= 20
     && archivePassword.trim().length > 0
-    && archiveConfirmCode.trim().toUpperCase() === archiveCodeTarget.toUpperCase();
+    && archiveConfirmCode.trim() === archiveCodeTarget;
 
   const healthCycle = selectedHealthCycle || rows[0] || null;
   const lifecycleHealth = resolveLifecycleHealth(healthCycle);
@@ -869,6 +869,7 @@ function SuperadminExamCyclesPage() {
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ fontSize: 13, fontWeight: 600 }}>Cycle Code</label>
               <input className="input" value={archiveConfirmCode} onChange={(event) => setArchiveConfirmCode(event.target.value)} placeholder={archiveCodeTarget ? `Type ${archiveCodeTarget}` : "Type cycle code"} />
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Expected: {archiveCodeTarget || "N/A"}</div>
             </div>
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ fontSize: 13, fontWeight: 600 }}>Password</label>

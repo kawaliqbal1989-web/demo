@@ -1866,7 +1866,7 @@ const exportEnrollmentListCsv = asyncHandler(async (req, res) => {
 async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {} }) {
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
-    select: { id: true, resultStatus: true, isArchived: true }
+    select: { id: true, resultStatus: true, isArchived: true, businessPartnerId: true }
   });
 
   if (!examCycle) {
@@ -1877,6 +1877,13 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
   }
 
   const scope = await resolveActorExamScope({ tenantId, actor });
+
+  if (actor.role !== "SUPERADMIN" && scope.businessPartnerId && examCycle.businessPartnerId !== scope.businessPartnerId) {
+    const error = new Error("Hierarchy scope denied");
+    error.statusCode = 403;
+    error.errorCode = "HIERARCHY_SCOPE_DENIED";
+    throw error;
+  }
 
   if (actor.role !== "SUPERADMIN" && examCycle.resultStatus !== "PUBLISHED") {
     const error = new Error("Results are not published");

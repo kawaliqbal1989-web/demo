@@ -52,10 +52,14 @@ function BusinessPartnerExamResultsPage() {
     { key: "center", header: "Center", render: (r) => r.centerName || r.center?.name || "" },
     { key: "level", header: "Level", render: (r) => r.levelName || r.level?.name || "" },
     { key: "score", header: "Score", render: (r) => String(r.score ?? r.totalScore ?? "") },
-    { key: "maxScore", header: "Max", render: (r) => String(r.maxScore ?? "") },
+    { key: "maxScore", header: "Max", render: (r) => String(r.maxScore ?? r.totalQuestions ?? "") },
     { key: "percentage", header: "%", render: (r) => r.percentage != null ? `${r.percentage}%` : "" },
     { key: "grade", header: "Grade", render: (r) => r.grade || "" },
-    { key: "status", header: "Status", render: (r) => <StatusBadge status={r.status || resultStatus} /> }
+    {
+      key: "status",
+      header: "Status",
+      render: (r) => <StatusBadge status={r.candidateStatus || r.status || resultStatus || "PENDING"} />
+    }
   ];
 
   return (

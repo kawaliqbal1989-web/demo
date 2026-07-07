@@ -57,6 +57,21 @@ const listWorksheets = asyncHandler(async (req, res) => {
     ...(levelId ? { levelId } : {})
   };
 
+  const appendNotFilter = (clause) => {
+    if (!clause) return;
+    if (!where.NOT) {
+      where.NOT = [clause];
+      return;
+    }
+
+    if (Array.isArray(where.NOT)) {
+      where.NOT.push(clause);
+      return;
+    }
+
+    where.NOT = [where.NOT, clause];
+  };
+
   const maxLevelRank = await resolveActorLevelCap({
     tenantId: req.auth.tenantId,
     auth: req.auth
@@ -84,6 +99,10 @@ const listWorksheets = asyncHandler(async (req, res) => {
   if (examSelectionEligible) {
     where.isPublished = true;
     where.examCycleId = null;
+    appendNotFilter({ generationMode: "EXAM" });
+  } else {
+    where.examCycleId = null;
+    appendNotFilter({ generationMode: "EXAM" });
   }
 
   if (!examSelectionEligible && published === "true") {
@@ -198,6 +217,13 @@ const getWorksheet = asyncHandler(async (req, res) => {
 
   if (Number.isFinite(maxLevelRank) && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
     return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
+  }
+
+  const role = String(req.auth?.role || "").toUpperCase();
+  const isExamWorksheet = Boolean(worksheet?.examCycleId) || String(worksheet?.generationMode || "").toUpperCase() === "EXAM";
+
+  if ((role === "CENTER" || role === "TEACHER") && isExamWorksheet) {
+    return res.apiError(403, "Exam worksheet access is restricted on this endpoint", "EXAM_WORKSHEET_ACCESS_DENIED");
   }
 
   return res.apiSuccess("Worksheet fetched", worksheet);

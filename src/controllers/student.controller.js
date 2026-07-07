@@ -24,31 +24,32 @@ function fullName(student) {
 }
 
 function mapSubmissionToAttempt(submission, { timeLimitSeconds = null, now = new Date() } = {}) {
-  if (!submission) {
+  const rows = Array.isArray(submission) ? submission : submission ? [submission] : [];
+  if (!rows.length) {
     return [];
   }
 
-  const timing = getAttemptTiming({
-    startedAt: submission.submittedAt || now,
-    timeLimitSeconds
-  });
-  const derivedStatus = deriveAttemptStatus({
-    finalSubmittedAt: submission.finalSubmittedAt,
-    endsAt: timing.endsAt,
-    now
-  });
+  return rows.map((row, index) => {
+    const timing = getAttemptTiming({
+      startedAt: row.submittedAt || now,
+      timeLimitSeconds
+    });
+    const derivedStatus = deriveAttemptStatus({
+      finalSubmittedAt: row.finalSubmittedAt,
+      endsAt: timing.endsAt,
+      now
+    });
 
-  return [
-    {
-      attemptId: submission.id,
-      attemptNo: 1,
+    return {
+      attemptId: row.id,
+      attemptNo: Number(row.attemptNo || index + 1),
       status: derivedStatus,
-      score: submission.score === null ? null : Number(submission.score),
-      total: submission.totalQuestions ?? null,
-      submittedAt: submission.finalSubmittedAt || null,
-      durationSeconds: submission.completionTimeSeconds ?? null
-    }
-  ];
+      score: row.score === null ? null : Number(row.score),
+      total: row.totalQuestions ?? null,
+      submittedAt: row.finalSubmittedAt || null,
+      durationSeconds: row.completionTimeSeconds ?? null
+    };
+  });
 }
 
 function normalizeArchivedResultSnapshot(snapshot) {
@@ -1529,16 +1530,19 @@ const listStudentWorksheetAttempts = asyncHandler(async (req, res) => {
     worksheet: access.worksheet
   });
 
-  const submission = await prisma.worksheetSubmission.findUnique({
+  const submissions = await prisma.worksheetSubmission.findMany({
     where: {
-      worksheetId_studentId: {
-        worksheetId,
-        studentId: req.student.id
-      }
-    }
+      tenantId: req.auth.tenantId,
+      worksheetId,
+      studentId: req.student.id
+    },
+    orderBy: [
+      { attemptNo: "asc" },
+      { submittedAt: "asc" }
+    ]
   });
 
-  const mapped = mapSubmissionToAttempt(submission, {
+  const mapped = mapSubmissionToAttempt(submissions, {
     timeLimitSeconds: access.worksheet?.timeLimitSeconds,
     now: new Date()
   }).map((attempt) => {

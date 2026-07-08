@@ -34,6 +34,25 @@ function mapAssessmentStorageError(error) {
   throw error;
 }
 
+function isMissingColumnError(error, columnName) {
+  return String(error?.code || "") === "P2022" && String(error?.message || "").toLowerCase().includes(String(columnName || "").toLowerCase());
+}
+
+function isTemplateGroupingUnavailable(error) {
+  const name = String(error?.name || "");
+  const message = String(error?.message || "").toLowerCase();
+  if (isMissingColumnError(error, "templateId")) {
+    return true;
+  }
+
+  // Handles stale Prisma Client cases where templateId is not known in the model metadata.
+  if (name.includes("PrismaClientValidationError") && message.includes("templateid")) {
+    return true;
+  }
+
+  return false;
+}
+
 function toPositiveInt(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -148,7 +167,7 @@ async function getExamCycleLevels({ tenantId, examCycleId, listId = null }) {
   });
 }
 
-async function getLevelWorksheets({ tenantId, levelIds }) {
+async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null }) {
   if (!Array.isArray(levelIds) || !levelIds.length) {
     return {};
   }
@@ -157,6 +176,12 @@ async function getLevelWorksheets({ tenantId, levelIds }) {
     where: {
       tenantId,
       levelId: { in: levelIds },
+      ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+        ? {
+            courseId: provenanceContext.courseId,
+            courseLevelId: provenanceContext.courseLevelId
+          }
+        : {}),
       isPublished: true,
       examCycleId: null
     },
@@ -188,50 +213,82 @@ async function getLevelWorksheets({ tenantId, levelIds }) {
   return byLevelId;
 }
 
-async function getLevelQuestionBanks({ tenantId, levelIds }) {
+async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = null }) {
   if (!Array.isArray(levelIds) || !levelIds.length) {
     return {};
   }
 
-  const grouped = await prisma.questionBank.groupBy({
-    by: ["levelId", "templateId"],
-    where: {
-      tenantId,
-      levelId: { in: levelIds },
-      isActive: true
-    },
-    _count: { _all: true }
-  });
+  const where = {
+    tenantId,
+    levelId: { in: levelIds },
+    ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+      ? {
+          courseId: provenanceContext.courseId,
+          courseLevelId: provenanceContext.courseLevelId
+        }
+      : {}),
+    isActive: true
+  };
 
-  const templateIds = Array.from(new Set(grouped.map((row) => row.templateId).filter(Boolean)));
-  const templates = templateIds.length
-    ? await prisma.worksheetTemplate.findMany({
-        where: { tenantId, id: { in: templateIds } },
-        select: { id: true, name: true }
-      })
-    : [];
+  try {
+    const grouped = await prisma.questionBank.groupBy({
+      by: ["levelId", "templateId"],
+      where,
+      _count: { _all: true }
+    });
 
-  const templateNameById = new Map(templates.map((template) => [template.id, template.name]));
+    const templateIds = Array.from(new Set(grouped.map((row) => row.templateId).filter(Boolean)));
+    const templates = templateIds.length
+      ? await prisma.worksheetTemplate.findMany({
+          where: { tenantId, id: { in: templateIds } },
+          select: { id: true, name: true }
+        })
+      : [];
 
-  const byLevelId = {};
-  for (const row of grouped) {
-    if (!byLevelId[row.levelId]) {
-      byLevelId[row.levelId] = [];
+    const templateNameById = new Map(templates.map((template) => [template.id, template.name]));
+
+    const byLevelId = {};
+    for (const row of grouped) {
+      if (!byLevelId[row.levelId]) {
+        byLevelId[row.levelId] = [];
+      }
+
+      const key = bankKeyFromTemplateId(row.templateId);
+      byLevelId[row.levelId].push({
+        id: key,
+        name: templateNameById.get(row.templateId) || (row.templateId ? "Question Bank" : "Default Level Bank"),
+        availableQuestionCount: row._count?._all || 0
+      });
     }
 
-    const key = bankKeyFromTemplateId(row.templateId);
-    byLevelId[row.levelId].push({
-      id: key,
-      name: templateNameById.get(row.templateId) || (row.templateId ? "Question Bank" : "Default Level Bank"),
-      availableQuestionCount: row._count?._all || 0
+    for (const levelId of Object.keys(byLevelId)) {
+      byLevelId[levelId].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    }
+
+    return byLevelId;
+  } catch (error) {
+    // Backward-compatible fallback for tenants not yet migrated with questionBank.templateId.
+    if (!isTemplateGroupingUnavailable(error)) {
+      throw error;
+    }
+
+    const groupedLegacy = await prisma.questionBank.groupBy({
+      by: ["levelId"],
+      where,
+      _count: { _all: true }
     });
-  }
 
-  for (const levelId of Object.keys(byLevelId)) {
-    byLevelId[levelId].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
-  }
+    const byLevelId = {};
+    for (const row of groupedLegacy) {
+      byLevelId[row.levelId] = [{
+        id: bankKeyFromTemplateId(null),
+        name: "Default Level Bank",
+        availableQuestionCount: row._count?._all || 0
+      }];
+    }
 
-  return byLevelId;
+    return byLevelId;
+  }
 }
 
 async function getConfig({ tenantId, examCycleId, levelIds }) {
@@ -265,7 +322,7 @@ async function getConfig({ tenantId, examCycleId, levelIds }) {
   }
 }
 
-async function validateQuestionBankSelection({ tenantId, levelId, questionBankId, questionCount }) {
+async function validateQuestionBankSelection({ tenantId, levelId, questionBankId, questionCount, provenanceContext = null }) {
   const normalizedBankKey = normalizeQuestionBankKey(questionBankId);
   if (!normalizedBankKey) {
     throw createHttpError(400, "questionBankId is required for question bank mode", "EXAM_QUESTION_BANK_REQUIRED");
@@ -281,6 +338,12 @@ async function validateQuestionBankSelection({ tenantId, levelId, questionBankId
     where: {
       tenantId,
       levelId,
+      ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+        ? {
+            courseId: provenanceContext.courseId,
+            courseLevelId: provenanceContext.courseLevelId
+          }
+        : {}),
       isActive: true,
       ...(templateId ? { templateId } : { templateId: null })
     }
@@ -301,7 +364,7 @@ async function validateQuestionBankSelection({ tenantId, levelId, questionBankId
   };
 }
 
-async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowedLevelIds }) {
+async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowedLevelIds, provenanceContext = null }) {
   if (!Array.isArray(configs) || configs.length === 0) {
     throw createHttpError(400, "configs[] is required", "VALIDATION_ERROR");
   }
@@ -339,7 +402,16 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
 
   const worksheets = worksheetIds.length
     ? await prisma.worksheet.findMany({
-        where: { tenantId, id: { in: worksheetIds } },
+        where: {
+          tenantId,
+          id: { in: worksheetIds },
+          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+            ? {
+                courseId: provenanceContext.courseId,
+                courseLevelId: provenanceContext.courseLevelId
+              }
+            : {})
+        },
         select: {
           id: true,
           levelId: true,
@@ -391,7 +463,8 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
       tenantId,
       levelId: config.levelId,
       questionBankId: config.questionBankId,
-      questionCount: config.questionCount
+      questionCount: config.questionCount,
+      provenanceContext
     });
 
     const timeLimitMinutes = toPositiveInt(config.timeLimitMinutes);
@@ -449,7 +522,7 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
   return getConfig({ tenantId, examCycleId, levelIds: writes.map((item) => item.levelId) });
 }
 
-async function validateConfig({ tenantId, examCycleId, requiredLevelIds }) {
+async function validateConfig({ tenantId, examCycleId, requiredLevelIds, provenanceContext = null }) {
   const required = Array.from(new Set((requiredLevelIds || []).filter(Boolean).map((levelId) => String(levelId))));
   if (!required.length) {
     throw createHttpError(409, "No levels found for configuration validation", "EXAM_LIST_EMPTY");
@@ -496,6 +569,12 @@ async function validateConfig({ tenantId, examCycleId, requiredLevelIds }) {
           tenantId,
           id: config.worksheetId,
           levelId,
+          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+            ? {
+                courseId: provenanceContext.courseId,
+                courseLevelId: provenanceContext.courseLevelId
+              }
+            : {}),
           isPublished: true,
           examCycleId: null
         },
@@ -516,7 +595,8 @@ async function validateConfig({ tenantId, examCycleId, requiredLevelIds }) {
       tenantId,
       levelId,
       questionBankId: config.questionBankId,
-      questionCount: config.questionCount
+      questionCount: config.questionCount,
+      provenanceContext
     });
 
     if (!toPositiveInt(config.timeLimitMinutes)) {
@@ -527,7 +607,7 @@ async function validateConfig({ tenantId, examCycleId, requiredLevelIds }) {
   return configs;
 }
 
-async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId }) {
+async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId, provenanceContext = null }) {
   const normalizedLevelId = String(levelId || "").trim();
   const normalizedStudentId = String(studentId || "").trim();
   if (!normalizedLevelId || !normalizedStudentId) {
@@ -605,6 +685,12 @@ async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId }
     where: {
       tenantId,
       levelId: normalizedLevelId,
+      ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+        ? {
+            courseId: provenanceContext.courseId,
+            courseLevelId: provenanceContext.courseLevelId
+          }
+        : {}),
       isActive: true,
       ...(templateId ? { templateId } : { templateId: null })
     },

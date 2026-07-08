@@ -1,10 +1,12 @@
 import { apiClient, baseURL } from "./apiClient";
 import { getStoredAccessToken } from "../auth/tokenStorage";
 
-async function listQuestionBank({ levelId, difficulty, q } = {}) {
+async function listQuestionBank({ levelId, difficulty, q, courseId, levelNumber } = {}) {
   const response = await apiClient.get("/question-bank", {
     params: {
       levelId,
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {}),
       ...(difficulty ? { difficulty } : {}),
       ...(q ? { q } : {})
     },
@@ -13,36 +15,68 @@ async function listQuestionBank({ levelId, difficulty, q } = {}) {
   return response.data;
 }
 
-async function createQuestionBankEntry(payload) {
-  const response = await apiClient.post("/question-bank", payload, { _skipGlobalLoading: true });
-  return response.data;
-}
-
-async function updateQuestionBankEntry(id, payload) {
-  const response = await apiClient.patch(`/question-bank/${id}`, payload, { _skipGlobalLoading: true });
-  return response.data;
-}
-
-async function deleteQuestionBankEntry(id) {
-  const response = await apiClient.delete(`/question-bank/${id}`, { _skipGlobalLoading: true });
-  return response.data;
-}
-
-async function importQuestionBank({ levelId, items }) {
+async function createQuestionBankEntry(payload, { courseId, levelNumber } = {}) {
   const response = await apiClient.post(
-    "/question-bank/import",
+    "/question-bank",
     {
-      levelId,
-      items
+      ...payload,
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {})
     },
     { _skipGlobalLoading: true }
   );
   return response.data;
 }
 
-async function exportQuestionBankCsv({ levelId }) {
+async function updateQuestionBankEntry(id, payload, { courseId, levelNumber } = {}) {
+  const response = await apiClient.patch(
+    `/question-bank/${id}`,
+    {
+      ...payload,
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {})
+    },
+    { _skipGlobalLoading: true }
+  );
+  return response.data;
+}
+
+async function deleteQuestionBankEntry(id, { courseId, levelNumber } = {}) {
+  const response = await apiClient.delete(`/question-bank/${id}`, {
+    params: {
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {})
+    },
+    _skipGlobalLoading: true
+  });
+  return response.data;
+}
+
+async function importQuestionBank({ levelId, items, courseId, levelNumber, workspaceScope }) {
+  const response = await apiClient.post(
+    "/question-bank/import",
+    {
+      levelId,
+      items,
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {}),
+      ...(workspaceScope ? { workspaceScope } : {})
+    },
+    { _skipGlobalLoading: true }
+  );
+  return response.data;
+}
+
+async function exportQuestionBankCsv({ levelId, courseId, levelNumber }) {
   const token = getStoredAccessToken();
-  const url = `${baseURL}/question-bank/export.csv?levelId=${encodeURIComponent(levelId)}`;
+  const params = new URLSearchParams({ levelId: String(levelId) });
+  if (courseId) {
+    params.set("courseId", String(courseId));
+  }
+  if (levelNumber) {
+    params.set("levelNumber", String(levelNumber));
+  }
+  const url = `${baseURL}/question-bank/export.csv?${params.toString()}`;
   const response = await fetch(url, {
     headers: token ? { Authorization: `Bearer ${token}` } : {}
   });

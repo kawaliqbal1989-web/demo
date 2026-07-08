@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
@@ -26,6 +26,11 @@ function formatDateTime(value) {
 function SuperadminExamPendingListsPage() {
   const { examCycleId } = useParams();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const examCourseContext = {
+    courseId: String(searchParams.get("examCourseId") || searchParams.get("courseId") || "").trim() || null,
+    levelNumber: String(searchParams.get("examLevelNumber") || searchParams.get("levelNumber") || "").trim() || null
+  };
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -161,7 +166,11 @@ function SuperadminExamPendingListsPage() {
     if (!assessmentDataByListId[listId]) {
       setLoadingApprovalId(listId);
       try {
-        const resp = await getExamCycleAssessmentConfig(examCycleId, { listId });
+        const resp = await getExamCycleAssessmentConfig(examCycleId, {
+          listId,
+          courseId: examCourseContext.courseId,
+          levelNumber: examCourseContext.levelNumber
+        });
         const payload = resp?.data || {};
         setAssessmentDataByListId((prev) => ({ ...prev, [listId]: payload }));
         setDraftConfigByListId((prev) => ({
@@ -201,19 +210,30 @@ function SuperadminExamPendingListsPage() {
     setSavingConfigListId(listId);
     setError("");
     try {
-      await saveExamCycleAssessmentConfig(examCycleId, {
-        listId,
-        configs: draft.map((item) => ({
-          levelId: item.levelId,
-          assessmentType: item.assessmentType,
-          worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
-          questionBankId: item.assessmentType === "QUESTION_BANK" ? item.questionBankId : null,
-          questionCount: item.assessmentType === "QUESTION_BANK" ? Number(item.questionCount) : null,
-          timeLimitMinutes: item.assessmentType === "QUESTION_BANK" ? Number(item.timeLimitMinutes) : null
-        }))
-      });
+      await saveExamCycleAssessmentConfig(
+        examCycleId,
+        {
+          listId,
+          configs: draft.map((item) => ({
+            levelId: item.levelId,
+            assessmentType: item.assessmentType,
+            worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
+            questionBankId: item.assessmentType === "QUESTION_BANK" ? item.questionBankId : null,
+            questionCount: item.assessmentType === "QUESTION_BANK" ? Number(item.questionCount) : null,
+            timeLimitMinutes: item.assessmentType === "QUESTION_BANK" ? Number(item.timeLimitMinutes) : null
+          }))
+        },
+        {
+          courseId: examCourseContext.courseId,
+          levelNumber: examCourseContext.levelNumber
+        }
+      );
 
-      const refreshed = await getExamCycleAssessmentConfig(examCycleId, { listId });
+      const refreshed = await getExamCycleAssessmentConfig(examCycleId, {
+        listId,
+        courseId: examCourseContext.courseId,
+        levelNumber: examCourseContext.levelNumber
+      });
       const payload = refreshed?.data || {};
       setAssessmentDataByListId((prev) => ({
       ...prev,
@@ -231,7 +251,7 @@ function SuperadminExamPendingListsPage() {
     } finally {
       setSavingConfigListId(null);
     }
-  }, [assessmentDataByListId, buildDraftFromAssessment, draftConfigByListId, examCycleId, getDraftValidation]);
+  }, [assessmentDataByListId, buildDraftFromAssessment, draftConfigByListId, examCycleId, examCourseContext.courseId, examCourseContext.levelNumber, getDraftValidation]);
 
   const doConfirmApprove = async (listId) => {
     if (!listId || !canAct(listId)) return;

@@ -1,30 +1,24 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { SuperadminExamPendingListsPage } from "../SuperadminExamPendingListsPage";
 
 const examCycleMocks = vi.hoisted(() => ({
   approveEnrollmentListAsSuperadmin: vi.fn(),
   exportEnrollmentListCsv: vi.fn(),
-  getEnrollmentListLevelBreakdown: vi.fn(),
+  getExamCycleAssessmentConfig: vi.fn(),
   listPendingEnrollmentLists: vi.fn(),
-  rejectPendingEnrollmentList: vi.fn()
-}));
-
-const worksheetMocks = vi.hoisted(() => ({
-  listWorksheets: vi.fn()
+  rejectPendingEnrollmentList: vi.fn(),
+  saveExamCycleAssessmentConfig: vi.fn()
 }));
 
 vi.mock("../../../services/examCyclesService", () => ({
   approveEnrollmentListAsSuperadmin: examCycleMocks.approveEnrollmentListAsSuperadmin,
   exportEnrollmentListCsv: examCycleMocks.exportEnrollmentListCsv,
-  getEnrollmentListLevelBreakdown: examCycleMocks.getEnrollmentListLevelBreakdown,
+  getExamCycleAssessmentConfig: examCycleMocks.getExamCycleAssessmentConfig,
   listPendingEnrollmentLists: examCycleMocks.listPendingEnrollmentLists,
-  rejectPendingEnrollmentList: examCycleMocks.rejectPendingEnrollmentList
-}));
-
-vi.mock("../../../services/worksheetsService", () => ({
-  listWorksheets: worksheetMocks.listWorksheets
+  rejectPendingEnrollmentList: examCycleMocks.rejectPendingEnrollmentList,
+  saveExamCycleAssessmentConfig: examCycleMocks.saveExamCycleAssessmentConfig
 }));
 
 describe("SuperadminExamPendingListsPage", () => {
@@ -46,40 +40,59 @@ describe("SuperadminExamPendingListsPage", () => {
       ]
     });
 
-    examCycleMocks.getEnrollmentListLevelBreakdown.mockResolvedValue({
-      data: [
-        {
-          levelId: "level-1",
-          levelName: "Level 1",
-          levelRank: 1,
-          studentCount: 1
-        }
-      ]
+    examCycleMocks.getExamCycleAssessmentConfig.mockResolvedValue({
+      data: {
+        levels: [
+          {
+            levelId: "level-1",
+            levelName: "Level 1",
+            levelRank: 1,
+            studentCount: 1
+          }
+        ],
+        configs: [
+          {
+            levelId: "level-1",
+            assessmentType: "WORKSHEET",
+            worksheetId: "ws-1",
+            questionBankId: null,
+            questionCount: null,
+            timeLimitMinutes: null
+          }
+        ],
+        worksheetsByLevelId: {
+          "level-1": [
+            {
+              id: "ws-1",
+              title: "Published Worksheet",
+              questionCount: 3
+            }
+          ]
+        },
+        questionBanksByLevelId: {
+          "level-1": []
+        },
+        isComplete: true
+      }
     });
 
-    worksheetMocks.listWorksheets.mockResolvedValue({
-      data: [
-        {
-          id: "ws-1",
-          title: "Published Worksheet",
-          questionCount: 3,
-          examCycleId: null
-        }
-      ]
+    examCycleMocks.saveExamCycleAssessmentConfig.mockResolvedValue({
+      data: {
+        saved: true
+      }
     });
 
-    examCycleMocks.approveEnrollmentListAsSuperadmin.mockRejectedValue({
-      response: {
-        data: {
-          error_code: "EXAM_WORKSHEET_NOT_PUBLISHED"
-        }
+    examCycleMocks.approveEnrollmentListAsSuperadmin.mockResolvedValue({
+      data: {
+        id: "list-1",
+        status: "APPROVED"
       }
     });
   });
 
-  it("surfaces approval errors using friendly exam workflow messages", async () => {
+  it("forwards exam course context to assessment config service calls", async () => {
     render(
-      <MemoryRouter initialEntries={["/superadmin/exam-cycles/cycle-1/pending"]}>
+      <MemoryRouter initialEntries={["/superadmin/exam-cycles/cycle-1/pending?examCourseId=course-1&examLevelNumber=1"]}>
         <Routes>
           <Route path="/superadmin/exam-cycles/:examCycleId/pending" element={<SuperadminExamPendingListsPage />} />
         </Routes>
@@ -90,37 +103,37 @@ describe("SuperadminExamPendingListsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
-    expect(await screen.findByText(/Select one published exam worksheet per level/i)).toBeInTheDocument();
-
     await waitFor(() => {
-      expect(worksheetMocks.listWorksheets).toHaveBeenCalledWith({
-        levelId: "level-1",
-        limit: 200,
-        offset: 0,
-        published: true
+      expect(examCycleMocks.getExamCycleAssessmentConfig).toHaveBeenCalledWith("cycle-1", {
+        listId: "list-1",
+        courseId: "course-1",
+        levelNumber: "1"
       });
     });
 
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "ws-1" }
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Confirm Approve" }));
-
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Approve" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Save Configuration" }));
 
     await waitFor(() => {
-      expect(examCycleMocks.approveEnrollmentListAsSuperadmin).toHaveBeenCalledWith("cycle-1", "list-1", {
-        selections: [
-          {
-            levelId: "level-1",
-            worksheetId: "ws-1"
-          }
-        ]
-      });
+      expect(examCycleMocks.saveExamCycleAssessmentConfig).toHaveBeenCalledWith(
+        "cycle-1",
+        {
+          listId: "list-1",
+          configs: [
+            {
+              levelId: "level-1",
+              assessmentType: "WORKSHEET",
+              worksheetId: "ws-1",
+              questionBankId: null,
+              questionCount: null,
+              timeLimitMinutes: null
+            }
+          ]
+        },
+        {
+          courseId: "course-1",
+          levelNumber: "1"
+        }
+      );
     });
-
-    expect(await screen.findByText("Selected exam worksheets must be published before approval.")).toBeInTheDocument();
   });
 });

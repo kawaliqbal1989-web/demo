@@ -210,7 +210,7 @@ function shuffleDeterministic(items, seed) {
     .map((e) => e.item);
 }
 
-async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedListId, actorUserId }) {
+async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedListId, actorUserId, provenanceContext = null }) {
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
     select: {
@@ -291,10 +291,21 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
   );
   const baseWorksheets = worksheetIds.length
     ? await prisma.worksheet.findMany({
-        where: { tenantId, id: { in: worksheetIds } },
+        where: {
+          tenantId,
+          id: { in: worksheetIds },
+          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+            ? {
+                courseId: provenanceContext.courseId,
+                courseLevelId: provenanceContext.courseLevelId
+              }
+            : {})
+        },
         select: {
           id: true,
           levelId: true,
+          courseId: true,
+          courseLevelId: true,
           templateId: true,
           questions: {
             orderBy: { questionNumber: "asc" },
@@ -318,11 +329,19 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         where: {
           tenantId,
           levelId: { in: questionBankLevelIds },
+          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
+            ? {
+                courseId: provenanceContext.courseId,
+                courseLevelId: provenanceContext.courseLevelId
+              }
+            : {}),
           isActive: true
         },
         select: {
           id: true,
           levelId: true,
+          courseId: true,
+          courseLevelId: true,
           templateId: true,
           operands: true,
           operation: true,
@@ -380,6 +399,8 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
       let seed;
       let templateId = null;
       let timeLimitSeconds = examTimeLimitSeconds;
+      let sourceCourseId = null;
+      let sourceCourseLevelId = null;
 
       if (levelConfig.assessmentType === ASSESSMENT_TYPE.WORKSHEET) {
         const baseWorksheetId = levelConfig.worksheetId;
@@ -392,6 +413,8 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         }
 
         templateId = baseWorksheet.templateId || null;
+        sourceCourseId = baseWorksheet.courseId || provenanceContext?.courseId || null;
+        sourceCourseLevelId = baseWorksheet.courseLevelId || provenanceContext?.courseLevelId || null;
         seed = `EXAM_SELECTED:${examCycleId}:${baseWorksheetId}:${entry.studentId}`;
         selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed);
       } else if (levelConfig.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK) {
@@ -418,6 +441,8 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         seed = `EXAM_BANK:${examCycleId}:${levelConfig.questionBankId}:${entry.studentId}`;
         selectedQuestions = shuffleDeterministic(bankQuestions, seed).slice(0, configuredCount);
         timeLimitSeconds = Math.max(60, Math.floor(Number(levelConfig.timeLimitMinutes || 0) * 60));
+        sourceCourseId = selectedQuestions[0]?.courseId || provenanceContext?.courseId || null;
+        sourceCourseLevelId = selectedQuestions[0]?.courseLevelId || provenanceContext?.courseLevelId || null;
 
         await tx.examGeneratedQuestionSet.upsert({
           where: {
@@ -453,6 +478,8 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
           description: `Exam worksheet for ${studentName}`,
           difficulty: "MEDIUM",
           levelId: entry.enrolledLevelId,
+          courseId: sourceCourseId,
+          courseLevelId: sourceCourseLevelId,
           createdByUserId: actorUserId,
           isPublished: false,
           templateId,

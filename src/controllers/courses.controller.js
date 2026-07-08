@@ -53,6 +53,16 @@ function isForeignKeyConstraintError(error) {
   return code === "P2003";
 }
 
+function isNullFilterValidationError(error) {
+  const code = error?.code ? String(error.code) : "";
+  const message = error?.message ? String(error.message) : "";
+  return (
+    error?.name === "PrismaClientValidationError" ||
+    code === "P2009" ||
+    (message.includes("scope") && message.toLowerCase().includes("null"))
+  );
+}
+
 function formatDeleteBlockerLabel(count, singular) {
   return `${count} ${singular}${count === 1 ? "" : "s"}`;
 }
@@ -86,36 +96,50 @@ const listCourses = asyncHandler(async (req, res) => {
   const q = req.query.q ? String(req.query.q).trim() : null;
   const status = parseStatus(req.query.status);
 
-  const where = {
+  const baseWhere = {
     tenantId: req.auth.tenantId
   };
 
   if (q) {
-    where.OR = [
+    baseWhere.OR = [
       { code: { contains: q } },
       { name: { contains: q } }
     ];
   }
 
   if (status === "ACTIVE") {
-    where.isActive = true;
+    baseWhere.isActive = true;
   }
 
   if (status === "ARCHIVED") {
-    where.isActive = false;
+    baseWhere.isActive = false;
   }
+
+  const whereWithStrictGeneralScope = {
+    ...baseWhere,
+    scope: "GENERAL"
+  };
+
+  const whereWithLegacyNullScope = {
+    ...baseWhere,
+    AND: [
+      ...(Array.isArray(baseWhere.AND) ? baseWhere.AND : []),
+      {
+        OR: [
+          { scope: "GENERAL" },
+          { scope: null }
+        ]
+      }
+    ]
+  };
 
   let total = 0;
   let items = [];
-  try {
-    [total, items] = await prisma.$transaction([
-      prisma.course.count({ where }),
-      prisma.course.findMany({
-        where,
-        orderBy,
-        skip,
-        take,
-        select: {
+  let effectiveWhere = whereWithLegacyNullScope;
+
+  const loadCourses = async ({ where, includeDescription }) => {
+    const select = includeDescription
+      ? {
           id: true,
           code: true,
           name: true,
@@ -124,32 +148,74 @@ const listCourses = asyncHandler(async (req, res) => {
           createdAt: true,
           updatedAt: true
         }
-      })
-    ]);
-  } catch (error) {
-    if (!isSchemaMismatchError(error)) {
-      throw error;
-    }
-
-    [total, items] = await prisma.$transaction([
-      prisma.course.count({ where }),
-      prisma.course.findMany({
-        where,
-        orderBy,
-        skip,
-        take,
-        select: {
+      : {
           id: true,
           code: true,
           name: true,
           isActive: true,
           createdAt: true,
           updatedAt: true
-        }
+        };
+
+    return prisma.$transaction([
+      prisma.course.count({ where }),
+      prisma.course.findMany({
+        where,
+        orderBy,
+        skip,
+        take,
+        select
       })
     ]);
+  };
 
-    items = items.map((c) => ({ ...c, description: null }));
+  try {
+    [total, items] = await loadCourses({
+      where: effectiveWhere,
+      includeDescription: true
+    });
+  } catch (error) {
+    if (isNullFilterValidationError(error)) {
+      effectiveWhere = whereWithStrictGeneralScope;
+
+      try {
+        [total, items] = await loadCourses({
+          where: effectiveWhere,
+          includeDescription: true
+        });
+      } catch (retryError) {
+        if (!isSchemaMismatchError(retryError)) {
+          throw retryError;
+        }
+
+        [total, items] = await loadCourses({
+          where: effectiveWhere,
+          includeDescription: false
+        });
+
+        items = items.map((c) => ({ ...c, description: null }));
+      }
+    } else if (isSchemaMismatchError(error)) {
+      try {
+        [total, items] = await loadCourses({
+          where: effectiveWhere,
+          includeDescription: false
+        });
+      } catch (fallbackError) {
+        if (!isNullFilterValidationError(fallbackError)) {
+          throw fallbackError;
+        }
+
+        [total, items] = await loadCourses({
+          where: whereWithStrictGeneralScope,
+          includeDescription: false
+        });
+      }
+
+      items = items.map((c) => ({ ...c, description: null }));
+    } else {
+      throw error;
+    }
   }
 
   return res.apiSuccess("Courses fetched", {

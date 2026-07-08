@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import toast from "react-hot-toast";
 import { LoadingState } from "../../components/LoadingState";
 import { ErrorState } from "../../components/ErrorState";
 import { ConfirmDialog } from "../../components/ConfirmDialog";
@@ -29,9 +30,11 @@ import {
 function displayQuestion(question) {
   return formatWorksheetQuestionPrompt(question);
 }
-function SuperadminCourseLevelWorksheetsPage() {
+function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber, hideNavigation = false } = {}) {
   const navigate = useNavigate();
-  const { courseId, levelNumber } = useParams();
+  const { courseId: routeCourseId, levelNumber: routeLevelNumber } = useParams();
+  const courseId = forcedCourseId || routeCourseId;
+  const levelNumber = String(forcedLevelNumber || routeLevelNumber || "");
   const levelNumberInt = Number(levelNumber);
 
   const [course, setCourse] = useState(null);
@@ -150,7 +153,11 @@ function SuperadminCourseLevelWorksheetsPage() {
   const loadBank = async (levelId) => {
     setBankLoading(true);
     try {
-      const resp = await listQuestionBank({ levelId });
+      const resp = await listQuestionBank({
+        levelId,
+        courseId,
+        levelNumber: levelNumberInt
+      });
       setBankItems(resp?.data?.items || []);
     } catch {
       setBankItems([]);
@@ -173,6 +180,8 @@ function SuperadminCourseLevelWorksheetsPage() {
     try {
       const resp = await listWorksheets({
         levelId,
+        courseId,
+        levelNumber: levelNumberInt,
         limit: next.limit,
         offset: next.offset,
         published: next.published || undefined,
@@ -199,7 +208,10 @@ function SuperadminCourseLevelWorksheetsPage() {
     setWorksheetError("");
     setDirtyOrder(false);
     try {
-      const resp = await getWorksheet(id);
+      const resp = await getWorksheet(id, {
+        courseId,
+        levelNumber: levelNumberInt
+      });
       setSelectedWorksheet(resp?.data || null);
     } catch (err) {
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to load worksheet.");
@@ -251,6 +263,10 @@ function SuperadminCourseLevelWorksheetsPage() {
     return <ErrorState title="Failed to load" message={error} onRetry={load} />;
   }
 
+  if (!courseId || !Number.isFinite(levelNumberInt) || levelNumberInt <= 0) {
+    return <ErrorState title="Invalid worksheet target" message="Course/level context is missing." />;
+  }
+
   if (!course || !courseLevel) {
     return <ErrorState title="Level not found" message="The course level could not be resolved." />;
   }
@@ -274,6 +290,7 @@ function SuperadminCourseLevelWorksheetsPage() {
         isActive: Boolean(templateForm.isActive)
       });
       await loadTemplate(academicLevel.id);
+      toast.success("Worksheet template updated.");
     } catch (err) {
       setTemplateError(getFriendlyErrorMessage(err) || "Failed to save worksheet template.");
     } finally {
@@ -302,10 +319,14 @@ function SuperadminCourseLevelWorksheetsPage() {
         difficulty: worksheetCreateForm.difficulty,
         levelId: academicLevel.id,
         isPublished: false
+      }, {
+        courseId,
+        levelNumber: levelNumberInt
       });
 
       setWorksheetCreateForm({ title: "", description: "", difficulty: "MEDIUM", isPublished: false });
-  await loadWorksheets(academicLevel.id, { offset: 0 });
+      await loadWorksheets(academicLevel.id, { offset: 0 });
+      toast.success("Worksheet created.");
     } catch (err) {
       setWorksheetsError(getFriendlyErrorMessage(err) || "Failed to create worksheet.");
     } finally {
@@ -321,7 +342,14 @@ function SuperadminCourseLevelWorksheetsPage() {
     setQuestionAdding(true);
     setWorksheetError("");
     try {
-      await addWorksheetQuestion(selectedWorksheet.id, { questionBankId: questionAddBankId });
+      await addWorksheetQuestion(
+        selectedWorksheet.id,
+        { questionBankId: questionAddBankId },
+        {
+          courseId,
+          levelNumber: levelNumberInt
+        }
+      );
       setQuestionAddBankId("");
       await loadWorksheet(selectedWorksheet.id);
       await loadWorksheets(academicLevel.id);
@@ -363,7 +391,10 @@ function SuperadminCourseLevelWorksheetsPage() {
     setWorksheetError("");
     try {
       const orderedIds = (selectedWorksheet.questions || []).map((item) => item.id);
-      await reorderWorksheetQuestions(selectedWorksheet.id, orderedIds);
+      await reorderWorksheetQuestions(selectedWorksheet.id, orderedIds, {
+        courseId,
+        levelNumber: levelNumberInt
+      });
       setDirtyOrder(false);
       await loadWorksheet(selectedWorksheet.id);
     } catch (err) {
@@ -385,6 +416,9 @@ function SuperadminCourseLevelWorksheetsPage() {
         description: worksheetMetaForm.description.trim() || null,
         difficulty: worksheetMetaForm.difficulty,
         isPublished: Boolean(worksheetMetaForm.isPublished)
+      }, {
+        courseId,
+        levelNumber: levelNumberInt
       });
 
       await loadWorksheet(selectedWorksheet.id);
@@ -424,7 +458,10 @@ function SuperadminCourseLevelWorksheetsPage() {
     setBulkAdding(true);
     setWorksheetError("");
     try {
-      await addWorksheetQuestionsBulk(selectedWorksheet.id, bulkQuestionIds);
+      await addWorksheetQuestionsBulk(selectedWorksheet.id, bulkQuestionIds, {
+        courseId,
+        levelNumber: levelNumberInt
+      });
       setBulkQuestionIds([]);
       await loadWorksheet(selectedWorksheet.id);
       await loadWorksheets(academicLevel.id);
@@ -446,24 +483,26 @@ function SuperadminCourseLevelWorksheetsPage() {
         </p>
       </div>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button
-          className="button secondary"
-          type="button"
-          style={{ width: "auto" }}
-          onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}`)}
-        >
-          Back
-        </button>
-        <button
-          className="button"
-          type="button"
-          style={{ width: "auto" }}
-          onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}/question-bank`)}
-        >
-          Open Question Bank
-        </button>
-      </div>
+      {!hideNavigation ? (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            className="button secondary"
+            type="button"
+            style={{ width: "auto" }}
+            onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}`)}
+          >
+            Back
+          </button>
+          <button
+            className="button"
+            type="button"
+            style={{ width: "auto" }}
+            onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${levelNumber}/question-bank`)}
+          >
+            Open Question Bank
+          </button>
+        </div>
+      ) : null}
 
       <div className="card" style={{ display: "grid", gap: 10 }}>
         <h3 style={{ margin: 0 }}>Worksheet Template</h3>
@@ -896,7 +935,10 @@ function SuperadminCourseLevelWorksheetsPage() {
           }
 
           try {
-            await deleteWorksheet(target.id);
+            await deleteWorksheet(target.id, {
+              courseId,
+              levelNumber: levelNumberInt
+            });
             if (selectedWorksheetId === target.id) {
               setSelectedWorksheetId(null);
               setSelectedWorksheet(null);
@@ -922,7 +964,10 @@ function SuperadminCourseLevelWorksheetsPage() {
           }
 
           try {
-            await deleteWorksheetQuestion(selectedWorksheet.id, target.id);
+            await deleteWorksheetQuestion(selectedWorksheet.id, target.id, {
+              courseId,
+              levelNumber: levelNumberInt
+            });
             await loadWorksheet(selectedWorksheet.id);
             await loadWorksheets(academicLevel.id);
           } catch (err) {

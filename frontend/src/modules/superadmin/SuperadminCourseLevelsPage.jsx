@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { StatusBadge } from "../../components/StatusBadge";
@@ -16,6 +16,22 @@ function SuperadminCourseLevelsPage() {
   const { id } = useParams();
   const courseId = id;
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  const source = String(searchParams.get("source") || "").trim().toLowerCase();
+  const isExamCoursesSource = source === "exam-courses";
+
+  const buildExamWorkspaceRoute = (tab, levelNumber) => {
+    const next = new URLSearchParams();
+    next.set("tab", tab);
+    if (courseId) {
+      next.set("examCourseId", String(courseId));
+    }
+    if (levelNumber !== undefined && levelNumber !== null) {
+      next.set("examLevelNumber", String(levelNumber));
+    }
+    return `/superadmin/exam-cycles?${next.toString()}`;
+  };
 
   const [course, setCourse] = useState(null);
   const [loadingCourse, setLoadingCourse] = useState(true);
@@ -250,9 +266,9 @@ function SuperadminCourseLevelsPage() {
           className="button secondary"
           type="button"
           style={{ width: "auto" }}
-          onClick={() => navigate("/superadmin/courses")}
+          onClick={() => navigate(isExamCoursesSource ? buildExamWorkspaceRoute("exam-courses") : "/superadmin/courses")}
         >
-          Back to Courses
+          {isExamCoursesSource ? "Back to Exam Courses" : "Back to Courses"}
         </button>
         <button
           className="button secondary"
@@ -359,7 +375,11 @@ function SuperadminCourseLevelsPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto" }}
-                  onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${r.levelNumber}`)}
+                  onClick={() => navigate(
+                    isExamCoursesSource
+                      ? buildExamWorkspaceRoute("paper-builder", r.levelNumber)
+                      : `/superadmin/courses/${courseId}/levels/${r.levelNumber}`
+                  )}
                 >
                   Engine
                 </button>
@@ -367,7 +387,11 @@ function SuperadminCourseLevelsPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto" }}
-                  onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${r.levelNumber}/question-bank`)}
+                  onClick={() => navigate(
+                    isExamCoursesSource
+                      ? buildExamWorkspaceRoute("question-bank", r.levelNumber)
+                      : `/superadmin/courses/${courseId}/levels/${r.levelNumber}/question-bank`
+                  )}
                 >
                   Question Bank
                 </button>
@@ -375,7 +399,11 @@ function SuperadminCourseLevelsPage() {
                   className="button secondary"
                   type="button"
                   style={{ width: "auto" }}
-                  onClick={() => navigate(`/superadmin/courses/${courseId}/levels/${r.levelNumber}/worksheets`)}
+                  onClick={() => navigate(
+                    isExamCoursesSource
+                      ? buildExamWorkspaceRoute("worksheets", r.levelNumber)
+                      : `/superadmin/courses/${courseId}/levels/${r.levelNumber}/worksheets`
+                  )}
                 >
                   Worksheets
                 </button>

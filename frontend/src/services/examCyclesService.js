@@ -16,6 +16,21 @@ async function createExamCycle(payload) {
   return response.data;
 }
 
+async function listExamCourses() {
+  const response = await apiClient.get("/exam-cycles/exam-courses");
+  return response.data;
+}
+
+async function createExamCourse(payload = {}) {
+  const response = await apiClient.post("/exam-cycles/exam-courses", payload);
+  return response.data;
+}
+
+async function createExamCourseLevel(courseId, payload = {}) {
+  const response = await apiClient.post(`/exam-cycles/exam-courses/${courseId}/levels`, payload);
+  return response.data;
+}
+
 async function getExamCycleDeleteImpact(examCycleId) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/delete-impact`);
   return response.data;
@@ -120,36 +135,52 @@ async function getEnrollmentListLevelBreakdown(examCycleId, listId) {
   return response.data;
 }
 
-async function getExamCycleLevels(examCycleId, { listId } = {}) {
+async function getExamCycleLevels(examCycleId, { listId, courseId, levelNumber } = {}) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/levels`, {
     params: {
-      ...(listId ? { listId } : {})
+      ...(listId ? { listId } : {}),
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {})
     }
   });
   return response.data;
 }
 
-async function getExamCycleAssessmentConfig(examCycleId, { listId } = {}) {
+async function getExamCycleAssessmentConfig(examCycleId, { listId, courseId, levelNumber } = {}) {
   const response = await apiClient.get(`/exam-cycles/${examCycleId}/assessment-config`, {
     params: {
-      ...(listId ? { listId } : {})
+      ...(listId ? { listId } : {}),
+      ...(courseId ? { courseId } : {}),
+      ...(levelNumber ? { levelNumber } : {})
     }
   });
   return response.data;
 }
 
-async function saveExamCycleAssessmentConfig(examCycleId, payload = {}) {
-  const response = await apiClient.post(`/exam-cycles/${examCycleId}/assessment-config`, payload);
+async function saveExamCycleAssessmentConfig(examCycleId, payload = {}, { courseId, levelNumber } = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/assessment-config`, {
+    ...payload,
+    ...(courseId ? { courseId } : {}),
+    ...(levelNumber ? { levelNumber } : {})
+  });
   return response.data;
 }
 
-async function updateExamCycleAssessmentConfig(examCycleId, payload = {}) {
-  const response = await apiClient.put(`/exam-cycles/${examCycleId}/assessment-config`, payload);
+async function updateExamCycleAssessmentConfig(examCycleId, payload = {}, { courseId, levelNumber } = {}) {
+  const response = await apiClient.put(`/exam-cycles/${examCycleId}/assessment-config`, {
+    ...payload,
+    ...(courseId ? { courseId } : {}),
+    ...(levelNumber ? { levelNumber } : {})
+  });
   return response.data;
 }
 
-async function generateExamCycleQuestionSet(examCycleId, payload = {}) {
-  const response = await apiClient.post(`/exam-cycles/${examCycleId}/generate-question-set`, payload);
+async function generateExamCycleQuestionSet(examCycleId, payload = {}, { courseId, levelNumber } = {}) {
+  const response = await apiClient.post(`/exam-cycles/${examCycleId}/generate-question-set`, {
+    ...payload,
+    ...(courseId ? { courseId } : {}),
+    ...(levelNumber ? { levelNumber } : {})
+  });
   return response.data;
 }
 
@@ -267,6 +298,9 @@ async function getLateEnrollmentAudit(examCycleId) {
 export {
   listExamCycles,
   createExamCycle,
+  listExamCourses,
+  createExamCourse,
+  createExamCourseLevel,
   getExamCycleArchiveImpact,
   archiveExamCycle,
   restoreExamCycle,

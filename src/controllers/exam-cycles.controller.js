@@ -364,6 +364,215 @@ function assertDateOrder(a, b, message) {
   }
 }
 
+function normalizeString(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const trimmed = String(value).trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function parseCourseStatus(value) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = String(value).trim().toUpperCase();
+  if (normalized === "ACTIVE") {
+    return "ACTIVE";
+  }
+
+  if (normalized === "ARCHIVED" || normalized === "INACTIVE") {
+    return "ARCHIVED";
+  }
+
+  return null;
+}
+
+function isUniqueConstraintError(error) {
+  return String(error?.code || "") === "P2002";
+}
+
+const listExamCourses = asyncHandler(async (req, res) => {
+  const items = await prisma.course.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      scope: "EXAM"
+    },
+    orderBy: [
+      { createdAt: "desc" },
+      { id: "desc" }
+    ],
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      description: true,
+      isActive: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: {
+        select: {
+          levels: true
+        }
+      },
+      levels: {
+        orderBy: [
+          { levelNumber: "asc" }
+        ],
+        select: {
+          id: true,
+          levelNumber: true,
+          title: true,
+          sortOrder: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      }
+    }
+  });
+
+  return res.apiSuccess("Exam courses fetched", {
+    total: items.length,
+    items
+  });
+});
+
+const createExamCourse = asyncHandler(async (req, res) => {
+  const code = normalizeString(req.body?.code);
+  const name = normalizeString(req.body?.name);
+  const description = normalizeString(req.body?.description);
+  const status = parseCourseStatus(req.body?.status);
+
+  if (!code || !name) {
+    return res.apiError(400, "code and name are required", "VALIDATION_ERROR");
+  }
+
+  let created;
+  try {
+    created = await prisma.course.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        code,
+        name,
+        description,
+        scope: "EXAM",
+        isActive: status === "ARCHIVED" ? false : true
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        description: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return res.apiError(409, "Exam course code or name already exists", "COURSE_EXISTS");
+    }
+
+    throw error;
+  }
+
+  res.locals.entityId = created.id;
+  return res.apiSuccess("Exam course created", created, 201);
+});
+
+const createExamCourseLevel = asyncHandler(async (req, res) => {
+  const { courseId } = req.params;
+
+  const examCourse = await prisma.course.findFirst({
+    where: {
+      id: courseId,
+      tenantId: req.auth.tenantId,
+      scope: "EXAM"
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!examCourse) {
+    return res.apiError(404, "Exam course not found", "COURSE_NOT_FOUND");
+  }
+
+  const levelNumber = Number(req.body?.levelNumber);
+  const sortOrder = Number(req.body?.sortOrder);
+  const title = normalizeString(req.body?.title);
+  const status = parseCourseStatus(req.body?.status);
+
+  if (!Number.isInteger(levelNumber) || levelNumber < 1 || levelNumber > 15) {
+    return res.apiError(400, "levelNumber must be an integer between 1 and 15", "VALIDATION_ERROR");
+  }
+
+  if (!Number.isInteger(sortOrder)) {
+    return res.apiError(400, "sortOrder must be an integer", "VALIDATION_ERROR");
+  }
+
+  if (!title) {
+    return res.apiError(400, "title is required", "VALIDATION_ERROR");
+  }
+
+  const existingLevels = await prisma.courseLevel.findMany({
+    where: {
+      tenantId: req.auth.tenantId,
+      courseId: examCourse.id
+    },
+    select: {
+      levelNumber: true
+    }
+  });
+
+  const existingNumbers = new Set(existingLevels.map((level) => level.levelNumber));
+  if (existingNumbers.has(levelNumber)) {
+    return res.apiError(409, "Level number already exists for this exam course", "COURSE_LEVEL_EXISTS");
+  }
+
+  for (let n = 1; n < levelNumber; n += 1) {
+    if (!existingNumbers.has(n)) {
+      return res.apiError(400, "Levels must be created sequentially without gaps", "COURSE_LEVEL_SEQUENCE_REQUIRED");
+    }
+  }
+
+  let created;
+  try {
+    created = await prisma.courseLevel.create({
+      data: {
+        tenantId: req.auth.tenantId,
+        courseId: examCourse.id,
+        levelNumber,
+        title,
+        sortOrder,
+        isActive: status === "ARCHIVED" ? false : true
+      },
+      select: {
+        id: true,
+        courseId: true,
+        levelNumber: true,
+        title: true,
+        sortOrder: true,
+        isActive: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      return res.apiError(409, "Level number already exists for this exam course", "COURSE_LEVEL_EXISTS");
+    }
+
+    throw error;
+  }
+
+  res.locals.entityId = created.id;
+  return res.apiSuccess("Exam course level created", created, 201);
+});
+
 function buildLifecycleFilterWhere(filter) {
   const now = new Date();
   const normalized = String(filter || "DEFAULT").trim().toUpperCase();
@@ -428,6 +637,95 @@ async function assertExamCycleOperational({ tenantId, examCycleId }) {
     throw error;
   }
   return cycle;
+}
+
+async function resolveExamCourseLevelContext({ tenantId, courseId, levelNumber }) {
+  const normalizedCourseId = normalizeString(courseId);
+  const normalizedLevelNumberRaw = normalizeString(levelNumber);
+
+  if (!normalizedCourseId && !normalizedLevelNumberRaw) {
+    return null;
+  }
+
+  if (!normalizedCourseId || !normalizedLevelNumberRaw) {
+    const error = new Error("courseId and levelNumber are required together");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const parsedLevelNumber = Number(normalizedLevelNumberRaw);
+  if (!Number.isInteger(parsedLevelNumber) || parsedLevelNumber <= 0) {
+    const error = new Error("levelNumber must be a positive integer");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const examCourse = await prisma.course.findFirst({
+    where: {
+      tenantId,
+      id: normalizedCourseId,
+      scope: "EXAM"
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!examCourse) {
+    const error = new Error("Exam course not found");
+    error.statusCode = 404;
+    error.errorCode = "EXAM_COURSE_NOT_FOUND";
+    throw error;
+  }
+
+  const courseLevel = await prisma.courseLevel.findFirst({
+    where: {
+      tenantId,
+      courseId: examCourse.id,
+      levelNumber: parsedLevelNumber
+    },
+    select: {
+      id: true,
+      levelNumber: true
+    }
+  });
+
+  if (!courseLevel) {
+    const error = new Error("Exam course level not found");
+    error.statusCode = 404;
+    error.errorCode = "EXAM_COURSE_LEVEL_NOT_FOUND";
+    throw error;
+  }
+
+  const mappedLevel = await prisma.level.findFirst({
+    where: {
+      tenantId,
+      rank: parsedLevelNumber
+    },
+    orderBy: [
+      { createdAt: "asc" }
+    ],
+    select: {
+      id: true,
+      rank: true
+    }
+  });
+
+  if (!mappedLevel?.id) {
+    const error = new Error("Academic level not found for selected exam course level");
+    error.statusCode = 404;
+    error.errorCode = "LEVEL_NOT_FOUND";
+    throw error;
+  }
+
+  return {
+    courseId: examCourse.id,
+    courseLevelId: courseLevel.id,
+    levelNumber: courseLevel.levelNumber,
+    mappedLevelId: mappedLevel.id
+  };
 }
 
 async function verifySuperadminPasswordOrThrow({ tenantId, userId, password }) {
@@ -1876,7 +2174,7 @@ const exportEnrollmentListCsv = asyncHandler(async (req, res) => {
 async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {} }) {
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
-    select: { id: true, resultStatus: true, isArchived: true, businessPartnerId: true }
+  select: { id: true, resultStatus: true, isArchived: true, businessPartnerId: true }
   });
 
   if (!examCycle) {
@@ -2888,12 +3186,21 @@ const getExamCycleLevelsForAssessment = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = req.query?.listId ? String(req.query.listId) : null;
+  const examCourseContext = await resolveExamCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId: req.query?.courseId,
+    levelNumber: req.query?.levelNumber
+  });
 
-  const levels = await getExamCycleLevels({
+  const levelsRaw = await getExamCycleLevels({
     tenantId: req.auth.tenantId,
     examCycleId,
     listId
   });
+
+  const levels = examCourseContext
+    ? levelsRaw.filter((level) => level.levelId === examCourseContext.mappedLevelId)
+    : levelsRaw;
 
   return res.apiSuccess("Exam cycle levels", levels);
 });
@@ -2902,18 +3209,44 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = req.query?.listId ? String(req.query.listId) : null;
+  const examCourseContext = await resolveExamCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId: req.query?.courseId,
+    levelNumber: req.query?.levelNumber
+  });
 
-  const levels = await getExamCycleLevels({
+  const levelsRaw = await getExamCycleLevels({
     tenantId: req.auth.tenantId,
     examCycleId,
     listId
   });
+  const levels = examCourseContext
+    ? levelsRaw.filter((level) => level.levelId === examCourseContext.mappedLevelId)
+    : levelsRaw;
   const levelIds = levels.map((level) => level.levelId);
 
   const [configs, worksheetsByLevelId, questionBanksByLevelId] = await Promise.all([
     getConfig({ tenantId: req.auth.tenantId, examCycleId, levelIds }),
-    getLevelWorksheets({ tenantId: req.auth.tenantId, levelIds }),
-    getLevelQuestionBanks({ tenantId: req.auth.tenantId, levelIds })
+    getLevelWorksheets({
+      tenantId: req.auth.tenantId,
+      levelIds,
+      provenanceContext: examCourseContext
+        ? {
+            courseId: examCourseContext.courseId,
+            courseLevelId: examCourseContext.courseLevelId
+          }
+        : null
+    }),
+    getLevelQuestionBanks({
+      tenantId: req.auth.tenantId,
+      levelIds,
+      provenanceContext: examCourseContext
+        ? {
+            courseId: examCourseContext.courseId,
+            courseLevelId: examCourseContext.courseLevelId
+          }
+        : null
+    })
   ]);
 
   const configuredLevels = new Set(configs.map((config) => config.levelId));
@@ -2932,19 +3265,37 @@ const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = req.body?.listId ? String(req.body.listId) : req.query?.listId ? String(req.query.listId) : null;
+  const examCourseContext = await resolveExamCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId: req.body?.courseId || req.query?.courseId,
+    levelNumber: req.body?.levelNumber || req.query?.levelNumber
+  });
 
-  const levels = await getExamCycleLevels({
+  const levelsRaw = await getExamCycleLevels({
     tenantId: req.auth.tenantId,
     examCycleId,
     listId
   });
+  const levels = examCourseContext
+    ? levelsRaw.filter((level) => level.levelId === examCourseContext.mappedLevelId)
+    : levelsRaw;
+
+  if (examCourseContext && !levels.length) {
+    return res.apiError(404, "Selected exam course level is not part of this exam cycle context", "EXAM_LEVEL_NOT_IN_SCOPE");
+  }
 
   const saved = await saveConfig({
     tenantId: req.auth.tenantId,
     examCycleId,
     actorUserId: req.auth.userId,
     configs: Array.isArray(req.body?.configs) ? req.body.configs : [],
-    allowedLevelIds: levels.map((level) => level.levelId)
+    allowedLevelIds: levels.map((level) => level.levelId),
+    provenanceContext: examCourseContext
+      ? {
+          courseId: examCourseContext.courseId,
+          courseLevelId: examCourseContext.courseLevelId
+        }
+      : null
   });
 
   return res.apiSuccess("Assessment config saved", saved);
@@ -2955,6 +3306,11 @@ const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const studentId = String(req.body?.studentId || "").trim();
   const requestedLevelId = String(req.body?.levelId || "").trim();
+  const examCourseContext = await resolveExamCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId: req.body?.courseId || req.query?.courseId,
+    levelNumber: req.body?.levelNumber || req.query?.levelNumber
+  });
 
   if (!studentId) {
     return res.apiError(400, "studentId is required", "VALIDATION_ERROR");
@@ -2981,11 +3337,21 @@ const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
     return res.apiError(409, "Requested level does not match enrolled exam level", "EXAM_LEVEL_MISMATCH");
   }
 
+  if (examCourseContext && enrollment.enrolledLevelId !== examCourseContext.mappedLevelId) {
+    return res.apiError(409, "Selected exam course level does not match enrolled exam level", "EXAM_LEVEL_MISMATCH");
+  }
+
   const result = await generateQuestionSet({
     tenantId: req.auth.tenantId,
     examCycleId,
     studentId,
-    levelId: enrollment.enrolledLevelId
+    levelId: enrollment.enrolledLevelId,
+    provenanceContext: examCourseContext
+      ? {
+          courseId: examCourseContext.courseId,
+          courseLevelId: examCourseContext.courseLevelId
+        }
+      : null
   });
 
   return res.apiSuccess("Question set generated", result);
@@ -3081,6 +3447,11 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
   await assertExamCycleOperational({ tenantId: req.auth.tenantId, examCycleId });
   const listId = String(req.params.listId);
+  const examCourseContext = await resolveExamCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId: req.body?.courseId || req.query?.courseId,
+    levelNumber: req.body?.levelNumber || req.query?.levelNumber
+  });
 
   const requiredLevelIds = await getRequiredLevelIdsForList({
     tenantId: req.auth.tenantId,
@@ -3095,7 +3466,13 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     await validateConfig({
       tenantId: req.auth.tenantId,
       examCycleId,
-      requiredLevelIds
+      requiredLevelIds,
+      provenanceContext: examCourseContext
+        ? {
+            courseId: examCourseContext.courseId,
+            courseLevelId: examCourseContext.courseLevelId
+          }
+        : null
     });
   } catch (error) {
     return res.apiError(error?.statusCode || 409, error?.message || "Assessment configuration is incomplete", error?.errorCode || "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
@@ -3124,7 +3501,13 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     examCycleId,
     combinedListId: listId,
-    actorUserId: req.auth.userId
+    actorUserId: req.auth.userId,
+    provenanceContext: examCourseContext
+      ? {
+          courseId: examCourseContext.courseId,
+          courseLevelId: examCourseContext.courseLevelId
+        }
+      : null
   });
 
   await prisma.examCycle.updateMany({
@@ -4030,6 +4413,9 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
 
 export {
   listExamCycles,
+  listExamCourses,
+  createExamCourse,
+  createExamCourseLevel,
   listExamResultsControlCenter,
   createExamCycle,
   getTeacherList,

@@ -5,9 +5,16 @@ import { DataTable, PaginationBar } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
 import { QuestionBankWorkspacePage } from "../common/QuestionBankWorkspacePage";
 import { SuperadminExamResultsControlCenterPage } from "./SuperadminExamResultsControlCenterPage";
+import { SuperadminCourseLevelQuestionBankPage } from "./SuperadminCourseLevelQuestionBankPage";
+import { SuperadminCourseLevelWorksheetsPage } from "./SuperadminCourseLevelWorksheetsPage";
 import { getFriendlyErrorMessage } from "../../utils/apiErrors";
 import {
   listExamCycles,
+  listExamCourses,
+  createExamCourse,
+  getExamCycleAssessmentConfig,
+  saveExamCycleAssessmentConfig,
+  generateExamCycleQuestionSet,
   getExamCycleArchiveImpact,
   archiveExamCycle,
   restoreExamCycle,
@@ -15,6 +22,7 @@ import {
   getExamCycleAuditCheck,
   deleteExamCycle
 } from "../../services/examCyclesService";
+import { archiveCourse, deleteCourse, updateCourse } from "../../services/coursesService";
 
 function formatDateTime(value) {
   if (!value) return "—";
@@ -158,6 +166,7 @@ function SummaryCard({ label, value, hint, tone = "#2563eb" }) {
 
 const SUPERADMIN_EXAM_TABS = [
   { key: "exam-cycles", label: "Exam Cycles" },
+  { key: "exam-courses", label: "Exam Courses" },
   { key: "question-bank", label: "Question Bank" },
   { key: "paper-builder", label: "Paper Builder" },
   { key: "worksheets", label: "Worksheets" },
@@ -1041,14 +1050,1201 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
   );
 }
 
+function SuperadminExamCoursesWorkspacePanel() {
+  const navigate = useNavigate();
+  const [rows, setRows] = useState([]);
+  const [q, setQ] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [limit, setLimit] = useState(10);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [savingCourse, setSavingCourse] = useState(false);
+  const [editingCourseId, setEditingCourseId] = useState("");
+  const [busyActionCourseId, setBusyActionCourseId] = useState("");
+  const [courseForm, setCourseForm] = useState({
+    code: "",
+    name: "",
+    status: "ACTIVE",
+    description: ""
+  });
+
+  const buildExamWorkspaceTabHref = useCallback((tab, courseId, levelNumber) => {
+    const params = new URLSearchParams({
+      tab: String(tab || ""),
+      examCourseId: String(courseId || ""),
+      examLevelNumber: String(levelNumber || "")
+    });
+    return `/superadmin/exam-cycles?${params.toString()}`;
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await listExamCourses();
+      setRows(Array.isArray(data?.data?.items) ? data.data.items : []);
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to load exam courses.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleCreateCourse = useCallback(async () => {
+    const code = String(courseForm.code || "").trim();
+    const name = String(courseForm.name || "").trim();
+    const status = String(courseForm.status || "ACTIVE").toUpperCase() === "INACTIVE" ? "ARCHIVED" : "ACTIVE";
+    const description = String(courseForm.description || "").trim();
+
+    if (!code || !name) {
+      toast.error("Code and name are required.");
+      return;
+    }
+
+    setSavingCourse(true);
+    try {
+      if (editingCourseId) {
+        await updateCourse({
+          id: editingCourseId,
+          name,
+          status,
+          description: description || null
+        });
+        toast.success("Exam course updated.");
+      } else {
+        await createExamCourse({
+          code,
+          name,
+          status,
+          description: description || null
+        });
+        toast.success("Exam course created.");
+      }
+      setEditingCourseId("");
+      setCourseForm({ code: "", name: "", status: "ACTIVE", description: "" });
+      await load();
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || (editingCourseId ? "Failed to update exam course." : "Failed to create exam course."));
+    } finally {
+      setSavingCourse(false);
+    }
+  }, [courseForm, editingCourseId, load]);
+
+  const handleDeactivateCourse = useCallback(async (course) => {
+    if (!course?.id || course?.isActive !== true) {
+      return;
+    }
+
+    setBusyActionCourseId(course.id);
+    try {
+      await archiveCourse(course.id);
+      toast.success("Exam course deactivated.");
+      await load();
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || "Failed to deactivate exam course.");
+    } finally {
+      setBusyActionCourseId("");
+    }
+  }, [load]);
+
+  const handleDeleteCourse = useCallback(async (course) => {
+    if (!course?.id) {
+      return;
+    }
+
+    const confirmed = window.confirm(`Delete course "${course.name}" permanently?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setBusyActionCourseId(course.id);
+    try {
+      await deleteCourse(course.id);
+      toast.success("Exam course deleted.");
+      if (editingCourseId === course.id) {
+        setEditingCourseId("");
+        setCourseForm({ code: "", name: "", status: "ACTIVE", description: "" });
+      }
+      await load();
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || "Failed to delete exam course.");
+    } finally {
+      setBusyActionCourseId("");
+    }
+  }, [editingCourseId, load]);
+
+  const filteredRows = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return rows.filter((course) => {
+      const statusText = course?.isActive ? "ACTIVE" : "INACTIVE";
+      const matchesStatus = !statusFilter || statusText === statusFilter;
+      const matchesQuery = !query
+        || String(course?.code || "").toLowerCase().includes(query)
+        || String(course?.name || "").toLowerCase().includes(query);
+      return matchesStatus && matchesQuery;
+    });
+  }, [rows, q, statusFilter]);
+
+  const pagedRows = useMemo(() => {
+    return filteredRows.slice(offset, offset + limit);
+  }, [filteredRows, offset, limit]);
+
+  useEffect(() => {
+    if (offset >= filteredRows.length && filteredRows.length > 0) {
+      setOffset(Math.max(0, Math.floor((filteredRows.length - 1) / limit) * limit));
+    }
+    if (!filteredRows.length && offset !== 0) {
+      setOffset(0);
+    }
+  }, [filteredRows.length, limit, offset]);
+
+  if (loading && !rows.length) {
+    return <LoadingState label="Loading exam courses..." />;
+  }
+
+  return (
+    <section style={{ display: "grid", gap: 12 }}>
+      <div className="card" style={{ display: "grid", gap: 12 }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Courses</h3>
+          <div style={{ marginTop: 4, color: "var(--color-text-muted)", fontSize: 13 }}>
+            Create and manage exam workspace courses.
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+          <label>
+            Course Code
+            <input
+              className="input"
+              value={courseForm.code}
+              onChange={(event) => setCourseForm((prev) => ({ ...prev, code: event.target.value }))}
+              placeholder="EX-GBLS-2026"
+            />
+          </label>
+          <label>
+            Course Name
+            <input
+              className="input"
+              value={courseForm.name}
+              onChange={(event) => setCourseForm((prev) => ({ ...prev, name: event.target.value }))}
+              placeholder="Exam GBLS 2026"
+            />
+          </label>
+          <label>
+            Status
+            <select
+              className="select"
+              value={courseForm.status}
+              onChange={(event) => setCourseForm((prev) => ({ ...prev, status: event.target.value }))}
+            >
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="INACTIVE">INACTIVE</option>
+            </select>
+          </label>
+          <label>
+            Description
+            <input
+              className="input"
+              value={courseForm.description}
+              onChange={(event) => setCourseForm((prev) => ({ ...prev, description: event.target.value }))}
+              placeholder="Short description"
+            />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-start" }}>
+          <button
+            type="button"
+            className="button"
+            style={{ width: "auto" }}
+            disabled={savingCourse}
+            onClick={() => void handleCreateCourse()}
+          >
+            {savingCourse ? "Saving..." : editingCourseId ? "Save Course" : "Create Course"}
+          </button>
+          <button
+            type="button"
+            className="button secondary"
+            style={{ width: "auto" }}
+            disabled={savingCourse}
+            onClick={() => {
+              setEditingCourseId("");
+              setCourseForm({ code: "", name: "", status: "ACTIVE", description: "" });
+            }}
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
+      {error ? (
+        <div className="card">
+          <p className="error">{error}</p>
+        </div>
+      ) : null}
+
+      <div>
+        <h3 style={{ margin: 0 }}>Course List</h3>
+        <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
+          Review and manage exam courses and levels.
+        </p>
+      </div>
+
+      <div className="card" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            setOffset(0);
+          }}
+          style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}
+        >
+          <input
+            className="input"
+            placeholder="Search code or name"
+            value={q}
+            onChange={(event) => setQ(event.target.value)}
+            style={{ width: 280 }}
+          />
+          <select
+            className="select"
+            value={statusFilter}
+            onChange={(event) => {
+              setStatusFilter(event.target.value);
+              setOffset(0);
+            }}
+            style={{ width: 160 }}
+          >
+            <option value="">All Status</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="INACTIVE">INACTIVE</option>
+          </select>
+          <button className="button secondary" type="submit" style={{ width: "auto" }}>
+            Search
+          </button>
+        </form>
+
+        <div style={{ flex: 1 }} />
+        <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void load()}>
+          Refresh
+        </button>
+      </div>
+
+      <DataTable
+        columns={[
+          { key: "code", header: "Code" },
+          { key: "name", header: "Name" },
+          {
+            key: "levels",
+            header: "Exam Levels",
+            render: (course) => {
+              const levels = Array.isArray(course?.levels)
+                ? [...course.levels].sort((a, b) => Number(a?.levelNumber || 0) - Number(b?.levelNumber || 0))
+                : [];
+
+              if (!levels.length) {
+                return <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>No exam levels configured.</span>;
+              }
+
+              return (
+                <div style={{ display: "grid", gap: 8, minWidth: 360 }}>
+                  {levels.map((level) => (
+                    <div
+                      key={level.id || `${course.id}-${level.levelNumber}`}
+                      style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+                    >
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text-muted)", minWidth: 120 }}>
+                        Level {level.levelNumber}{level.title ? ` · ${level.title}` : ""}
+                      </span>
+                      <Link
+                        className="button secondary"
+                        style={{ width: "auto" }}
+                        to={buildExamWorkspaceTabHref("question-bank", course.id, level.levelNumber)}
+                      >
+                        Question Bank
+                      </Link>
+                      <Link
+                        className="button secondary"
+                        style={{ width: "auto" }}
+                        to={buildExamWorkspaceTabHref("paper-builder", course.id, level.levelNumber)}
+                      >
+                        Paper Builder
+                      </Link>
+                      <Link
+                        className="button secondary"
+                        style={{ width: "auto" }}
+                        to={buildExamWorkspaceTabHref("worksheets", course.id, level.levelNumber)}
+                      >
+                        Worksheets
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+          },
+          {
+            key: "status",
+            header: "Status",
+            render: (course) => (
+              <span
+                style={{
+                  display: "inline-flex",
+                  padding: "2px 8px",
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: course?.isActive ? "#166534" : "#374151",
+                  background: course?.isActive ? "#dcfce7" : "#e5e7eb"
+                }}
+              >
+                {course?.isActive ? "ACTIVE" : "INACTIVE"}
+              </span>
+            )
+          },
+          {
+            key: "actions",
+            header: "Actions",
+            render: (course) => {
+              const isBusy = busyActionCourseId === course.id;
+              return (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    onClick={() => {
+                      setEditingCourseId(course.id);
+                      setCourseForm({
+                        code: course.code || "",
+                        name: course.name || "",
+                        status: course.isActive ? "ACTIVE" : "INACTIVE",
+                        description: course.description || ""
+                      });
+                    }}
+                  >
+                    Edit
+                  </button>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    onClick={() => navigate(`/superadmin/courses/${course.id}/levels?source=exam-courses`)}
+                  >
+                    Level
+                  </button>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    disabled={isBusy || course?.isActive === false}
+                    onClick={() => void handleDeactivateCourse(course)}
+                  >
+                    Deactive
+                  </button>
+                  <button
+                    className="button secondary"
+                    type="button"
+                    style={{ width: "auto" }}
+                    disabled={isBusy}
+                    onClick={() => void handleDeleteCourse(course)}
+                  >
+                    Delete
+                  </button>
+                </div>
+              );
+            }
+          }
+        ]}
+        rows={pagedRows}
+        keyField="id"
+        emptyMessage={loading ? "Loading exam courses..." : "No exam courses found."}
+      />
+
+      <PaginationBar
+        limit={limit}
+        offset={offset}
+        count={pagedRows.length}
+        total={filteredRows.length}
+        onChange={(next) => {
+          setLimit(next.limit);
+          setOffset(next.offset);
+        }}
+      />
+    </section>
+  );
+}
+
+function normalizePaperBuilderDraft(item = {}) {
+  return {
+    levelId: String(item.levelId || ""),
+    assessmentType: String(item.assessmentType || "WORKSHEET"),
+    worksheetId: item.worksheetId ? String(item.worksheetId) : "",
+    questionBankId: item.questionBankId ? String(item.questionBankId) : "",
+    questionCount: item.questionCount ?? "",
+    timeLimitMinutes: item.timeLimitMinutes ?? ""
+  };
+}
+
+function buildPaperBuilderDraftFromAssessment(assessmentPayload = {}) {
+  const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+  const existingConfigs = Array.isArray(assessmentPayload?.configs) ? assessmentPayload.configs : [];
+  const worksheetsByLevelId = assessmentPayload?.worksheetsByLevelId || {};
+  const questionBanksByLevelId = assessmentPayload?.questionBanksByLevelId || {};
+  const configByLevelId = new Map(existingConfigs.map((config) => [config.levelId, config]));
+
+  return levels.map((level) => {
+    const existing = configByLevelId.get(level.levelId);
+    if (existing) {
+      return normalizePaperBuilderDraft(existing);
+    }
+
+    const wsOptions = Array.isArray(worksheetsByLevelId[level.levelId]) ? worksheetsByLevelId[level.levelId] : [];
+    const bankOptions = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
+
+    // Prefer question-bank mode when worksheet mode would be unusable.
+    if (!wsOptions.length && bankOptions.length) {
+      return normalizePaperBuilderDraft({
+        levelId: level.levelId,
+        assessmentType: "QUESTION_BANK",
+        questionBankId: bankOptions.length === 1 ? bankOptions[0].id : ""
+      });
+    }
+
+    return normalizePaperBuilderDraft({
+      levelId: level.levelId,
+      assessmentType: "WORKSHEET"
+    });
+  });
+}
+
+function getPaperBuilderValidation(assessmentPayload = {}, draftConfig = []) {
+  const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+  const worksheetsByLevelId = assessmentPayload?.worksheetsByLevelId || {};
+  const questionBanksByLevelId = assessmentPayload?.questionBanksByLevelId || {};
+  const draftByLevelId = new Map((draftConfig || []).map((item) => [item.levelId, item]));
+
+  const errorsByLevelId = {};
+  let validCount = 0;
+
+  for (const level of levels) {
+    const current = draftByLevelId.get(level.levelId);
+    const errors = [];
+
+    if (!current) {
+      errors.push("Missing configuration");
+    } else if (current.assessmentType === "WORKSHEET") {
+      if (!current.worksheetId) {
+        errors.push("Select a worksheet");
+      }
+      const wsOptions = Array.isArray(worksheetsByLevelId[level.levelId]) ? worksheetsByLevelId[level.levelId] : [];
+      if (!wsOptions.length) {
+        errors.push("No worksheet options available for this level");
+      }
+    } else if (current.assessmentType === "QUESTION_BANK") {
+      if (!current.questionBankId) {
+        errors.push("Select a question bank");
+      }
+
+      const count = Number(current.questionCount);
+      if (!Number.isInteger(count) || count <= 0) {
+        errors.push("Question count must be a positive integer");
+      }
+
+      const limit = Number(current.timeLimitMinutes);
+      if (!Number.isInteger(limit) || limit <= 0) {
+        errors.push("Time limit must be a positive integer");
+      }
+
+      const banks = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
+      if (!banks.length) {
+        errors.push("No active question bank options available for this level");
+      }
+      const selectedBank = banks.find((bank) => bank.id === current.questionBankId);
+      if (selectedBank && Number.isInteger(count) && count > selectedBank.availableQuestionCount) {
+        errors.push(`Question count cannot exceed ${selectedBank.availableQuestionCount}`);
+      }
+    } else {
+      errors.push("Select assessment type");
+    }
+
+    if (!errors.length) {
+      validCount += 1;
+    }
+
+    errorsByLevelId[level.levelId] = errors;
+  }
+
+  return {
+    errorsByLevelId,
+    isComplete: levels.length > 0 && validCount === levels.length
+  };
+}
+
+function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, selectedExamCycleId, onExamCycleChange }) {
+  const [examCycleOptions, setExamCycleOptions] = useState([]);
+  const [cyclesLoading, setCyclesLoading] = useState(false);
+  const [cyclesError, setCyclesError] = useState("");
+
+  const [assessmentLoading, setAssessmentLoading] = useState(false);
+  const [assessmentError, setAssessmentError] = useState("");
+  const [assessmentPayload, setAssessmentPayload] = useState(null);
+  const [draftConfig, setDraftConfig] = useState([]);
+  const [savingConfig, setSavingConfig] = useState(false);
+
+  const [studentId, setStudentId] = useState("");
+  const [generateBusy, setGenerateBusy] = useState(false);
+  const [generatedQuestionSet, setGeneratedQuestionSet] = useState(null);
+
+  const examContext = useMemo(() => ({
+    courseId: examCourse?.id,
+    levelNumber: examCourseLevel?.levelNumber
+  }), [examCourse?.id, examCourseLevel?.levelNumber]);
+
+  const loadCycleOptions = useCallback(async () => {
+    setCyclesLoading(true);
+    setCyclesError("");
+    try {
+      const data = await listExamCycles({ limit: 100, offset: 0, filter: "ALL" });
+      const items = Array.isArray(data?.data?.items) ? data.data.items : [];
+      setExamCycleOptions(items);
+
+      if (!selectedExamCycleId && items.length) {
+        const defaultCycle = items.find((cycle) => !cycle?.isArchived) || items[0];
+        if (defaultCycle?.id) {
+          onExamCycleChange(String(defaultCycle.id));
+        }
+      }
+    } catch (err) {
+      setCyclesError(getFriendlyErrorMessage(err) || "Failed to load exam cycles.");
+    } finally {
+      setCyclesLoading(false);
+    }
+  }, [selectedExamCycleId, onExamCycleChange]);
+
+  const loadAssessmentConfig = useCallback(async () => {
+    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
+      setAssessmentPayload(null);
+      setDraftConfig([]);
+      return;
+    }
+
+    setAssessmentLoading(true);
+    setAssessmentError("");
+    try {
+      const response = await getExamCycleAssessmentConfig(selectedExamCycleId, {
+        courseId: examContext.courseId,
+        levelNumber: examContext.levelNumber
+      });
+      const payload = response?.data || {};
+      setAssessmentPayload(payload);
+      setDraftConfig(buildPaperBuilderDraftFromAssessment(payload));
+    } catch (err) {
+      setAssessmentPayload(null);
+      setDraftConfig([]);
+      setAssessmentError(getFriendlyErrorMessage(err) || "Failed to load paper builder configuration.");
+    } finally {
+      setAssessmentLoading(false);
+    }
+  }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber]);
+
+  useEffect(() => {
+    void loadCycleOptions();
+  }, [loadCycleOptions]);
+
+  useEffect(() => {
+    if (!selectedExamCycleId || !examCycleOptions.length) {
+      return;
+    }
+    const hasSelected = examCycleOptions.some((cycle) => String(cycle.id) === String(selectedExamCycleId));
+    if (!hasSelected) {
+      const fallback = examCycleOptions.find((cycle) => !cycle?.isArchived) || examCycleOptions[0] || null;
+      if (fallback?.id) {
+        onExamCycleChange(String(fallback.id));
+      }
+    }
+  }, [selectedExamCycleId, examCycleOptions, onExamCycleChange]);
+
+  useEffect(() => {
+    setGeneratedQuestionSet(null);
+    void loadAssessmentConfig();
+  }, [loadAssessmentConfig]);
+
+  const selectedCycle = useMemo(() => {
+    return examCycleOptions.find((cycle) => String(cycle.id) === String(selectedExamCycleId)) || null;
+  }, [examCycleOptions, selectedExamCycleId]);
+
+  const draftByLevelId = useMemo(() => {
+    return new Map((draftConfig || []).map((item) => [item.levelId, item]));
+  }, [draftConfig]);
+
+  const validation = useMemo(() => {
+    return getPaperBuilderValidation(assessmentPayload || {}, draftConfig || []);
+  }, [assessmentPayload, draftConfig]);
+
+  const availableSummary = useMemo(() => {
+    const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+    const worksheetsByLevelId = assessmentPayload?.worksheetsByLevelId || {};
+    const questionBanksByLevelId = assessmentPayload?.questionBanksByLevelId || {};
+
+    return levels.map((level) => {
+      const wsOptions = Array.isArray(worksheetsByLevelId[level.levelId]) ? worksheetsByLevelId[level.levelId] : [];
+      const bankOptions = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
+      const totalBankQuestions = bankOptions.reduce((sum, bank) => sum + Number(bank?.availableQuestionCount || 0), 0);
+      return {
+        levelId: level.levelId,
+        worksheetOptions: wsOptions.length,
+        questionBankOptions: bankOptions.length,
+        totalBankQuestions
+      };
+    });
+  }, [assessmentPayload]);
+
+  const setDraftLevelConfig = useCallback((levelId, patch) => {
+    setDraftConfig((prev) => {
+      const current = Array.isArray(prev) ? prev : [];
+      return current.map((item) => (item.levelId === levelId ? { ...item, ...patch } : item));
+    });
+  }, []);
+
+  const handleSaveConfig = useCallback(async () => {
+    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
+      return;
+    }
+    if (!validation.isComplete) {
+      setAssessmentError("Fix paper builder validation errors before saving.");
+      return;
+    }
+
+    setSavingConfig(true);
+    setAssessmentError("");
+    try {
+      await saveExamCycleAssessmentConfig(
+        selectedExamCycleId,
+        {
+          configs: draftConfig.map((item) => ({
+            levelId: item.levelId,
+            assessmentType: item.assessmentType,
+            worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
+            questionBankId: item.assessmentType === "QUESTION_BANK" ? item.questionBankId : null,
+            questionCount: item.assessmentType === "QUESTION_BANK" ? Number(item.questionCount) : null,
+            timeLimitMinutes: item.assessmentType === "QUESTION_BANK" ? Number(item.timeLimitMinutes) : null
+          }))
+        },
+        {
+          courseId: examContext.courseId,
+          levelNumber: examContext.levelNumber
+        }
+      );
+
+      toast.success("Paper builder configuration saved.");
+      await loadAssessmentConfig();
+    } catch (err) {
+      setAssessmentError(getFriendlyErrorMessage(err) || "Failed to save paper builder configuration.");
+    } finally {
+      setSavingConfig(false);
+    }
+  }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber, validation.isComplete, draftConfig, loadAssessmentConfig]);
+
+  const handleGenerateQuestionSet = useCallback(async () => {
+    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
+      return;
+    }
+    const normalizedStudentId = String(studentId || "").trim();
+    if (!normalizedStudentId) {
+      toast.error("Student ID is required to generate question set.");
+      return;
+    }
+
+    const targetLevel = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels[0] : null;
+    if (!targetLevel?.levelId) {
+      toast.error("No in-scope level found for question-set generation.");
+      return;
+    }
+
+    setGenerateBusy(true);
+    try {
+      const response = await generateExamCycleQuestionSet(
+        selectedExamCycleId,
+        {
+          studentId: normalizedStudentId,
+          levelId: targetLevel.levelId
+        },
+        {
+          courseId: examContext.courseId,
+          levelNumber: examContext.levelNumber
+        }
+      );
+
+      setGeneratedQuestionSet(response?.data || null);
+      toast.success("Question set generated.");
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || "Failed to generate question set.");
+    } finally {
+      setGenerateBusy(false);
+    }
+  }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber, studentId, assessmentPayload]);
+
+  const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+  const primaryLevel = levels[0] || null;
+  const primaryDraft = primaryLevel ? draftByLevelId.get(primaryLevel.levelId) : null;
+  const isPrimaryQuestionBankMode = Boolean(primaryDraft && primaryDraft.assessmentType === "QUESTION_BANK");
+  const worksheetModeGenerationMessage = "Question set generation is available for Question Bank mode. Worksheet mode is managed through worksheet assignment/approval flow.";
+
+  return (
+    <section style={{ display: "grid", gap: 12 }}>
+      <div className="card" style={{ display: "grid", gap: 10 }}>
+        <h3 style={{ margin: 0 }}>Paper Builder</h3>
+        <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+          Configure level-wise exam paper rules, save assessment setup, and generate deterministic question sets in EXAM scope only.
+        </div>
+        <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+          <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+            Exam Cycle
+            <select
+              className="input"
+              value={selectedExamCycleId}
+              onChange={(event) => onExamCycleChange(event.target.value)}
+              disabled={cyclesLoading}
+            >
+              <option value="">Select exam cycle</option>
+              {examCycleOptions.map((cycle) => (
+                <option key={cycle.id} value={cycle.id}>
+                  {cycle.code} · {cycle.name}{cycle.isArchived ? " (ARCHIVED)" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
+            <span>Exam Context</span>
+            <div style={{ padding: "10px 12px", border: "1px solid var(--color-border)", borderRadius: 8, background: "var(--color-background-muted)" }}>
+              {examCourse?.code} · {examCourse?.name} · Level {examCourseLevel?.levelNumber}
+            </div>
+          </div>
+        </div>
+        {cyclesError ? <div className="error">{cyclesError}</div> : null}
+        {selectedCycle ? (
+          <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+            Selected cycle window: {formatDateRange(selectedCycle.examStartsAt, selectedCycle.examEndsAt)}
+          </div>
+        ) : null}
+      </div>
+
+      {!selectedExamCycleId ? (
+        <div className="card" style={{ color: "var(--color-text-muted)" }}>
+          Select an exam cycle to load paper builder configuration.
+        </div>
+      ) : null}
+
+      {assessmentLoading ? <LoadingState label="Loading paper builder configuration..." /> : null}
+
+      {assessmentError ? (
+        <div className="card">
+          <p className="error" style={{ margin: 0 }}>{assessmentError}</p>
+        </div>
+      ) : null}
+
+      {selectedExamCycleId && !assessmentLoading && !assessmentError ? (
+        <>
+          <div className="card" style={{ display: "grid", gap: 10 }}>
+            <strong>Available Pool Summary</strong>
+            {!availableSummary.length ? (
+              <div style={{ color: "var(--color-text-muted)" }}>No in-scope levels found for this cycle and exam context.</div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+                {availableSummary.map((entry) => (
+                  <div key={entry.levelId} style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+                    <div style={{ fontWeight: 700 }}>Level Pool</div>
+                    <div style={{ fontSize: 13 }}>Worksheets: {entry.worksheetOptions}</div>
+                    <div style={{ fontSize: 13 }}>Question banks: {entry.questionBankOptions}</div>
+                    <div style={{ fontSize: 13 }}>Available exam questions: {entry.totalBankQuestions}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <strong>Level Rule Configuration</strong>
+              <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+                Operation and difficulty splits are not supported by current backend contract.
+              </div>
+            </div>
+
+            {!levels.length ? (
+              <div style={{ color: "var(--color-text-muted)" }}>No configurable levels available.</div>
+            ) : null}
+
+            {levels.map((level) => {
+              const levelId = level.levelId;
+              const wsOptions = assessmentPayload?.worksheetsByLevelId?.[levelId] || [];
+              const bankOptions = assessmentPayload?.questionBanksByLevelId?.[levelId] || [];
+              const current = draftByLevelId.get(levelId) || {
+                levelId,
+                assessmentType: "WORKSHEET",
+                worksheetId: "",
+                questionBankId: "",
+                questionCount: "",
+                timeLimitMinutes: ""
+              };
+              const levelErrors = validation.errorsByLevelId[levelId] || [];
+              const selectedWorksheet = wsOptions.find((item) => item.id === current.worksheetId) || null;
+              const selectedBank = bankOptions.find((item) => item.id === current.questionBankId) || null;
+              const configuredTotalQuestions = current.assessmentType === "WORKSHEET"
+                ? Number(selectedWorksheet?.questionCount || 0)
+                : Number(current.questionCount || 0);
+
+              return (
+                <div key={levelId} style={{ display: "grid", gap: 8, border: "1px solid var(--color-border)", borderRadius: 10, padding: 12 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <strong>{level.levelName || levelId}</strong>
+                    <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Students: {level.studentCount}</span>
+                    <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Rank: {String(level.levelRank ?? "")}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700 }}>Total Questions: {Number.isFinite(configuredTotalQuestions) ? configuredTotalQuestions : 0}</span>
+                  </div>
+
+                  <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                    Assessment Type
+                    <select
+                      className="input"
+                      value={current.assessmentType}
+                      onChange={(event) => {
+                        const nextType = event.target.value;
+                        setDraftLevelConfig(levelId, {
+                          assessmentType: nextType,
+                          worksheetId: "",
+                          questionBankId: "",
+                          questionCount: "",
+                          timeLimitMinutes: ""
+                        });
+                      }}
+                    >
+                      <option value="WORKSHEET">Worksheet</option>
+                      <option value="QUESTION_BANK">Question Bank</option>
+                    </select>
+                  </label>
+
+                  {current.assessmentType === "WORKSHEET" ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                        Worksheet
+                        <select
+                          className="input"
+                          value={current.worksheetId || ""}
+                          onChange={(event) => setDraftLevelConfig(levelId, { worksheetId: event.target.value })}
+                        >
+                          <option value="">Select worksheet</option>
+                          {wsOptions.map((worksheet) => (
+                            <option key={worksheet.id} value={worksheet.id}>
+                              {worksheet.title} (Q: {worksheet.questionCount})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!wsOptions.length ? (
+                        <div style={{ display: "grid", gap: 2 }}>
+                          <span className="error" style={{ margin: 0 }}>No exam worksheets available for this level.</span>
+                          <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Create an exam worksheet from the Worksheets tab first.</span>
+                        </div>
+                      ) : null}
+                      {!wsOptions.length && bankOptions.length ? (
+                        <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No worksheets available. Use Question Bank mode or create an exam worksheet first.</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  {current.assessmentType === "QUESTION_BANK" ? (
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                        Question Bank
+                        <select
+                          className="input"
+                          value={current.questionBankId || ""}
+                          onChange={(event) => setDraftLevelConfig(levelId, { questionBankId: event.target.value })}
+                        >
+                          <option value="">Select question bank</option>
+                          {bankOptions.map((bank) => (
+                            <option key={bank.id} value={bank.id}>
+                              {bank.name} (Questions: {bank.availableQuestionCount})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+                        <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                          Question Count
+                          <input
+                            className="input"
+                            type="number"
+                            min={1}
+                            value={current.questionCount}
+                            onChange={(event) => setDraftLevelConfig(levelId, { questionCount: event.target.value })}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                          Time Limit (Minutes)
+                          <input
+                            className="input"
+                            type="number"
+                            min={1}
+                            value={current.timeLimitMinutes}
+                            onChange={(event) => setDraftLevelConfig(levelId, { timeLimitMinutes: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                        {selectedBank ? `Available in selected bank: ${selectedBank.availableQuestionCount}` : "Select a question bank to view available count."}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {levelErrors.length ? (
+                    <div style={{ display: "grid", gap: 2 }}>
+                      {levelErrors.map((message) => (
+                        <span key={message} className="error" style={{ margin: 0 }}>{message}</span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Configuration valid</span>
+                  )}
+                </div>
+              );
+            })}
+
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ width: "auto" }}
+                onClick={() => void loadAssessmentConfig()}
+                disabled={assessmentLoading || savingConfig}
+              >
+                Refresh
+              </button>
+              <button
+                type="button"
+                className="button"
+                style={{ width: "auto" }}
+                onClick={() => void handleSaveConfig()}
+                disabled={!validation.isComplete || savingConfig || assessmentLoading || !levels.length}
+              >
+                {savingConfig ? "Saving..." : "Save Configuration"}
+              </button>
+            </div>
+          </div>
+
+          <div className="card" style={{ display: "grid", gap: 10 }}>
+            <strong>Preview / Generate Question Set</strong>
+            <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+              {isPrimaryQuestionBankMode
+                ? "Generates deterministic per-student question sets for QUESTION_BANK mode."
+                : worksheetModeGenerationMessage}
+            </div>
+            <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                Student ID
+                <input
+                  className="input"
+                  value={studentId}
+                  onChange={(event) => setStudentId(event.target.value)}
+                  placeholder="Enter enrolled student ID"
+                />
+              </label>
+              <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                <span>Worksheet Generation</span>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{ width: "auto", justifySelf: "start" }}
+                  disabled
+                  title="Worksheet assignment is triggered during superadmin pending-list approval workflow."
+                >
+                  Managed In Approval Flow
+                </button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="button"
+                style={{ width: "auto" }}
+                onClick={() => void handleGenerateQuestionSet()}
+                disabled={generateBusy || !String(studentId || "").trim() || !levels.length || !isPrimaryQuestionBankMode}
+              >
+                {generateBusy ? "Generating..." : "Generate Question Set"}
+              </button>
+            </div>
+
+            {generatedQuestionSet ? (
+              <div style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
+                <div><strong>Question Set ID:</strong> {generatedQuestionSet.id}</div>
+                <div><strong>Question Bank:</strong> {generatedQuestionSet.questionBankId || "—"}</div>
+                <div><strong>Generated Questions:</strong> {Array.isArray(generatedQuestionSet.generatedQuestionIds) ? generatedQuestionSet.generatedQuestionIds.length : 0}</div>
+                <div><strong>Time Limit (Minutes):</strong> {generatedQuestionSet.timeLimitMinutes ?? "—"}</div>
+                <div><strong>Generated At:</strong> {formatDateTime(generatedQuestionSet.generatedAt)}</div>
+              </div>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function SuperadminExamCyclesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = useMemo(() => resolveSuperadminExamTab(searchParams), [searchParams]);
   const routeHierarchyFilter = searchParams.get("focus") === "late" ? "LATE_ONLY" : "ALL";
+  const hasLegacyCourseContext = Boolean(searchParams.get("courseId") || searchParams.get("levelNumber"));
+  const [examCourses, setExamCourses] = useState([]);
+  const [examCoursesLoading, setExamCoursesLoading] = useState(false);
+  const [examCoursesError, setExamCoursesError] = useState("");
+
+  const selectedExamCourseId = String(searchParams.get("examCourseId") || "");
+  const selectedExamLevelNumber = String(searchParams.get("examLevelNumber") || "");
+  const selectedExamCycleId = String(searchParams.get("examCycleId") || "");
+
+  const tabsRequiringExamCourseContext = new Set(["question-bank", "paper-builder", "worksheets"]);
+  const requiresExamCourseContext = tabsRequiringExamCourseContext.has(activeTab);
+
+  const selectedExamCourse = useMemo(() => {
+    return examCourses.find((course) => String(course.id) === selectedExamCourseId) || null;
+  }, [examCourses, selectedExamCourseId]);
+
+  const selectedExamCourseLevels = useMemo(() => {
+    if (!selectedExamCourse) {
+      return [];
+    }
+    return Array.isArray(selectedExamCourse.levels) ? selectedExamCourse.levels : [];
+  }, [selectedExamCourse]);
+
+  const selectedExamCourseLevel = useMemo(() => {
+    return selectedExamCourseLevels.find((level) => String(level.levelNumber) === selectedExamLevelNumber) || null;
+  }, [selectedExamCourseLevels, selectedExamLevelNumber]);
+
+  const hasResolvedExamContext = Boolean(selectedExamCourse && selectedExamCourseLevel);
+
+  const loadExamCourses = useCallback(async () => {
+    setExamCoursesLoading(true);
+    setExamCoursesError("");
+    try {
+      const data = await listExamCourses();
+      setExamCourses(Array.isArray(data?.data?.items) ? data.data.items : []);
+    } catch (err) {
+      setExamCoursesError(getFriendlyErrorMessage(err) || "Failed to load exam courses.");
+    } finally {
+      setExamCoursesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!requiresExamCourseContext) {
+      return;
+    }
+    void loadExamCourses();
+  }, [requiresExamCourseContext, loadExamCourses]);
+
+  useEffect(() => {
+    if (!requiresExamCourseContext) {
+      return;
+    }
+    if (!examCourses.length) {
+      return;
+    }
+
+    const hasCourse = examCourses.some((course) => String(course.id) === selectedExamCourseId);
+    const hasLevel = hasCourse
+      ? examCourses
+          .find((course) => String(course.id) === selectedExamCourseId)
+          ?.levels?.some((level) => String(level.levelNumber) === selectedExamLevelNumber)
+      : false;
+
+    if (hasCourse && hasLevel) {
+      return;
+    }
+
+    const fallbackCourse = hasCourse
+      ? examCourses.find((course) => String(course.id) === selectedExamCourseId)
+      : examCourses[0] || null;
+    const fallbackLevel = fallbackCourse?.levels?.[0] || null;
+
+    const next = new URLSearchParams(searchParams);
+    if (fallbackCourse?.id) {
+      next.set("examCourseId", String(fallbackCourse.id));
+    } else {
+      next.delete("examCourseId");
+    }
+
+    if (fallbackLevel?.levelNumber) {
+      next.set("examLevelNumber", String(fallbackLevel.levelNumber));
+    } else {
+      next.delete("examLevelNumber");
+    }
+
+    setSearchParams(next, { replace: true });
+  }, [
+    requiresExamCourseContext,
+    examCourses,
+    selectedExamCourseId,
+    selectedExamLevelNumber,
+    searchParams,
+    setSearchParams
+  ]);
 
   const handleTabChange = useCallback((nextTab) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", nextTab);
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const handleExamCourseChange = useCallback((nextCourseId) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextCourseId) {
+      next.set("examCourseId", String(nextCourseId));
+      const nextCourse = examCourses.find((course) => String(course.id) === String(nextCourseId));
+      const firstLevel = Array.isArray(nextCourse?.levels) ? nextCourse.levels[0] : null;
+      if (firstLevel?.levelNumber) {
+        next.set("examLevelNumber", String(firstLevel.levelNumber));
+      } else {
+        next.delete("examLevelNumber");
+      }
+    } else {
+      next.delete("examCourseId");
+      next.delete("examLevelNumber");
+    }
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, examCourses]);
+
+  const handleExamLevelChange = useCallback((nextLevelNumber) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextLevelNumber) {
+      next.set("examLevelNumber", String(nextLevelNumber));
+    } else {
+      next.delete("examLevelNumber");
+    }
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const handleExamCycleChange = useCallback((nextCycleId) => {
+    const next = new URLSearchParams(searchParams);
+    if (nextCycleId) {
+      next.set("examCycleId", String(nextCycleId));
+    } else {
+      next.delete("examCycleId");
+    }
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const clearLegacyCourseContext = useCallback(() => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("courseId");
+    next.delete("levelNumber");
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -1079,31 +2275,107 @@ function SuperadminExamCyclesPage() {
         </div>
       </div>
 
-      {activeTab === "exam-cycles" ? <SuperadminExamCyclesWorkspacePanel routeHierarchyFilter="ALL" /> : null}
-
-      {activeTab === "question-bank" ? <QuestionBankWorkspacePage title="Superadmin Question Bank" /> : null}
-
-      {activeTab === "paper-builder" ? (
-        <div className="card" style={{ display: "grid", gap: 10 }}>
-          <h3 style={{ margin: 0 }}>Paper Builder (Pending Backend/Schema Audit)</h3>
-          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
-            This workspace will reuse existing exam platform capabilities after backend and schema mapping audit.
-          </p>
-          <div style={{ display: "grid", gap: 6 }}>
-            <div>Manual Paper</div>
-            <div>Rule-wise Paper</div>
-            <div>Hybrid Paper</div>
+      {hasLegacyCourseContext ? (
+        <div className="card" style={{ display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 700 }}>Exam Context Notice</div>
+          <div style={{ color: "var(--color-text-muted)" }}>
+            No exam course context found for this exam cycle/course.
+          </div>
+          <div>
+            <button className="button secondary" type="button" style={{ width: "auto" }} onClick={clearLegacyCourseContext}>
+              Clear Invalid Course Context
+            </button>
           </div>
         </div>
       ) : null}
 
-      {activeTab === "worksheets" ? (
-        <div className="card" style={{ display: "grid", gap: 8 }}>
-          <h3 style={{ margin: 0 }}>Worksheets</h3>
-          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
-            Worksheet workspace will reuse the existing worksheet builder after backend mapping audit.
-          </p>
+      {activeTab === "exam-cycles" ? <SuperadminExamCyclesWorkspacePanel routeHierarchyFilter="ALL" /> : null}
+
+      {activeTab === "exam-courses" ? <SuperadminExamCoursesWorkspacePanel /> : null}
+
+      {requiresExamCourseContext ? (
+        <div className="card" style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontWeight: 700 }}>Exam Course Context</div>
+          <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+            Select an exam course and level to continue.
+          </div>
+          {examCoursesError ? <div className="error">{examCoursesError}</div> : null}
+          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+            <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+              Exam Course
+              <select
+                className="input"
+                value={selectedExamCourseId}
+                onChange={(event) => handleExamCourseChange(event.target.value)}
+                disabled={examCoursesLoading}
+              >
+                <option value="">Select exam course</option>
+                {examCourses.map((course) => (
+                  <option key={course.id} value={course.id}>{course.code} · {course.name}</option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+              Exam Level
+              <select
+                className="input"
+                value={selectedExamLevelNumber}
+                onChange={(event) => handleExamLevelChange(event.target.value)}
+                disabled={examCoursesLoading || !selectedExamCourse}
+              >
+                <option value="">Select exam level</option>
+                {selectedExamCourseLevels.map((level) => (
+                  <option key={level.id} value={String(level.levelNumber)}>
+                    Level {level.levelNumber} · {level.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
         </div>
+      ) : null}
+
+      {activeTab === "question-bank" ? (
+        hasResolvedExamContext ? (
+          <SuperadminCourseLevelQuestionBankPage
+            forcedCourseId={selectedExamCourse.id}
+            forcedLevelNumber={selectedExamCourseLevel.levelNumber}
+            hideNavigation
+          />
+        ) : (
+          <div className="card" style={{ color: "var(--color-text-muted)" }}>
+            Select an exam course and level to continue.
+          </div>
+        )
+      ) : null}
+
+      {activeTab === "paper-builder" ? (
+        hasResolvedExamContext ? (
+          <SuperadminPaperBuilderWorkspacePanel
+            examCourse={selectedExamCourse}
+            examCourseLevel={selectedExamCourseLevel}
+            selectedExamCycleId={selectedExamCycleId}
+            onExamCycleChange={handleExamCycleChange}
+          />
+        ) : (
+          <div className="card" style={{ color: "var(--color-text-muted)" }}>
+            Select an exam course and level to continue.
+          </div>
+        )
+      ) : null}
+
+      {activeTab === "worksheets" ? (
+        hasResolvedExamContext ? (
+          <SuperadminCourseLevelWorksheetsPage
+            forcedCourseId={selectedExamCourse.id}
+            forcedLevelNumber={selectedExamCourseLevel.levelNumber}
+            hideNavigation
+          />
+        ) : (
+          <div className="card" style={{ color: "var(--color-text-muted)" }}>
+            Select an exam course and level to continue.
+          </div>
+        )
       ) : null}
 
       {activeTab === "enrollment" ? <SuperadminExamCyclesWorkspacePanel routeHierarchyFilter={routeHierarchyFilter} /> : null}

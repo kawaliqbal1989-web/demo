@@ -44,9 +44,204 @@ async function hierarchyContainsNode(targetNodeId, actorNodeId, tenantId) {
   return false;
 }
 
+function toPositiveInt(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+async function resolveCourseLevelContext({ tenantId, courseId, levelNumber, levelId }) {
+  if (!courseId && !levelNumber) {
+    return null;
+  }
+
+  if (!courseId || !levelNumber || !levelId) {
+    const error = new Error("courseId, levelNumber, and levelId are required for exam workspace scope");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const normalizedLevelNumber = toPositiveInt(levelNumber);
+  if (!normalizedLevelNumber) {
+    const error = new Error("levelNumber must be a positive integer");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  const course = await prisma.course.findFirst({
+    where: {
+      id: String(courseId),
+      tenantId
+    },
+    select: {
+      id: true,
+      scope: true
+    }
+  });
+
+  if (!course) {
+    const error = new Error("Course not found");
+    error.statusCode = 404;
+    error.errorCode = "COURSE_NOT_FOUND";
+    throw error;
+  }
+
+  const courseLevel = await prisma.courseLevel.findFirst({
+    where: {
+      tenantId,
+      courseId: course.id,
+      levelNumber: normalizedLevelNumber
+    },
+    select: { id: true, levelNumber: true }
+  });
+
+  if (!courseLevel) {
+    const error = new Error("Course level not found");
+    error.statusCode = 404;
+    error.errorCode = "COURSE_LEVEL_NOT_FOUND";
+    throw error;
+  }
+
+  const level = await prisma.level.findFirst({
+    where: {
+      id: String(levelId),
+      tenantId
+    },
+    select: {
+      id: true,
+      rank: true
+    }
+  });
+
+  if (!level) {
+    const error = new Error("Academic level not found");
+    error.statusCode = 404;
+    error.errorCode = "LEVEL_NOT_FOUND";
+    throw error;
+  }
+
+  if (Number(level.rank) !== normalizedLevelNumber) {
+    const error = new Error("Exam course level does not match academic level rank");
+    error.statusCode = 409;
+    error.errorCode = "EXAM_LEVEL_MAPPING_MISMATCH";
+    throw error;
+  }
+
+  return {
+    courseId: course.id,
+    courseLevelId: courseLevel.id,
+    scope: String(course.scope || "GENERAL").toUpperCase(),
+    levelNumber: courseLevel.levelNumber
+  };
+}
+
+function applyWorksheetContextFilter({ where, context, includeLegacyGeneral }) {
+  if (!context) {
+    return;
+  }
+
+  if (context.scope === "EXAM") {
+    where.courseId = context.courseId;
+    where.courseLevelId = context.courseLevelId;
+    return;
+  }
+
+  const clause = {
+    OR: includeLegacyGeneral
+      ? [
+          {
+            courseId: context.courseId,
+            courseLevelId: context.courseLevelId
+          },
+          {
+            courseId: null,
+            courseLevelId: null
+          }
+        ]
+      : [
+          {
+            courseId: context.courseId,
+            courseLevelId: context.courseLevelId
+          }
+        ]
+  };
+
+  if (!where.AND) {
+    where.AND = [clause];
+    return;
+  }
+
+  if (Array.isArray(where.AND)) {
+    where.AND.push(clause);
+    return;
+  }
+
+  where.AND = [where.AND, clause];
+}
+
+function appendExcludeExamGenerationModeFilter(where) {
+  const clause = {
+    OR: [
+      { generationMode: null },
+      { generationMode: { not: "EXAM" } }
+    ]
+  };
+
+  if (!where.AND) {
+    where.AND = [clause];
+    return;
+  }
+
+  if (Array.isArray(where.AND)) {
+    where.AND.push(clause);
+    return;
+  }
+
+  where.AND = [where.AND, clause];
+}
+
+function worksheetMatchesContext({ worksheet, context, allowLegacyGeneral = false }) {
+  if (!context) {
+    return true;
+  }
+
+  const isExact = worksheet?.courseId === context.courseId && worksheet?.courseLevelId === context.courseLevelId;
+  if (isExact) {
+    return true;
+  }
+
+  if (context.scope === "GENERAL" && allowLegacyGeneral) {
+    return !worksheet?.courseId && !worksheet?.courseLevelId;
+  }
+
+  return false;
+}
+
+function questionBankMatchesWorksheetContext({ questionBank, worksheet, context }) {
+  if (!questionBank || !worksheet) {
+    return false;
+  }
+
+  if (questionBank.courseId && questionBank.courseLevelId) {
+    return questionBank.courseId === worksheet.courseId && questionBank.courseLevelId === worksheet.courseLevelId;
+  }
+
+  if (context?.scope === "EXAM") {
+    return false;
+  }
+
+  return true;
+}
+
 const listWorksheets = asyncHandler(async (req, res) => {
   const { take, skip, orderBy } = parsePagination(req.query);
   const levelId = req.query.levelId ? String(req.query.levelId) : null;
+  const courseId = req.query.courseId ? String(req.query.courseId) : null;
+  const levelNumber = req.query.levelNumber ? String(req.query.levelNumber) : null;
   const published = req.query.published === undefined ? null : String(req.query.published).trim().toLowerCase();
   const difficulty = req.query.difficulty ? String(req.query.difficulty).trim().toUpperCase() : null;
   const q = req.query.q ? String(req.query.q).trim() : null;
@@ -56,6 +251,17 @@ const listWorksheets = asyncHandler(async (req, res) => {
     tenantId: req.auth.tenantId,
     ...(levelId ? { levelId } : {})
   };
+
+  const context = await resolveCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId,
+    levelNumber,
+    levelId
+  });
+
+  if (courseId || levelNumber) {
+    applyWorksheetContextFilter({ where, context, includeLegacyGeneral: true });
+  }
 
   const appendNotFilter = (clause) => {
     if (!clause) return;
@@ -99,10 +305,10 @@ const listWorksheets = asyncHandler(async (req, res) => {
   if (examSelectionEligible) {
     where.isPublished = true;
     where.examCycleId = null;
-    appendNotFilter({ generationMode: "EXAM" });
+    appendExcludeExamGenerationModeFilter(where);
   } else {
     where.examCycleId = null;
-    appendNotFilter({ generationMode: "EXAM" });
+    appendExcludeExamGenerationModeFilter(where);
   }
 
   if (!examSelectionEligible && published === "true") {
@@ -180,6 +386,8 @@ const listWorksheets = asyncHandler(async (req, res) => {
 
 const getWorksheet = asyncHandler(async (req, res) => {
   const { id } = req.params;
+  const courseId = req.query.courseId ? String(req.query.courseId) : null;
+  const levelNumber = req.query.levelNumber ? String(req.query.levelNumber) : null;
 
   const maxLevelRank = await resolveActorLevelCap({
     tenantId: req.auth.tenantId,
@@ -215,6 +423,17 @@ const getWorksheet = asyncHandler(async (req, res) => {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
 
+  const context = await resolveCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId,
+    levelNumber,
+    levelId: worksheet.levelId
+  });
+
+  if (!worksheetMatchesContext({ worksheet, context, allowLegacyGeneral: true })) {
+    return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
   if (Number.isFinite(maxLevelRank) && Number(worksheet?.level?.rank || 0) > maxLevelRank) {
     return res.apiError(403, "Level visibility denied", "LEVEL_SCOPE_DENIED");
   }
@@ -232,14 +451,35 @@ const getWorksheet = asyncHandler(async (req, res) => {
 const updateWorksheet = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
   const { id } = req.params;
+  const courseId = req.body?.courseId ? String(req.body.courseId) : null;
+  const levelNumber = req.body?.levelNumber ? String(req.body.levelNumber) : null;
 
   const existing = await prisma.worksheet.findFirst({
     where: { id, tenantId: req.auth.tenantId },
-    select: { id: true }
+    select: {
+      id: true,
+      levelId: true,
+      courseId: true,
+      courseLevelId: true
+    }
   });
 
   if (!existing) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  let context = null;
+  if (courseId || levelNumber) {
+    context = await resolveCourseLevelContext({
+      tenantId: req.auth.tenantId,
+      courseId,
+      levelNumber,
+      levelId: existing.levelId
+    });
+
+    if (!worksheetMatchesContext({ worksheet: existing, context, allowLegacyGeneral: true })) {
+      return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+    }
   }
 
   const data = {};
@@ -280,7 +520,11 @@ const updateWorksheet = asyncHandler(async (req, res) => {
 
   const updated = await prisma.worksheet.update({
     where: { id: existing.id },
-    data
+    data: {
+      ...data,
+      courseId: context ? context.courseId : undefined,
+      courseLevelId: context ? context.courseLevelId : undefined
+    }
   });
 
   res.locals.entityId = updated.id;
@@ -290,10 +534,34 @@ const updateWorksheet = asyncHandler(async (req, res) => {
 const reorderWorksheetQuestions = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
   const { id: worksheetId } = req.params;
+  const courseId = req.body?.courseId ? String(req.body.courseId) : null;
+  const levelNumber = req.body?.levelNumber ? String(req.body.levelNumber) : null;
   const orderedIds = Array.isArray(req.body?.orderedIds) ? req.body.orderedIds.map(String) : null;
 
   if (!orderedIds || orderedIds.length === 0) {
     return res.apiError(400, "orderedIds[] is required", "VALIDATION_ERROR");
+  }
+
+  if (courseId || levelNumber) {
+    const worksheetScope = await prisma.worksheet.findFirst({
+      where: { id: worksheetId, tenantId: req.auth.tenantId },
+      select: { id: true, levelId: true, courseId: true, courseLevelId: true }
+    });
+
+    if (!worksheetScope) {
+      return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+    }
+
+    const context = await resolveCourseLevelContext({
+      tenantId: req.auth.tenantId,
+      courseId,
+      levelNumber,
+      levelId: worksheetScope.levelId
+    });
+
+    if (!worksheetMatchesContext({ worksheet: worksheetScope, context, allowLegacyGeneral: true })) {
+      return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+    }
   }
 
   const questions = await prisma.worksheetQuestion.findMany({
@@ -334,13 +602,26 @@ const reorderWorksheetQuestions = asyncHandler(async (req, res) => {
 const addWorksheetQuestion = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
   const { id: worksheetId } = req.params;
+  const courseId = req.body?.courseId ? String(req.body.courseId) : null;
+  const levelNumber = req.body?.levelNumber ? String(req.body.levelNumber) : null;
 
   const worksheet = await prisma.worksheet.findFirst({
     where: { id: worksheetId, tenantId: req.auth.tenantId },
-    select: { id: true }
+    select: { id: true, levelId: true, courseId: true, courseLevelId: true }
   });
 
   if (!worksheet) {
+    return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const context = await resolveCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId,
+    levelNumber,
+    levelId: worksheet.levelId
+  });
+
+  if (!worksheetMatchesContext({ worksheet, context, allowLegacyGeneral: true })) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
 
@@ -358,6 +639,8 @@ const addWorksheetQuestion = asyncHandler(async (req, res) => {
       },
       select: {
         id: true,
+        courseId: true,
+        courseLevelId: true,
         operands: true,
         operation: true,
         correctAnswer: true
@@ -366,6 +649,9 @@ const addWorksheetQuestion = asyncHandler(async (req, res) => {
 
     if (!source) {
       return res.apiError(404, "Question bank entry not found", "QUESTION_NOT_FOUND");
+    }
+    if (!questionBankMatchesWorksheetContext({ questionBank: source, worksheet, context })) {
+      return res.apiError(409, "Question bank entry scope mismatch", "QUESTION_SCOPE_MISMATCH");
     }
   }
 
@@ -402,6 +688,8 @@ const addWorksheetQuestion = asyncHandler(async (req, res) => {
 const addWorksheetQuestionsBulk = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
   const { id: worksheetId } = req.params;
+  const courseId = req.body?.courseId ? String(req.body.courseId) : null;
+  const levelNumber = req.body?.levelNumber ? String(req.body.levelNumber) : null;
   const questionBankIds = Array.isArray(req.body?.questionBankIds)
     ? req.body.questionBankIds.map((item) => String(item)).filter(Boolean)
     : [];
@@ -414,10 +702,21 @@ const addWorksheetQuestionsBulk = asyncHandler(async (req, res) => {
 
   const worksheet = await prisma.worksheet.findFirst({
     where: { id: worksheetId, tenantId: req.auth.tenantId },
-    select: { id: true }
+    select: { id: true, levelId: true, courseId: true, courseLevelId: true }
   });
 
   if (!worksheet) {
+    return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  const context = await resolveCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId,
+    levelNumber,
+    levelId: worksheet.levelId
+  });
+
+  if (!worksheetMatchesContext({ worksheet, context, allowLegacyGeneral: true })) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
   }
 
@@ -428,6 +727,8 @@ const addWorksheetQuestionsBulk = asyncHandler(async (req, res) => {
     },
     select: {
       id: true,
+      courseId: true,
+      courseLevelId: true,
       operands: true,
       operation: true,
       correctAnswer: true
@@ -436,6 +737,12 @@ const addWorksheetQuestionsBulk = asyncHandler(async (req, res) => {
 
   if (sourceRows.length !== uniqueIds.length) {
     return res.apiError(400, "questionBankIds contains invalid ids", "VALIDATION_ERROR");
+  }
+
+  for (const source of sourceRows) {
+    if (!questionBankMatchesWorksheetContext({ questionBank: source, worksheet, context })) {
+      return res.apiError(409, "Question bank entry scope mismatch", "QUESTION_SCOPE_MISMATCH");
+    }
   }
 
   const sourceById = new Map(sourceRows.map((row) => [row.id, row]));
@@ -468,6 +775,30 @@ const addWorksheetQuestionsBulk = asyncHandler(async (req, res) => {
 const deleteWorksheetQuestion = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
   const { id: worksheetId, questionId } = req.params;
+  const courseId = req.query.courseId ? String(req.query.courseId) : null;
+  const levelNumber = req.query.levelNumber ? String(req.query.levelNumber) : null;
+
+  if (courseId || levelNumber) {
+    const worksheetScope = await prisma.worksheet.findFirst({
+      where: { id: worksheetId, tenantId: req.auth.tenantId },
+      select: { id: true, levelId: true, courseId: true, courseLevelId: true }
+    });
+
+    if (!worksheetScope) {
+      return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+    }
+
+    const context = await resolveCourseLevelContext({
+      tenantId: req.auth.tenantId,
+      courseId,
+      levelNumber,
+      levelId: worksheetScope.levelId
+    });
+
+    if (!worksheetMatchesContext({ worksheet: worksheetScope, context, allowLegacyGeneral: true })) {
+      return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+    }
+  }
 
   const question = await prisma.worksheetQuestion.findFirst({
     where: {
@@ -511,10 +842,19 @@ const createWorksheet = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
 
   const { title, description, difficulty, levelId, isPublished } = req.body;
+  const courseId = req.body?.courseId ? String(req.body.courseId) : null;
+  const levelNumber = req.body?.levelNumber ? String(req.body.levelNumber) : null;
 
   if (Boolean(isPublished)) {
     return res.apiError(409, "Create worksheet as draft, add questions, then publish", "WORKSHEET_PUBLISH_REQUIRES_QUESTIONS");
   }
+
+  const context = await resolveCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId,
+    levelNumber,
+    levelId
+  });
 
   const created = await prisma.worksheet.create({
     data: {
@@ -523,6 +863,8 @@ const createWorksheet = asyncHandler(async (req, res) => {
       description,
       difficulty,
       levelId,
+      courseId: context?.courseId || null,
+      courseLevelId: context?.courseLevelId || null,
       createdByUserId: req.auth.userId,
       isPublished: Boolean(isPublished)
     }
@@ -535,14 +877,34 @@ const createWorksheet = asyncHandler(async (req, res) => {
 const deleteWorksheet = asyncHandler(async (req, res) => {
   assertCanModifyAcademic(req.auth.role);
   const { id } = req.params;
+  const courseId = req.query.courseId ? String(req.query.courseId) : null;
+  const levelNumber = req.query.levelNumber ? String(req.query.levelNumber) : null;
 
   const existing = await prisma.worksheet.findFirst({
     where: { id, tenantId: req.auth.tenantId },
-    select: { id: true }
+    select: {
+      id: true,
+      levelId: true,
+      courseId: true,
+      courseLevelId: true
+    }
   });
 
   if (!existing) {
     return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+  }
+
+  if (courseId || levelNumber) {
+    const context = await resolveCourseLevelContext({
+      tenantId: req.auth.tenantId,
+      courseId,
+      levelNumber,
+      levelId: existing.levelId
+    });
+
+    if (!worksheetMatchesContext({ worksheet: existing, context, allowLegacyGeneral: true })) {
+      return res.apiError(404, "Worksheet not found", "WORKSHEET_NOT_FOUND");
+    }
   }
 
   const usedInExamSelections = await prisma.examEnrollmentLevelWorksheetSelection.count({

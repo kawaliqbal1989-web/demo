@@ -5,6 +5,7 @@ import { SuperadminCourseLevelWorksheetsPage } from "../SuperadminCourseLevelWor
 
 const serviceMocks = vi.hoisted(() => ({
   getCourse: vi.fn(),
+  listCourseLevels: vi.fn(),
   listLevels: vi.fn(),
   getWorksheetTemplate: vi.fn(),
   upsertWorksheetTemplate: vi.fn(),
@@ -27,6 +28,10 @@ vi.mock("../../../services/coursesService", () => ({
 
 vi.mock("../../../services/levelsService", () => ({
   listLevels: serviceMocks.listLevels
+}));
+
+vi.mock("../../../services/courseLevelsService", () => ({
+  listCourseLevels: serviceMocks.listCourseLevels
 }));
 
 vi.mock("../../../services/worksheetTemplatesService", () => ({
@@ -70,6 +75,25 @@ describe("SuperadminCourseLevelWorksheetsPage", () => {
           name: "Level 1"
         }
       ]
+    });
+
+    serviceMocks.listCourseLevels.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: "course-level-1",
+            levelNumber: 1,
+            title: "Level 1",
+            levelName: "Level 1",
+            isActive: true,
+            level: {
+              id: "level-1",
+              rank: 1,
+              name: "Level 1"
+            }
+          }
+        ]
+      }
     });
 
     serviceMocks.getWorksheetTemplate.mockResolvedValue({ data: null });

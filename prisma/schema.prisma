@@ -652,6 +652,11 @@ enum Gender {
   OTHER
 }
 
+enum CourseScope {
+  GENERAL
+  EXAM
+}
+
 enum AssessmentType {
   EXAM
   COMPETITION
@@ -1956,6 +1961,8 @@ model Worksheet {
   description                            String?
   difficulty                             WorksheetDifficulty                     @default(MEDIUM)
   levelId                                String
+  courseId                               String?
+  courseLevelId                          String?
   createdByUserId                        String
   isPublished                            Boolean                                 @default(false)
   generationMode                         WorksheetGenerationMode?
@@ -1967,6 +1974,8 @@ model Worksheet {
   updatedAt                              DateTime                                @updatedAt
   tenant                                 Tenant                                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   level                                  Level                                   @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  course                                 Course?                                 @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseLevel                            CourseLevel?                            @relation(fields: [courseLevelId], references: [id], onDelete: SetNull)
   createdBy                              AuthUser                                @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
   examCycle                              ExamCycle?                              @relation(fields: [examCycleId], references: [id], onDelete: SetNull)
   submissions                            WorksheetSubmission[]
@@ -1986,8 +1995,11 @@ model Worksheet {
   @@index([tenantId])
   @@index([levelId])
   @@index([createdByUserId])
+  @@index([courseId])
+  @@index([courseLevelId])
   @@index([templateId])
   @@index([examCycleId])
+  @@index([tenantId, courseId, courseLevelId, levelId, examCycleId])
   @@index([tenantId, createdAt, id])
   @@map("worksheet")
 }
@@ -2436,9 +2448,12 @@ model QuestionBank {
   id                 String              @id @default(cuid())
   tenantId           String
   levelId            String
+  courseId           String?
+  courseLevelId      String?
   templateId         String?
   difficulty         WorksheetDifficulty
   prompt             String
+  promptScopeKey     String              @db.Char(64)
   operands           Json
   operation          String
   correctAnswer      Float
@@ -2447,11 +2462,16 @@ model QuestionBank {
   updatedAt          DateTime            @updatedAt
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   level              Level               @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  course             Course?             @relation(fields: [courseId], references: [id], onDelete: SetNull)
+  courseLevel        CourseLevel?        @relation(fields: [courseLevelId], references: [id], onDelete: SetNull)
   template           WorksheetTemplate?  @relation(fields: [templateId], references: [id], onDelete: SetNull)
   worksheetQuestions WorksheetQuestion[]
 
-  @@unique([tenantId, levelId, prompt])
+  @@unique([tenantId, levelId, promptScopeKey])
   @@index([tenantId, levelId, difficulty, isActive])
+  @@index([courseId])
+  @@index([courseLevelId])
+  @@index([tenantId, courseId, courseLevelId, levelId, isActive])
   @@index([templateId])
    @@map("questionbank")
 }
@@ -3252,6 +3272,7 @@ model Course {
   code             String
   name             String
   description      String?
+  scope            CourseScope             @default(GENERAL)
   isActive         Boolean                 @default(true)
   createdAt        DateTime                @default(now())
   updatedAt        DateTime                @updatedAt
@@ -3262,10 +3283,13 @@ model Course {
   assignedStudents StudentAssignedCourse[]
   assessments      Assessment[]
   certificates     Certificate[]
+  worksheets       Worksheet[]
+  questionBankEntries QuestionBank[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, name])
   @@index([tenantId, isActive])
+  @@index([tenantId, scope, isActive])
     @@map("course")
 }
 
@@ -3281,6 +3305,8 @@ model CourseLevel {
   updatedAt   DateTime @updatedAt
   tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  worksheets  Worksheet[]
+  questionBankEntries QuestionBank[]
 
   @@unique([courseId, levelNumber])
   @@index([tenantId, courseId, isActive])

@@ -3,6 +3,9 @@ import { requireOperationalRoles, requireRole, requireSuperadmin } from "../midd
 import { auditAction } from "../middleware/audit-logger.js";
 import {
   listExamCycles,
+  listExamCourses,
+  createExamCourse,
+  createExamCourseLevel,
   listExamResultsControlCenter,
   createExamCycle,
   getTeacherList,
@@ -55,6 +58,27 @@ examCyclesRouter.post(
   requireSuperadmin(),
   auditAction("EXAM_CYCLE_CREATE", "EXAM_CYCLE"),
   createExamCycle
+);
+
+examCyclesRouter.get(
+  "/exam-courses",
+  requireSuperadmin(),
+  auditAction("EXAM_COURSE_LIST", "COURSE"),
+  listExamCourses
+);
+
+examCyclesRouter.post(
+  "/exam-courses",
+  requireSuperadmin(),
+  auditAction("EXAM_COURSE_CREATE", "COURSE"),
+  createExamCourse
+);
+
+examCyclesRouter.post(
+  "/exam-courses/:courseId/levels",
+  requireSuperadmin(),
+  auditAction("EXAM_COURSE_LEVEL_CREATE", "COURSE_LEVEL", (req) => req.params.courseId),
+  createExamCourseLevel
 );
 
 // Teacher enrollment list

@@ -3284,7 +3284,47 @@ const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
     }
   });
 
-  return res.apiSuccess("Pending lists", lists.map((l) => ({ ...l, entriesCount: l._count?.items ?? 0, _count: undefined })));
+  const enrichedLists = await Promise.all(
+    lists.map(async (l) => {
+      let assessmentScope = {
+        canConfigureAssessment: false,
+        scopeError: "Exam cycle assessment scope is not configured"
+      };
+
+      try {
+        const scope = await resolvePendingAssessmentScope({
+          tenantId: req.auth.tenantId,
+          examCycleId,
+          listId: l.id
+        });
+
+        assessmentScope = {
+          canConfigureAssessment: true,
+          examCourseId: scope.examCourseContext.courseId,
+          examLevelNumber: scope.examCourseContext.levelNumber,
+          examCourseLevelId: scope.examCourseContext.courseLevelId,
+          mappedLevelId: scope.examCourseContext.mappedLevelId
+        };
+      } catch (scopeError) {
+        assessmentScope = {
+          canConfigureAssessment: false,
+          scopeError: scopeError?.errorCode === "EXAM_ASSESSMENT_SCOPE_NOT_CONFIGURED"
+            ? "Exam cycle assessment scope is not configured"
+            : (scopeError?.message || "Exam cycle assessment scope is not configured"),
+          errorCode: scopeError?.errorCode || "EXAM_ASSESSMENT_SCOPE_NOT_CONFIGURED"
+        };
+      }
+
+      return {
+        ...l,
+        entriesCount: l._count?.items ?? 0,
+        _count: undefined,
+        assessmentScope
+      };
+    })
+  );
+
+  return res.apiSuccess("Pending lists", enrichedLists);
 });
 
 async function getRequiredLevelIdsForList({ tenantId, examCycleId, listId }) {

@@ -10,7 +10,9 @@ import { downloadBlob } from "../../utils/downloadBlob";
 import {
   approveEnrollmentListAsSuperadmin,
   exportEnrollmentListCsv,
+  getEnrollmentListLevelBreakdown,
   getExamCycleAssessmentConfig,
+  listExamCourses,
   listPendingEnrollmentLists,
   rejectPendingEnrollmentList,
   saveExamCycleAssessmentConfig
@@ -27,7 +29,7 @@ function SuperadminExamPendingListsPage() {
   const { examCycleId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const examCourseContext = useMemo(() => {
     const routeStateContext = location.state?.examCycleContext || {};
@@ -52,28 +54,148 @@ function SuperadminExamPendingListsPage() {
   const [assessmentDataByListId, setAssessmentDataByListId] = useState({});
   const [draftConfigByListId, setDraftConfigByListId] = useState({});
   const [savingConfigListId, setSavingConfigListId] = useState(null);
+  const [manualScopeByListId, setManualScopeByListId] = useState({});
+  const [scopeOptionsByListId, setScopeOptionsByListId] = useState({});
+  const [loadingScopeOptionsListId, setLoadingScopeOptionsListId] = useState(null);
 
   const [approveListId, setApproveListId] = useState(null);
   const [rejectListId, setRejectListId] = useState(null);
+
+  const syncScopeToUrl = useCallback((courseId, levelNumber) => {
+    if (!courseId || !levelNumber) return;
+    const next = new URLSearchParams(searchParams);
+    next.set("examCourseId", String(courseId));
+    next.set("examLevelNumber", String(levelNumber));
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const data = await listPendingEnrollmentLists(examCycleId);
-      setRows(data?.data || []);
+      const nextRows = Array.isArray(data?.data) ? data.data : [];
+      setRows(nextRows);
+
+      if (!examCourseContext.courseId || !examCourseContext.levelNumber) {
+        const firstResolvedScope = nextRows.find((row) => row?.assessmentScope?.canConfigureAssessment);
+        if (firstResolvedScope?.assessmentScope?.examCourseId && firstResolvedScope?.assessmentScope?.examLevelNumber) {
+          const courseId = String(firstResolvedScope.assessmentScope.examCourseId);
+          const levelNumber = String(firstResolvedScope.assessmentScope.examLevelNumber);
+          setManualScopeByListId((prev) => ({
+            ...prev,
+            [firstResolvedScope.id]: { courseId, levelNumber }
+          }));
+          syncScopeToUrl(courseId, levelNumber);
+        }
+      }
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load pending lists.");
     } finally {
       setLoading(false);
     }
-  }, [examCycleId]);
+  }, [examCycleId, examCourseContext.courseId, examCourseContext.levelNumber, syncScopeToUrl]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const canAct = (listId) => actingId === null || actingId === listId;
+
+  const getApiErrorCode = (err) => String(err?.response?.data?.errorCode || err?.errorCode || "").trim();
+
+  const getEffectiveScopeForRow = useCallback((row, listId) => {
+    const manual = manualScopeByListId[listId];
+    if (manual?.courseId && manual?.levelNumber) {
+      return {
+        courseId: manual.courseId,
+        levelNumber: String(manual.levelNumber)
+      };
+    }
+
+    if (row?.assessmentScope?.canConfigureAssessment && row?.assessmentScope?.examCourseId && row?.assessmentScope?.examLevelNumber) {
+      return {
+        courseId: String(row.assessmentScope.examCourseId),
+        levelNumber: String(row.assessmentScope.examLevelNumber)
+      };
+    }
+
+    if (examCourseContext.courseId && examCourseContext.levelNumber) {
+      return {
+        courseId: examCourseContext.courseId,
+        levelNumber: String(examCourseContext.levelNumber)
+      };
+    }
+
+    return null;
+  }, [examCourseContext.courseId, examCourseContext.levelNumber, manualScopeByListId]);
+
+  const ensureScopeOptionsForList = useCallback(async (listRow) => {
+    const listId = listRow?.id;
+    if (!listId) return null;
+
+    if (scopeOptionsByListId[listId]) {
+      return scopeOptionsByListId[listId];
+    }
+
+    setLoadingScopeOptionsListId(listId);
+    try {
+      const [coursesResp, breakdownResp] = await Promise.all([
+        listExamCourses(),
+        getEnrollmentListLevelBreakdown(examCycleId, listId)
+      ]);
+
+      const rawCourses = Array.isArray(coursesResp?.data?.items) ? coursesResp.data.items : [];
+      const levels = Array.isArray(breakdownResp?.data) ? breakdownResp.data : [];
+      const allowedLevelNumbers = Array.from(
+        new Set(levels.map((entry) => Number(entry?.levelRank)).filter((rank) => Number.isInteger(rank) && rank > 0))
+      );
+
+      const scopedCourses = rawCourses
+        .map((course) => {
+          const sourceLevels = Array.isArray(course?.levels) ? course.levels : [];
+          const filteredLevels = allowedLevelNumbers.length
+            ? sourceLevels.filter((level) => allowedLevelNumbers.includes(Number(level?.levelNumber)))
+            : sourceLevels;
+
+          return {
+            ...course,
+            levels: filteredLevels
+          };
+        })
+        .filter((course) => Array.isArray(course.levels) && course.levels.length > 0);
+
+      const options = {
+        courses: scopedCourses,
+        allowedLevelNumbers
+      };
+
+      setScopeOptionsByListId((prev) => ({
+        ...prev,
+        [listId]: options
+      }));
+
+      return options;
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to load exam scope options.");
+      return null;
+    } finally {
+      setLoadingScopeOptionsListId((prev) => (prev === listId ? null : prev));
+    }
+  }, [examCycleId, scopeOptionsByListId]);
+
+  const setManualScope = useCallback((listId, patch) => {
+    setManualScopeByListId((prev) => {
+      const current = prev[listId] || {};
+      return {
+        ...prev,
+        [listId]: {
+          ...current,
+          ...patch
+        }
+      };
+    });
+  }, []);
 
   const normalizeDraftConfig = useCallback((item = {}) => ({
     levelId: String(item.levelId || ""),
@@ -164,6 +286,23 @@ function SuperadminExamPendingListsPage() {
     };
   }, []);
 
+  const loadAssessmentOptions = useCallback(async (listId, scopeContext = null) => {
+    const params = {
+      listId,
+      ...(scopeContext?.courseId ? { courseId: scopeContext.courseId } : {}),
+      ...(scopeContext?.levelNumber ? { levelNumber: scopeContext.levelNumber } : {})
+    };
+
+    const resp = await getExamCycleAssessmentConfig(examCycleId, params);
+    const payload = resp?.data || {};
+    setAssessmentDataByListId((prev) => ({ ...prev, [listId]: payload }));
+    setDraftConfigByListId((prev) => ({
+      ...prev,
+      [listId]: buildDraftFromAssessment(payload)
+    }));
+    return payload;
+  }, [buildDraftFromAssessment, examCycleId]);
+
   const openApprovalForm = async (listId) => {
     if (!listId || !canAct(listId)) return;
     if (editingId === listId) {
@@ -171,10 +310,8 @@ function SuperadminExamPendingListsPage() {
       return;
     }
 
-    if (!examCourseContext.courseId || !examCourseContext.levelNumber) {
-      setError("Exam course context is required. Open Pending from Exam Cycles workspace with selected exam course and level.");
-      return;
-    }
+    const row = rows.find((entry) => entry?.id === listId) || null;
+    const effectiveScope = getEffectiveScopeForRow(row, listId);
 
     setEditingId(listId);
     setError("");
@@ -182,19 +319,28 @@ function SuperadminExamPendingListsPage() {
     if (!assessmentDataByListId[listId]) {
       setLoadingApprovalId(listId);
       try {
-        const resp = await getExamCycleAssessmentConfig(examCycleId, {
-          listId,
-          courseId: examCourseContext.courseId,
-          levelNumber: examCourseContext.levelNumber
-        });
-        const payload = resp?.data || {};
-        setAssessmentDataByListId((prev) => ({ ...prev, [listId]: payload }));
-        setDraftConfigByListId((prev) => ({
-          ...prev,
-          [listId]: buildDraftFromAssessment(payload)
-        }));
+        if (effectiveScope?.courseId && effectiveScope?.levelNumber) {
+          await loadAssessmentOptions(listId, effectiveScope);
+          syncScopeToUrl(effectiveScope.courseId, effectiveScope.levelNumber);
+        } else {
+          const options = await ensureScopeOptionsForList(row);
+          const firstCourse = options?.courses?.[0] || null;
+          const firstLevel = firstCourse?.levels?.[0] || null;
+          if (firstCourse?.id && firstLevel?.levelNumber) {
+            setManualScope(listId, {
+              courseId: String(firstCourse.id),
+              levelNumber: String(firstLevel.levelNumber)
+            });
+          }
+        }
       } catch (err) {
-        setError(getFriendlyErrorMessage(err) || "Failed to load assessment configuration options.");
+        const errorCode = getApiErrorCode(err);
+        if (errorCode === "EXAM_ASSESSMENT_SCOPE_NOT_CONFIGURED" || errorCode === "EXAM_LEVEL_NOT_IN_SCOPE") {
+          await ensureScopeOptionsForList(row);
+          setError("Select Exam Course and Level to continue.");
+        } else {
+          setError(getFriendlyErrorMessage(err) || "Failed to load assessment configuration options.");
+        }
       } finally {
         setLoadingApprovalId((prev) => (prev === listId ? null : prev));
       }
@@ -215,8 +361,10 @@ function SuperadminExamPendingListsPage() {
   const saveAssessmentConfig = useCallback(async (listId) => {
     if (!listId) return;
 
-    if (!examCourseContext.courseId || !examCourseContext.levelNumber) {
-      setError("Exam course context is required. Open Pending from Exam Cycles workspace with selected exam course and level.");
+    const row = rows.find((entry) => entry?.id === listId) || null;
+    const effectiveScope = getEffectiveScopeForRow(row, listId);
+    if (!effectiveScope?.courseId || !effectiveScope?.levelNumber) {
+      setError("Select Exam Course and Level to continue.");
       throw new Error("EXAM_CONTEXT_REQUIRED");
     }
 
@@ -245,24 +393,17 @@ function SuperadminExamPendingListsPage() {
           }))
         },
         {
-          courseId: examCourseContext.courseId,
-          levelNumber: examCourseContext.levelNumber
+          courseId: effectiveScope.courseId,
+          levelNumber: effectiveScope.levelNumber
         }
       );
 
-      const refreshed = await getExamCycleAssessmentConfig(examCycleId, {
-        listId,
-        courseId: examCourseContext.courseId,
-        levelNumber: examCourseContext.levelNumber
-      });
-      const payload = refreshed?.data || {};
+      const payload = await loadAssessmentOptions(listId, effectiveScope);
+      syncScopeToUrl(effectiveScope.courseId, effectiveScope.levelNumber);
+
       setAssessmentDataByListId((prev) => ({
-      ...prev,
-        [listId]: payload
-      }));
-      setDraftConfigByListId((prev) => ({
         ...prev,
-        [listId]: buildDraftFromAssessment(payload)
+        [listId]: payload
       }));
       toast.success("Assessment configuration saved.");
       return true;
@@ -272,7 +413,7 @@ function SuperadminExamPendingListsPage() {
     } finally {
       setSavingConfigListId(null);
     }
-  }, [assessmentDataByListId, buildDraftFromAssessment, draftConfigByListId, examCycleId, examCourseContext.courseId, examCourseContext.levelNumber, getDraftValidation]);
+  }, [assessmentDataByListId, draftConfigByListId, examCycleId, getDraftValidation, getEffectiveScopeForRow, loadAssessmentOptions, rows, syncScopeToUrl]);
 
   const doConfirmApprove = async (listId) => {
     if (!listId || !canAct(listId)) return;
@@ -294,8 +435,18 @@ function SuperadminExamPendingListsPage() {
     setActingId(listId);
     setError("");
     try {
+      const row = rows.find((entry) => entry?.id === listId) || null;
+      const effectiveScope = getEffectiveScopeForRow(row, listId);
+      if (!effectiveScope?.courseId || !effectiveScope?.levelNumber) {
+        setError("Select Exam Course and Level to continue.");
+        return;
+      }
+
       await saveAssessmentConfig(listId);
-      await approveEnrollmentListAsSuperadmin(examCycleId, listId, {});
+      await approveEnrollmentListAsSuperadmin(examCycleId, listId, {
+        courseId: effectiveScope.courseId,
+        levelNumber: effectiveScope.levelNumber
+      });
       setEditingId(null);
       await load();
     } catch (err) {
@@ -410,6 +561,98 @@ function SuperadminExamPendingListsPage() {
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
                       Assessment Configuration: set Worksheet or Question Bank mode for every participating level before final approval.
                     </div>
+
+                    {(() => {
+                      const effectiveScope = getEffectiveScopeForRow(r, r.id);
+                      if (effectiveScope?.courseId && effectiveScope?.levelNumber) {
+                        return null;
+                      }
+
+                      const scopeOptions = scopeOptionsByListId[r.id] || null;
+                      const manualScope = manualScopeByListId[r.id] || {};
+                      const selectedCourseId = String(manualScope.courseId || "");
+                      const selectedCourse = scopeOptions?.courses?.find((course) => String(course.id) === selectedCourseId) || null;
+                      const selectedLevelNumber = String(manualScope.levelNumber || "");
+                      const levelOptions = Array.isArray(selectedCourse?.levels) ? selectedCourse.levels : [];
+
+                      return (
+                        <div style={{ display: "grid", gap: 8, border: "1px solid var(--color-border)", borderRadius: 10, padding: 10 }}>
+                          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                            Select Exam Course and Level to continue.
+                          </div>
+
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "end" }}>
+                            <button
+                              className="button secondary"
+                              type="button"
+                              style={{ width: "auto" }}
+                              disabled={loadingScopeOptionsListId === r.id}
+                              onClick={() => void ensureScopeOptionsForList(r)}
+                            >
+                              {loadingScopeOptionsListId === r.id ? "Loading scope..." : "Load Scope Options"}
+                            </button>
+
+                            <label style={{ display: "grid", gap: 4, minWidth: 220 }}>
+                              <span style={{ fontSize: 12, color: "var(--muted)" }}>Exam Course</span>
+                              <select
+                                value={selectedCourseId}
+                                onChange={(event) => setManualScope(r.id, { courseId: event.target.value, levelNumber: "" })}
+                                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                              >
+                                <option value="">Select exam course</option>
+                                {(scopeOptions?.courses || []).map((course) => (
+                                  <option key={course.id} value={course.id}>
+                                    {course.code} · {course.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <label style={{ display: "grid", gap: 4, minWidth: 200 }}>
+                              <span style={{ fontSize: 12, color: "var(--muted)" }}>Exam Level</span>
+                              <select
+                                value={selectedLevelNumber}
+                                onChange={(event) => setManualScope(r.id, { levelNumber: event.target.value })}
+                                disabled={!selectedCourse}
+                                style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                              >
+                                <option value="">Select level</option>
+                                {levelOptions.map((level) => (
+                                  <option key={level.id} value={level.levelNumber}>
+                                    Level {level.levelNumber} · {level.title}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+
+                            <button
+                              className="button"
+                              type="button"
+                              style={{ width: "auto" }}
+                              disabled={!selectedCourseId || !selectedLevelNumber || loadingApprovalId === r.id}
+                              onClick={async () => {
+                                const nextScope = {
+                                  courseId: selectedCourseId,
+                                  levelNumber: selectedLevelNumber
+                                };
+                                syncScopeToUrl(nextScope.courseId, nextScope.levelNumber);
+                                setLoadingApprovalId(r.id);
+                                setError("");
+                                try {
+                                  await loadAssessmentOptions(r.id, nextScope);
+                                } catch (err) {
+                                  setError(getFriendlyErrorMessage(err) || "Failed to load assessment configuration options.");
+                                } finally {
+                                  setLoadingApprovalId((prev) => (prev === r.id ? null : prev));
+                                }
+                              }}
+                            >
+                              Apply Scope
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {loadingApprovalId === r.id && !(assessmentDataByListId[r.id]?.levels || []).length ? (
                       <LoadingState label="Loading assessment options..." />

@@ -171,6 +171,11 @@ function SuperadminExamPendingListsPage() {
       return;
     }
 
+    if (!examCourseContext.courseId || !examCourseContext.levelNumber) {
+      setError("Exam course context is required. Open Pending from Exam Cycles workspace with selected exam course and level.");
+      return;
+    }
+
     setEditingId(listId);
     setError("");
 
@@ -209,6 +214,11 @@ function SuperadminExamPendingListsPage() {
 
   const saveAssessmentConfig = useCallback(async (listId) => {
     if (!listId) return;
+
+    if (!examCourseContext.courseId || !examCourseContext.levelNumber) {
+      setError("Exam course context is required. Open Pending from Exam Cycles workspace with selected exam course and level.");
+      throw new Error("EXAM_CONTEXT_REQUIRED");
+    }
 
     const assessmentPayload = assessmentDataByListId[listId] || {};
     const draft = draftConfigByListId[listId] || [];

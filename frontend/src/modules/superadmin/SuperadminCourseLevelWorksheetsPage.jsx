@@ -14,6 +14,7 @@ import { getWorksheetTemplate, upsertWorksheetTemplate } from "../../services/wo
 import { listQuestionBank } from "../../services/questionBankService";
 import { resolveAcademicLevelForCourseLevel } from "../../utils/courseLevelMapping";
 import { formatWorksheetQuestionPreview } from "../../utils/worksheetQuestionPreview";
+import { listExamCourses } from "../../services/examCyclesService";
 import {
   addWorksheetQuestion,
   addWorksheetQuestionsBulk,
@@ -42,6 +43,7 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
   const [academicLevels, setAcademicLevels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [legacyExamRouteBlocked, setLegacyExamRouteBlocked] = useState(false);
 
   const [template, setTemplate] = useState(null);
   const [templateForm, setTemplateForm] = useState({
@@ -118,9 +120,22 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         listCourseLevels({ courseId, limit: 100, offset: 0 }),
         listLevels()
       ]);
+
+      let shouldBlockLegacyExamRoute = false;
+      if (!forcedCourseId && !hideNavigation) {
+        try {
+          const examCoursesResp = await listExamCourses();
+          const examCourses = Array.isArray(examCoursesResp?.data?.items) ? examCoursesResp.data.items : [];
+          shouldBlockLegacyExamRoute = examCourses.some((item) => String(item.id) === String(courseId));
+        } catch {
+          shouldBlockLegacyExamRoute = false;
+        }
+      }
+
       setCourse(courseResp?.data || null);
       setCourseLevels(courseLevelsResp?.data?.items || []);
       setAcademicLevels(academicLevelsResp?.data || []);
+      setLegacyExamRouteBlocked(shouldBlockLegacyExamRoute);
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load course level context.");
     } finally {
@@ -269,6 +284,37 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
 
   if (!course || !courseLevel) {
     return <ErrorState title="Level not found" message="The course level could not be resolved." />;
+  }
+
+  if (legacyExamRouteBlocked) {
+    return (
+      <section style={{ display: "grid", gap: 12 }}>
+        <div>
+          <h2 style={{ margin: 0 }}>Worksheets moved to Exam Cycles workspace</h2>
+          <p style={{ margin: "6px 0 0", color: "var(--color-text-muted)", fontSize: 13 }}>
+            This exam-scoped course level is now managed only from the new Exam Cycles module.
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            className="button"
+            type="button"
+            style={{ width: "auto" }}
+            onClick={() => navigate(`/superadmin/exam-cycles?tab=worksheets&examCourseId=${encodeURIComponent(String(courseId))}&examLevelNumber=${encodeURIComponent(String(levelNumberInt))}`)}
+          >
+            Open Exam Cycles Worksheets
+          </button>
+          <button
+            className="button secondary"
+            type="button"
+            style={{ width: "auto" }}
+            onClick={() => navigate("/superadmin/courses")}
+          >
+            Back to Courses
+          </button>
+        </div>
+      </section>
+    );
   }
 
   if (!academicLevel) {

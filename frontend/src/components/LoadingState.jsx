@@ -1,3 +1,5 @@
+import React from "react";
+
 function LoadingState({ label = "Loading..." }) {
   return <div className="card">{label}</div>;
 }

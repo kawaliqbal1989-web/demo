@@ -213,8 +213,11 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
       tenantId,
       levelId: { in: levelIds },
       ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
-      isPublished: true,
-      examCycleId: null
+      examCycleId: null,
+      OR: [
+        { generationMode: null },
+        { generationMode: { not: "EXAM" } }
+      ]
     },
     select: {
       id: true,
@@ -222,6 +225,7 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
       levelId: true,
       courseId: true,
       courseLevelId: true,
+      isPublished: true,
       _count: { select: { questions: true } }
     },
     orderBy: [{ levelId: "asc" }, { createdAt: "desc" }]
@@ -235,7 +239,13 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
     }
 
     const questionCount = worksheet?._count?.questions ?? 0;
-    if (questionCount <= 0) continue;
+    const isPublished = Boolean(worksheet.isPublished);
+    const isSelectable = isPublished && questionCount > 0;
+    const unavailableReason = !isPublished
+      ? "Worksheet exists but is draft/unpublished. Publish it before approval."
+      : questionCount <= 0
+        ? "Worksheet has no questions. Add questions before approval."
+        : null;
 
     if (!byLevelId[worksheet.levelId]) {
       byLevelId[worksheet.levelId] = [];
@@ -244,7 +254,12 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
     byLevelId[worksheet.levelId].push({
       id: worksheet.id,
       title: worksheet.title,
-      questionCount
+      questionCount,
+      isPublished,
+      status: isPublished ? "PUBLISHED" : "DRAFT",
+      isSelectable,
+      disabled: !isSelectable,
+      unavailableReason
     });
   }
 

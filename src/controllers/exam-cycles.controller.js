@@ -3647,7 +3647,12 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
       const levelId = String(level?.levelId || "");
       const levelScope = scope.levelScopeByLevelId?.[levelId];
       if (!levelScope?.courseId || !levelScope?.courseLevelId) return;
-      if (Array.isArray(worksheetsByLevelId[levelId]) && worksheetsByLevelId[levelId].length > 0) return;
+      const worksheetOptions = Array.isArray(worksheetsByLevelId[levelId]) ? worksheetsByLevelId[levelId] : [];
+      const unavailableWorksheet = worksheetOptions.find((worksheet) => worksheet?.unavailableReason);
+      if (unavailableWorksheet?.unavailableReason) {
+        worksheetScopeWarningsByLevelId[levelId] = unavailableWorksheet.unavailableReason;
+      }
+      if (worksheetOptions.length > 0) return;
 
       const draftWorksheetCount = await prisma.worksheet.count({
         where: {

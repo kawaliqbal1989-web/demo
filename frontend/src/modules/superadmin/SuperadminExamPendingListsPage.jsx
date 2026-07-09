@@ -239,6 +239,8 @@ function SuperadminExamPendingListsPage() {
     for (const level of levels) {
       const current = draftByLevelId.get(level.levelId);
       const errors = [];
+      const worksheetOptions = Array.isArray(worksheetsByLevelId[level.levelId]) ? worksheetsByLevelId[level.levelId] : [];
+      const questionBankOptions = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
 
       if (level?.canConfigureAssessment === false) {
         errors.push(level?.scopeError || `Exam course Level ${String(level?.levelRank ?? "").trim() || "?"} is not configured.`);
@@ -251,6 +253,13 @@ function SuperadminExamPendingListsPage() {
       } else if (current.assessmentType === "WORKSHEET") {
         if (!current.worksheetId) {
           errors.push("Select a worksheet");
+        } else {
+          const selectedWorksheet = worksheetOptions.find((worksheet) => worksheet.id === current.worksheetId);
+          if (!selectedWorksheet) {
+            errors.push("Selected worksheet is not available for this level");
+          } else if (selectedWorksheet.isSelectable === false || selectedWorksheet.disabled) {
+            errors.push(selectedWorksheet.unavailableReason || "Selected worksheet is not ready for approval");
+          }
         }
       } else if (current.assessmentType === "QUESTION_BANK") {
         if (!current.questionBankId) {
@@ -267,8 +276,10 @@ function SuperadminExamPendingListsPage() {
           errors.push("Time limit must be a positive integer");
         }
 
-        const banks = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
-        const selectedBank = banks.find((bank) => bank.id === current.questionBankId);
+        const selectedBank = questionBankOptions.find((bank) => bank.id === current.questionBankId);
+        if (current.questionBankId && !selectedBank) {
+          errors.push("Selected question bank is not available for this level");
+        }
         if (selectedBank && Number.isInteger(count) && count > selectedBank.availableQuestionCount) {
           errors.push(`Question count cannot exceed ${selectedBank.availableQuestionCount}`);
         }
@@ -276,10 +287,12 @@ function SuperadminExamPendingListsPage() {
         errors.push("Select assessment type");
       }
 
-      if (current?.assessmentType === "WORKSHEET" && Array.isArray(worksheetsByLevelId[level.levelId]) && !worksheetsByLevelId[level.levelId].length) {
+      if (current?.assessmentType === "WORKSHEET" && !worksheetOptions.length) {
         errors.push("No worksheet options available for this level");
+      } else if (current?.assessmentType === "WORKSHEET" && !worksheetOptions.some((worksheet) => worksheet?.isSelectable !== false && !worksheet?.disabled)) {
+        errors.push("No published worksheet options available for this level");
       }
-      if (current?.assessmentType === "QUESTION_BANK" && Array.isArray(questionBanksByLevelId[level.levelId]) && !questionBanksByLevelId[level.levelId].length) {
+      if (current?.assessmentType === "QUESTION_BANK" && !questionBankOptions.length) {
         errors.push("No active question bank options available for this level");
       }
 
@@ -408,7 +421,21 @@ function SuperadminExamPendingListsPage() {
   const setDraftLevelConfig = useCallback((listId, levelId, patch) => {
     setDraftConfigByListId((prev) => {
       const current = Array.isArray(prev[listId]) ? prev[listId] : [];
-      const next = current.map((item) => (item.levelId === levelId ? { ...item, ...patch } : item));
+      const hasExistingLevel = current.some((item) => item.levelId === levelId);
+      const next = hasExistingLevel
+        ? current.map((item) => (item.levelId === levelId ? { ...item, ...patch } : item))
+        : [
+            ...current,
+            {
+              levelId,
+              assessmentType: "WORKSHEET",
+              worksheetId: "",
+              questionBankId: "",
+              questionCount: "",
+              timeLimitMinutes: "",
+              ...patch
+            }
+          ];
       return {
         ...prev,
         [listId]: next
@@ -805,11 +832,16 @@ function SuperadminExamPendingListsPage() {
                                   style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
                                 >
                                   <option value="">-- Select worksheet --</option>
-                                  {wsOptions.map((w) => (
-                                    <option key={w.id} value={w.id}>
-                                      {w.title} (Q: {w.questionCount})
-                                    </option>
-                                  ))}
+                                  {wsOptions.map((w) => {
+                                    const isWorksheetDisabled = w.isSelectable === false || w.disabled;
+                                    const statusLabel = w.status || (w.isPublished === false ? "DRAFT" : "PUBLISHED");
+                                    const detailLabel = isWorksheetDisabled && w.unavailableReason ? ` - ${w.unavailableReason}` : "";
+                                    return (
+                                      <option key={w.id} value={w.id} disabled={isWorksheetDisabled}>
+                                        {w.title} (Q: {w.questionCount}, {statusLabel}){detailLabel}
+                                      </option>
+                                    );
+                                  })}
                                 </select>
                                 {worksheetScopeWarning ? (
                                   <span className="error" style={{ margin: 0 }}>{worksheetScopeWarning}</span>

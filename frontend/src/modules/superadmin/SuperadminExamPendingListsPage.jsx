@@ -398,19 +398,25 @@ function SuperadminExamPendingListsPage() {
           syncScopeToUrl(effectiveScope.courseId, effectiveScope.levelNumber);
         } else {
           const options = await ensureScopeOptionsForList(row);
-          const firstCourse = options?.courses?.[0] || null;
+          const courses = Array.isArray(options?.courses) ? options.courses : [];
+          const firstCourse = courses[0] || null;
           const firstLevel = firstCourse?.levels?.[0] || null;
-          if (firstCourse?.id && firstLevel?.levelNumber) {
-            setManualScope(listId, {
+          if (firstCourse?.id) {
+            const autoScope = {
               courseId: String(firstCourse.id),
-              levelNumber: String(firstLevel.levelNumber)
-            });
+              levelNumber: firstLevel?.levelNumber ? String(firstLevel.levelNumber) : ""
+            };
+            setManualScope(listId, autoScope);
+            if (courses.length === 1) {
+              await loadAssessmentOptions(listId, autoScope);
+              syncScopeToUrl(autoScope.courseId, autoScope.levelNumber);
+            }
           }
         }
       } catch (err) {
         const errorCode = getApiErrorCode(err);
-        if (errorCode === "EXAM_ASSESSMENT_SCOPE_NOT_CONFIGURED" || errorCode === "EXAM_LEVEL_NOT_IN_SCOPE") {
-          await ensureScopeOptionsForList(row);
+        await ensureScopeOptionsForList(row);
+        if (errorCode === "EXAM_ASSESSMENT_SCOPE_NOT_CONFIGURED" || errorCode === "EXAM_LEVEL_NOT_IN_SCOPE" || errorCode === "EXAM_COURSE_NOT_FOUND" || errorCode === "EXAM_COURSE_LEVEL_NOT_FOUND") {
           setError("Select Exam Course and Level to continue.");
         } else {
           setError(getFriendlyErrorMessage(err) || "Failed to load assessment configuration options.");
@@ -657,16 +663,17 @@ function SuperadminExamPendingListsPage() {
                     </div>
 
                     {(() => {
-                      const effectiveScope = getEffectiveScopeForRow(r, r.id);
-                      if (effectiveScope?.courseId) {
+                      const optionsLoaded = (assessmentDataByListId[r.id]?.levels || []).length > 0;
+                      if (optionsLoaded || loadingApprovalId === r.id) {
                         return null;
                       }
 
+                      const effectiveScope = getEffectiveScopeForRow(r, r.id);
                       const scopeOptions = scopeOptionsByListId[r.id] || null;
                       const manualScope = manualScopeByListId[r.id] || {};
-                      const selectedCourseId = String(manualScope.courseId || "");
+                      const selectedCourseId = String(manualScope.courseId ?? effectiveScope?.courseId ?? "");
                       const selectedCourse = scopeOptions?.courses?.find((course) => String(course.id) === selectedCourseId) || null;
-                      const selectedLevelNumber = String(manualScope.levelNumber || "");
+                      const selectedLevelNumber = String(manualScope.levelNumber ?? effectiveScope?.levelNumber ?? "");
                       const levelOptions = Array.isArray(selectedCourse?.levels) ? selectedCourse.levels : [];
 
                       return (
@@ -752,7 +759,7 @@ function SuperadminExamPendingListsPage() {
                       <LoadingState label="Loading assessment options..." />
                     ) : null}
 
-                    {!loadingApprovalId && !(assessmentDataByListId[r.id]?.levels || []).length ? (
+                    {!loadingApprovalId && !(assessmentDataByListId[r.id]?.levels || []).length && !(r?.levelBreakdown || []).length ? (
                       <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
                         No level breakdown is available for this request.
                       </p>
@@ -761,6 +768,7 @@ function SuperadminExamPendingListsPage() {
                     {(() => {
                       const assessmentPayload = assessmentDataByListId[r.id] || {};
                       const levelsFromPayload = Array.isArray(assessmentPayload.levels) ? assessmentPayload.levels : [];
+                      const payloadLoaded = levelsFromPayload.length > 0;
                       const levels = levelsFromPayload.length
                         ? levelsFromPayload
                         : (Array.isArray(r?.levelBreakdown)
@@ -799,13 +807,19 @@ function SuperadminExamPendingListsPage() {
                               <span style={{ fontSize: 12, color: "var(--muted)" }}>Rank: {String(b.levelRank ?? "")}</span>
                             </div>
 
-                            {b?.canConfigureAssessment === false ? (
+                            {payloadLoaded && b?.canConfigureAssessment === false ? (
                               <p className="error" style={{ margin: 0 }}>
                                 {b?.scopeError || `Exam course Level ${String(b?.levelRank ?? "").trim() || "?"} is not configured.`}
                               </p>
                             ) : null}
 
-                            {b?.canConfigureAssessment === false ? null : (
+                            {!payloadLoaded ? (
+                              <p style={{ margin: 0, color: "var(--color-text-muted)", fontSize: 12 }}>
+                                Assessment options are not loaded for this level yet. Select Exam Course and Level above, then Apply Scope.
+                              </p>
+                            ) : null}
+
+                            {!payloadLoaded || b?.canConfigureAssessment === false ? null : (
                               <>
 
                             <label style={{ display: "grid", gap: 4 }}>

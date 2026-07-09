@@ -922,7 +922,7 @@ async function inferExamCourseContext({ tenantId, examCycleId, listId, levelsRaw
   return { courseId: Array.from(candidateCourseIds)[0] };
 }
 
-async function buildLevelScopeByLevelId({ tenantId, courseId, levelsRaw = [] }) {
+async function buildLevelScopeByLevelId({ tenantId, courseId, levelsRaw = [], allowPartial = false }) {
   const levelNumbers = Array.from(
     new Set(levelsRaw.map((level) => Number(level?.levelRank)).filter((rank) => Number.isInteger(rank) && rank > 0))
   );
@@ -945,6 +945,7 @@ async function buildLevelScopeByLevelId({ tenantId, courseId, levelsRaw = [] }) 
 
   const courseLevelByNumber = new Map(courseLevels.map((entry) => [Number(entry.levelNumber), entry]));
   const levelScopeByLevelId = {};
+  const missingLevels = [];
 
   for (const level of levelsRaw) {
     const mappedLevelId = String(level?.levelId || "");
@@ -955,10 +956,20 @@ async function buildLevelScopeByLevelId({ tenantId, courseId, levelsRaw = [] }) 
 
     const courseLevel = courseLevelByNumber.get(parsedRank);
     if (!courseLevel?.id) {
-      const error = new Error("Selected exam course does not include all participating levels");
-      error.statusCode = 409;
-      error.errorCode = "EXAM_LEVEL_NOT_IN_SCOPE";
-      throw error;
+      if (!allowPartial) {
+        const error = new Error("Selected exam course does not include all participating levels");
+        error.statusCode = 409;
+        error.errorCode = "EXAM_LEVEL_NOT_IN_SCOPE";
+        throw error;
+      }
+
+      missingLevels.push({
+        levelId: mappedLevelId,
+        levelRank: parsedRank,
+        levelName: level?.levelName || null,
+        studentCount: Number(level?.studentCount || 0)
+      });
+      continue;
     }
 
     levelScopeByLevelId[mappedLevelId] = {
@@ -969,10 +980,13 @@ async function buildLevelScopeByLevelId({ tenantId, courseId, levelsRaw = [] }) 
     };
   }
 
-  return levelScopeByLevelId;
+  return {
+    levelScopeByLevelId,
+    missingLevels
+  };
 }
 
-async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = null, courseId = null, levelNumber = null }) {
+async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = null, courseId = null, levelNumber = null, allowPartialLevels = false }) {
   const levelsRaw = await getExamCycleLevels({
     tenantId,
     examCycleId,
@@ -1027,9 +1041,11 @@ async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = n
       examCourseContext,
       levels,
       levelIds: levels.map((level) => level.levelId),
+      configurableLevelIds: levels.map((level) => level.levelId),
       levelScopeByLevelId: {
         [examCourseContext.mappedLevelId]: examCourseContext
-      }
+      },
+      missingLevels: []
     };
   }
 
@@ -1037,15 +1053,17 @@ async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = n
     tenantId,
     courseId: resolvedCourseId
   });
-  const levelScopeByLevelId = await buildLevelScopeByLevelId({
+  const { levelScopeByLevelId, missingLevels } = await buildLevelScopeByLevelId({
     tenantId,
     courseId: examCourseContext.courseId,
-    levelsRaw
+    levelsRaw,
+    allowPartial: allowPartialLevels
   });
 
-  const levels = levelsRaw.filter((level) => levelScopeByLevelId[String(level.levelId || "")]);
+  const levels = levelsRaw;
+  const configurableLevelIds = Object.keys(levelScopeByLevelId);
 
-  if (!levels.length) {
+  if (!levels.length || (!configurableLevelIds.length && !allowPartialLevels)) {
     throw createScopeNotConfiguredError();
   }
 
@@ -1058,7 +1076,9 @@ async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = n
     },
     levels,
     levelIds: levels.map((level) => level.levelId),
-    levelScopeByLevelId
+    configurableLevelIds,
+    levelScopeByLevelId,
+    missingLevels
   };
 }
 
@@ -3594,9 +3614,10 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
     examCycleId,
     listId,
     courseId: req.query?.courseId,
-    levelNumber: req.query?.levelNumber
+    levelNumber: req.query?.levelNumber,
+    allowPartialLevels: true
   });
-  const levelIds = scope.levelIds;
+  const levelIds = Array.isArray(scope.configurableLevelIds) ? scope.configurableLevelIds : [];
 
   const [configs, worksheetsByLevelId, questionBanksByLevelId] = await Promise.all([
     getConfig({ tenantId: req.auth.tenantId, examCycleId, levelIds }),
@@ -3620,14 +3641,59 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
     })
   ]);
 
+  const worksheetScopeWarningsByLevelId = {};
+  await Promise.all(
+    scope.levels.map(async (level) => {
+      const levelId = String(level?.levelId || "");
+      const levelScope = scope.levelScopeByLevelId?.[levelId];
+      if (!levelScope?.courseId || !levelScope?.courseLevelId) return;
+      if (Array.isArray(worksheetsByLevelId[levelId]) && worksheetsByLevelId[levelId].length > 0) return;
+
+      const draftWorksheetCount = await prisma.worksheet.count({
+        where: {
+          tenantId: req.auth.tenantId,
+          levelId,
+          courseId: levelScope.courseId,
+          courseLevelId: levelScope.courseLevelId,
+          examCycleId: null,
+          isPublished: false
+        }
+      });
+
+      if (draftWorksheetCount > 0) {
+        worksheetScopeWarningsByLevelId[levelId] = "Worksheet exists but is draft/unpublished. Publish it before approval.";
+      }
+    })
+  );
+
+  const levels = scope.levels.map((level) => {
+    const levelId = String(level?.levelId || "");
+    const levelScope = scope.levelScopeByLevelId?.[levelId] || null;
+    return {
+      ...level,
+      canConfigureAssessment: Boolean(levelScope),
+      examLevelNumber: levelScope?.levelNumber ?? null,
+      examCourseLevelId: levelScope?.courseLevelId ?? null,
+      scopeError: levelScope
+        ? null
+        : `Exam course Level ${String(level?.levelRank ?? "") || "?"} is not configured. Create Level ${String(level?.levelRank ?? "") || "?"} under Exam Course before approval.`
+    };
+  });
+
   const configuredLevels = new Set(configs.map((config) => config.levelId));
-  const isComplete = levelIds.length > 0 && levelIds.every((levelId) => configuredLevels.has(levelId));
+  const isComplete = levels.length > 0 && levels.every((level) => {
+    if (!level?.canConfigureAssessment) {
+      return false;
+    }
+    return configuredLevels.has(level.levelId);
+  });
 
   return res.apiSuccess("Assessment config fetched", {
-    levels: scope.levels,
+    levels,
     configs,
     worksheetsByLevelId,
     questionBanksByLevelId,
+    worksheetScopeWarningsByLevelId,
     isComplete
   });
 });
@@ -3641,15 +3707,29 @@ const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
     examCycleId,
     listId,
     courseId: req.body?.courseId || req.query?.courseId,
-    levelNumber: req.body?.levelNumber || req.query?.levelNumber
+    levelNumber: req.body?.levelNumber || req.query?.levelNumber,
+    allowPartialLevels: true
   });
+
+  const allowedLevelIds = Array.isArray(scope.configurableLevelIds) ? scope.configurableLevelIds : [];
+  if (!allowedLevelIds.length) {
+    return res.apiError(409, "Selected exam course has no configured participating levels", "EXAM_LEVEL_NOT_IN_SCOPE");
+  }
+
+  const submittedConfigs = Array.isArray(req.body?.configs) ? req.body.configs : [];
+  const allowedLevelIdSet = new Set(allowedLevelIds.map((levelId) => String(levelId)));
+  const validConfigs = submittedConfigs.filter((config) => allowedLevelIdSet.has(String(config?.levelId || "")));
+
+  if (!validConfigs.length) {
+    return res.apiError(409, "No valid level configurations to save for selected exam course", "EXAM_ASSESSMENT_LEVEL_INVALID");
+  }
 
   const saved = await saveConfig({
     tenantId: req.auth.tenantId,
     examCycleId,
     actorUserId: req.auth.userId,
-    configs: Array.isArray(req.body?.configs) ? req.body.configs : [],
-    allowedLevelIds: scope.levelIds,
+    configs: validConfigs,
+    allowedLevelIds,
     provenanceContext: {
       courseId: scope.examCourseContext.courseId,
       courseLevelId: scope.examCourseContext.courseLevelId,
@@ -3657,7 +3737,19 @@ const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
     }
   });
 
-  return res.apiSuccess("Assessment config saved", saved);
+  const skippedLevels = Array.from(
+    new Set(
+      submittedConfigs
+        .map((config) => String(config?.levelId || ""))
+        .filter((levelId) => levelId && !allowedLevelIdSet.has(levelId))
+    )
+  );
+
+  return res.apiSuccess("Assessment config saved", {
+    saved,
+    skippedLevels,
+    missingLevels: scope.missingLevels || []
+  });
 });
 
 const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
@@ -3811,7 +3903,8 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     examCycleId,
     listId,
     courseId: req.body?.courseId || req.query?.courseId,
-    levelNumber: req.body?.levelNumber || req.query?.levelNumber
+    levelNumber: req.body?.levelNumber || req.query?.levelNumber,
+    allowPartialLevels: true
   });
 
   const requiredLevelIds = await getRequiredLevelIdsForList({
@@ -3821,6 +3914,21 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
   });
   if (!requiredLevelIds.length) {
     return res.apiError(409, "No enrolled students in list", "EXAM_LIST_EMPTY");
+  }
+
+  const missingRequiredLevel = requiredLevelIds
+    .map((levelId) => String(levelId || ""))
+    .find((levelId) => !scope.levelScopeByLevelId?.[levelId]);
+
+  if (missingRequiredLevel) {
+    const levelInfo = (scope.levels || []).find((level) => String(level?.levelId || "") === missingRequiredLevel);
+    const rank = String(levelInfo?.levelRank ?? "").trim();
+    const rankLabel = rank || "?";
+    return res.apiError(
+      409,
+      `Exam course Level ${rankLabel} is not configured. Create Level ${rankLabel} under Exam Course before approval.`,
+      "EXAM_LEVEL_NOT_IN_SCOPE"
+    );
   }
 
   try {

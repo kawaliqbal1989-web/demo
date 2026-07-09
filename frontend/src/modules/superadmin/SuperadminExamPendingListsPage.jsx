@@ -213,7 +213,9 @@ function SuperadminExamPendingListsPage() {
     const existingConfigs = Array.isArray(assessmentPayload?.configs) ? assessmentPayload.configs : [];
     const configByLevelId = new Map(existingConfigs.map((config) => [config.levelId, config]));
 
-    return levels.map((level) => {
+    return levels
+      .filter((level) => level?.canConfigureAssessment !== false)
+      .map((level) => {
       const existing = configByLevelId.get(level.levelId);
       if (existing) {
         return normalizeDraftConfig(existing);
@@ -222,7 +224,7 @@ function SuperadminExamPendingListsPage() {
         levelId: level.levelId,
         assessmentType: "WORKSHEET"
       });
-    });
+      });
   }, [normalizeDraftConfig]);
 
   const getDraftValidation = useCallback((assessmentPayload = {}, draftConfig = []) => {
@@ -237,6 +239,12 @@ function SuperadminExamPendingListsPage() {
     for (const level of levels) {
       const current = draftByLevelId.get(level.levelId);
       const errors = [];
+
+      if (level?.canConfigureAssessment === false) {
+        errors.push(level?.scopeError || `Exam course Level ${String(level?.levelRank ?? "").trim() || "?"} is not configured.`);
+        errorsByLevelId[level.levelId] = errors;
+        continue;
+      }
 
       if (!current) {
         errors.push("Missing configuration");
@@ -296,12 +304,61 @@ function SuperadminExamPendingListsPage() {
 
     const resp = await getExamCycleAssessmentConfig(examCycleId, params);
     const payload = resp?.data || {};
-    setAssessmentDataByListId((prev) => ({ ...prev, [listId]: payload }));
+
+    const levels = Array.isArray(payload?.levels) ? payload.levels : [];
+    const configurableLevels = levels.filter((level) => level?.canConfigureAssessment && Number.isInteger(Number(level?.examLevelNumber)));
+
+    const scopedResponses = await Promise.all(
+      configurableLevels.map(async (level) => {
+        try {
+          const scopedResp = await getExamCycleAssessmentConfig(examCycleId, {
+            listId,
+            courseId: scopeContext?.courseId,
+            levelNumber: level.examLevelNumber
+          });
+          return {
+            levelId: level.levelId,
+            data: scopedResp?.data || {}
+          };
+        } catch (_err) {
+          return {
+            levelId: level.levelId,
+            data: null
+          };
+        }
+      })
+    );
+
+    const mergedWorksheetsByLevelId = { ...(payload?.worksheetsByLevelId || {}) };
+    const mergedQuestionBanksByLevelId = { ...(payload?.questionBanksByLevelId || {}) };
+
+    for (const scopedEntry of scopedResponses) {
+      if (!scopedEntry?.data) continue;
+      const scopedLevelId = String(scopedEntry.levelId || "");
+      const scopedWorksheets = scopedEntry?.data?.worksheetsByLevelId?.[scopedLevelId];
+      const scopedQuestionBanks = scopedEntry?.data?.questionBanksByLevelId?.[scopedLevelId];
+
+      if (Array.isArray(scopedWorksheets)) {
+        mergedWorksheetsByLevelId[scopedLevelId] = scopedWorksheets;
+      }
+
+      if (Array.isArray(scopedQuestionBanks)) {
+        mergedQuestionBanksByLevelId[scopedLevelId] = scopedQuestionBanks;
+      }
+    }
+
+    const mergedPayload = {
+      ...payload,
+      worksheetsByLevelId: mergedWorksheetsByLevelId,
+      questionBanksByLevelId: mergedQuestionBanksByLevelId
+    };
+
+    setAssessmentDataByListId((prev) => ({ ...prev, [listId]: mergedPayload }));
     setDraftConfigByListId((prev) => ({
       ...prev,
-      [listId]: buildDraftFromAssessment(payload)
+      [listId]: buildDraftFromAssessment(mergedPayload)
     }));
-    return payload;
+    return mergedPayload;
   }, [buildDraftFromAssessment, examCycleId]);
 
   const openApprovalForm = async (listId) => {
@@ -384,7 +441,12 @@ function SuperadminExamPendingListsPage() {
         examCycleId,
         {
           listId,
-          configs: draft.map((item) => ({
+          configs: draft
+            .filter((item) => {
+              const levelMeta = (assessmentPayload?.levels || []).find((level) => level.levelId === item.levelId);
+              return levelMeta?.canConfigureAssessment !== false;
+            })
+            .map((item) => ({
             levelId: item.levelId,
             assessmentType: item.assessmentType,
             worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
@@ -684,6 +746,7 @@ function SuperadminExamPendingListsPage() {
                         const levelId = b.levelId;
                         const wsOptions = assessmentPayload?.worksheetsByLevelId?.[levelId] || [];
                         const bankOptions = assessmentPayload?.questionBanksByLevelId?.[levelId] || [];
+                        const worksheetScopeWarning = assessmentPayload?.worksheetScopeWarningsByLevelId?.[levelId] || "";
                         const current = draftByLevelId.get(levelId) || {
                           levelId,
                           assessmentType: "WORKSHEET",
@@ -702,6 +765,15 @@ function SuperadminExamPendingListsPage() {
                               </strong>
                               <span style={{ fontSize: 12, color: "var(--muted)" }}>Rank: {String(b.levelRank ?? "")}</span>
                             </div>
+
+                            {b?.canConfigureAssessment === false ? (
+                              <p className="error" style={{ margin: 0 }}>
+                                {b?.scopeError || `Exam course Level ${String(b?.levelRank ?? "").trim() || "?"} is not configured.`}
+                              </p>
+                            ) : null}
+
+                            {b?.canConfigureAssessment === false ? null : (
+                              <>
 
                             <label style={{ display: "grid", gap: 4 }}>
                               <span style={{ fontSize: 12, color: "var(--muted)" }}>Assessment Type</span>
@@ -739,6 +811,9 @@ function SuperadminExamPendingListsPage() {
                                     </option>
                                   ))}
                                 </select>
+                                {worksheetScopeWarning ? (
+                                  <span className="error" style={{ margin: 0 }}>{worksheetScopeWarning}</span>
+                                ) : null}
                               </label>
                             ) : null}
 
@@ -794,6 +869,9 @@ function SuperadminExamPendingListsPage() {
                               </div>
                             ) : (
                               <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>Configuration valid</span>
+                            )}
+
+                              </>
                             )}
                           </div>
                         );

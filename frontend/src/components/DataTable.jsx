@@ -1,4 +1,4 @@
-import { useMemo, useState, useCallback, memo } from "react";
+import React, { useMemo, useState, useCallback, memo } from "react";
 
 const DataTable = memo(function DataTable({
   columns = [],

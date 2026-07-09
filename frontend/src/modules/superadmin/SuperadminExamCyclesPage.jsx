@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable, PaginationBar } from "../../components/DataTable";
@@ -180,6 +180,33 @@ function resolveSuperadminExamTab(searchParams) {
   if (hasKnownTab) return tab;
   if (searchParams.get("focus") === "late") return "enrollment";
   return "exam-cycles";
+}
+
+function normalizeExamCycleLifecycleState(cycle = {}) {
+  const candidates = [
+    cycle?.lifecycleStatus,
+    cycle?.status,
+    cycle?.state,
+    cycle?.workflowStage,
+    cycle?.resultStatus,
+    cycle?.stage
+  ];
+
+  const editableStatuses = new Set(["DRAFT", "CONFIGURING", "RETURNED", "REOPENED", "NEW"]);
+  const lockedStatuses = new Set(["APPROVED", "FINISHED", "COMPLETED", "RESULT_PUBLISHED", "RESULTPUBLISHED", "CLOSED", "ARCHIVED", "LOCKED", "READY_FOR_REVIEW", "PUBLISHED"]);
+
+  for (const candidate of candidates) {
+    const normalized = String(candidate || "").trim().toUpperCase();
+    if (!normalized) continue;
+    if (editableStatuses.has(normalized)) return "EDITABLE";
+    if (lockedStatuses.has(normalized)) return "LOCKED";
+  }
+
+  return cycle?.isArchived ? "LOCKED" : "EDITABLE";
+}
+
+function isExamCycleEditable(cycle = {}) {
+  return normalizeExamCycleLifecycleState(cycle) === "EDITABLE";
 }
 
 function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {}) {
@@ -1644,14 +1671,32 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     try {
       const data = await listExamCycles({ limit: 100, offset: 0, filter: "ALL" });
       const items = Array.isArray(data?.data?.items) ? data.data.items : [];
-      setExamCycleOptions(items);
+      const selectedCycleId = String(selectedExamCycleId || "").trim();
+      const selectedCycle = items.find((cycle) => String(cycle.id) === selectedCycleId) || null;
+      const editableCycleItems = items.filter((cycle) => isExamCycleEditable(cycle));
+      const lockedCycleItems = items.filter((cycle) => !isExamCycleEditable(cycle));
+      const orderedItems = [];
+      const seenIds = new Set();
 
-      if (!selectedExamCycleId && items.length) {
-        const defaultCycle = items.find((cycle) => !cycle?.isArchived) || items[0];
+      const pushCycle = (cycle) => {
+        if (!cycle?.id || seenIds.has(String(cycle.id))) return;
+        seenIds.add(String(cycle.id));
+        orderedItems.push(cycle);
+      };
+
+      editableCycleItems.forEach(pushCycle);
+      if (selectedCycle && !isExamCycleEditable(selectedCycle)) {
+        pushCycle(selectedCycle);
+      }
+      lockedCycleItems.forEach(pushCycle);
+      if (!selectedCycleId && orderedItems.length) {
+        const defaultCycle = editableCycleItems[0] || selectedCycle || orderedItems[0] || null;
         if (defaultCycle?.id) {
           onExamCycleChange(String(defaultCycle.id));
         }
       }
+
+      setExamCycleOptions(orderedItems);
     } catch (err) {
       setCyclesError(getFriendlyErrorMessage(err) || "Failed to load exam cycles.");
     } finally {
@@ -1695,7 +1740,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     }
     const hasSelected = examCycleOptions.some((cycle) => String(cycle.id) === String(selectedExamCycleId));
     if (!hasSelected) {
-      const fallback = examCycleOptions.find((cycle) => !cycle?.isArchived) || examCycleOptions[0] || null;
+      const fallback = examCycleOptions.find((cycle) => isExamCycleEditable(cycle)) || examCycleOptions[0] || null;
       if (fallback?.id) {
         onExamCycleChange(String(fallback.id));
       }
@@ -1710,6 +1755,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
   const selectedCycle = useMemo(() => {
     return examCycleOptions.find((cycle) => String(cycle.id) === String(selectedExamCycleId)) || null;
   }, [examCycleOptions, selectedExamCycleId]);
+  const isCycleLocked = Boolean(selectedCycle && !isExamCycleEditable(selectedCycle));
 
   const draftByLevelId = useMemo(() => {
     return new Map((draftConfig || []).map((item) => [item.levelId, item]));
@@ -1845,11 +1891,14 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
               disabled={cyclesLoading}
             >
               <option value="">Select exam cycle</option>
-              {examCycleOptions.map((cycle) => (
-                <option key={cycle.id} value={cycle.id}>
-                  {cycle.code} · {cycle.name}{cycle.isArchived ? " (ARCHIVED)" : ""}
-                </option>
-              ))}
+              {examCycleOptions.map((cycle) => {
+                const cycleLocked = !isExamCycleEditable(cycle);
+                return (
+                  <option key={cycle.id} value={cycle.id} disabled={cycleLocked}>
+                    {cycle.code} · {cycle.name}{cycleLocked ? " (READ-ONLY)" : ""}
+                  </option>
+                );
+              })}
             </select>
           </label>
           <div style={{ display: "grid", gap: 4, fontSize: 13 }}>
@@ -1861,8 +1910,11 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
         </div>
         {cyclesError ? <div className="error">{cyclesError}</div> : null}
         {selectedCycle ? (
-          <div style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
-            Selected cycle window: {formatDateRange(selectedCycle.examStartsAt, selectedCycle.examEndsAt)}
+          <div style={{ display: "grid", gap: 4, color: "var(--color-text-muted)", fontSize: 12 }}>
+            <div>Selected cycle window: {formatDateRange(selectedCycle.examStartsAt, selectedCycle.examEndsAt)}</div>
+            {isCycleLocked ? (
+              <div style={{ color: "var(--color-text-muted)", fontWeight: 600 }}>Read-only preview for this locked exam cycle.</div>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -1946,6 +1998,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                     <select
                       className="input"
                       value={current.assessmentType}
+                      disabled={isCycleLocked}
                       onChange={(event) => {
                         const nextType = event.target.value;
                         setDraftLevelConfig(levelId, {
@@ -1969,6 +2022,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                         <select
                           className="input"
                           value={current.worksheetId || ""}
+                          disabled={isCycleLocked}
                           onChange={(event) => setDraftLevelConfig(levelId, { worksheetId: event.target.value })}
                         >
                           <option value="">Select worksheet</option>
@@ -1998,6 +2052,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                         <select
                           className="input"
                           value={current.questionBankId || ""}
+                          disabled={isCycleLocked}
                           onChange={(event) => setDraftLevelConfig(levelId, { questionBankId: event.target.value })}
                         >
                           <option value="">Select question bank</option>
@@ -2016,6 +2071,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                             type="number"
                             min={1}
                             value={current.questionCount}
+                            disabled={isCycleLocked}
                             onChange={(event) => setDraftLevelConfig(levelId, { questionCount: event.target.value })}
                           />
                         </label>
@@ -2026,6 +2082,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                             type="number"
                             min={1}
                             value={current.timeLimitMinutes}
+                            disabled={isCycleLocked}
                             onChange={(event) => setDraftLevelConfig(levelId, { timeLimitMinutes: event.target.value })}
                           />
                         </label>
@@ -2064,7 +2121,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                 className="button"
                 style={{ width: "auto" }}
                 onClick={() => void handleSaveConfig()}
-                disabled={!validation.isComplete || savingConfig || assessmentLoading || !levels.length}
+                disabled={isCycleLocked || !validation.isComplete || savingConfig || assessmentLoading || !levels.length}
               >
                 {savingConfig ? "Saving..." : "Save Configuration"}
               </button>
@@ -2107,7 +2164,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                 className="button"
                 style={{ width: "auto" }}
                 onClick={() => void handleGenerateQuestionSet()}
-                disabled={generateBusy || !String(studentId || "").trim() || !levels.length || !isPrimaryQuestionBankMode}
+                disabled={isCycleLocked || generateBusy || !String(studentId || "").trim() || !levels.length || !isPrimaryQuestionBankMode}
               >
                 {generateBusy ? "Generating..." : "Generate Question Set"}
               </button>

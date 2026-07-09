@@ -62,10 +62,12 @@ function SuperadminExamPendingListsPage() {
   const [rejectListId, setRejectListId] = useState(null);
 
   const syncScopeToUrl = useCallback((courseId, levelNumber) => {
-    if (!courseId || !levelNumber) return;
+    if (!courseId) return;
     const next = new URLSearchParams(searchParams);
     next.set("examCourseId", String(courseId));
-    next.set("examLevelNumber", String(levelNumber));
+    if (levelNumber) {
+      next.set("examLevelNumber", String(levelNumber));
+    }
     setSearchParams(next, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -106,24 +108,24 @@ function SuperadminExamPendingListsPage() {
 
   const getEffectiveScopeForRow = useCallback((row, listId) => {
     const manual = manualScopeByListId[listId];
-    if (manual?.courseId && manual?.levelNumber) {
+    if (manual?.courseId) {
       return {
         courseId: manual.courseId,
-        levelNumber: String(manual.levelNumber)
+        levelNumber: manual?.levelNumber ? String(manual.levelNumber) : ""
       };
     }
 
-    if (row?.assessmentScope?.canConfigureAssessment && row?.assessmentScope?.examCourseId && row?.assessmentScope?.examLevelNumber) {
+    if (row?.assessmentScope?.canConfigureAssessment && row?.assessmentScope?.examCourseId) {
       return {
         courseId: String(row.assessmentScope.examCourseId),
-        levelNumber: String(row.assessmentScope.examLevelNumber)
+        levelNumber: row?.assessmentScope?.examLevelNumber ? String(row.assessmentScope.examLevelNumber) : ""
       };
     }
 
-    if (examCourseContext.courseId && examCourseContext.levelNumber) {
+    if (examCourseContext.courseId) {
       return {
         courseId: examCourseContext.courseId,
-        levelNumber: String(examCourseContext.levelNumber)
+        levelNumber: examCourseContext.levelNumber ? String(examCourseContext.levelNumber) : ""
       };
     }
 
@@ -289,8 +291,7 @@ function SuperadminExamPendingListsPage() {
   const loadAssessmentOptions = useCallback(async (listId, scopeContext = null) => {
     const params = {
       listId,
-      ...(scopeContext?.courseId ? { courseId: scopeContext.courseId } : {}),
-      ...(scopeContext?.levelNumber ? { levelNumber: scopeContext.levelNumber } : {})
+      ...(scopeContext?.courseId ? { courseId: scopeContext.courseId } : {})
     };
 
     const resp = await getExamCycleAssessmentConfig(examCycleId, params);
@@ -319,7 +320,7 @@ function SuperadminExamPendingListsPage() {
     if (!assessmentDataByListId[listId]) {
       setLoadingApprovalId(listId);
       try {
-        if (effectiveScope?.courseId && effectiveScope?.levelNumber) {
+        if (effectiveScope?.courseId) {
           await loadAssessmentOptions(listId, effectiveScope);
           syncScopeToUrl(effectiveScope.courseId, effectiveScope.levelNumber);
         } else {
@@ -363,8 +364,8 @@ function SuperadminExamPendingListsPage() {
 
     const row = rows.find((entry) => entry?.id === listId) || null;
     const effectiveScope = getEffectiveScopeForRow(row, listId);
-    if (!effectiveScope?.courseId || !effectiveScope?.levelNumber) {
-      setError("Select Exam Course and Level to continue.");
+    if (!effectiveScope?.courseId) {
+      setError("Select Exam Course to continue.");
       throw new Error("EXAM_CONTEXT_REQUIRED");
     }
 
@@ -393,8 +394,7 @@ function SuperadminExamPendingListsPage() {
           }))
         },
         {
-          courseId: effectiveScope.courseId,
-          levelNumber: effectiveScope.levelNumber
+          courseId: effectiveScope.courseId
         }
       );
 
@@ -437,15 +437,14 @@ function SuperadminExamPendingListsPage() {
     try {
       const row = rows.find((entry) => entry?.id === listId) || null;
       const effectiveScope = getEffectiveScopeForRow(row, listId);
-      if (!effectiveScope?.courseId || !effectiveScope?.levelNumber) {
-        setError("Select Exam Course and Level to continue.");
+      if (!effectiveScope?.courseId) {
+        setError("Select Exam Course to continue.");
         return;
       }
 
       await saveAssessmentConfig(listId);
       await approveEnrollmentListAsSuperadmin(examCycleId, listId, {
-        courseId: effectiveScope.courseId,
-        levelNumber: effectiveScope.levelNumber
+        courseId: effectiveScope.courseId
       });
       setEditingId(null);
       await load();
@@ -564,7 +563,7 @@ function SuperadminExamPendingListsPage() {
 
                     {(() => {
                       const effectiveScope = getEffectiveScopeForRow(r, r.id);
-                      if (effectiveScope?.courseId && effectiveScope?.levelNumber) {
+                      if (effectiveScope?.courseId) {
                         return null;
                       }
 
@@ -629,7 +628,7 @@ function SuperadminExamPendingListsPage() {
                               className="button"
                               type="button"
                               style={{ width: "auto" }}
-                              disabled={!selectedCourseId || !selectedLevelNumber || loadingApprovalId === r.id}
+                              disabled={!selectedCourseId || loadingApprovalId === r.id}
                               onClick={async () => {
                                 const nextScope = {
                                   courseId: selectedCourseId,
@@ -666,7 +665,17 @@ function SuperadminExamPendingListsPage() {
 
                     {(() => {
                       const assessmentPayload = assessmentDataByListId[r.id] || {};
-                      const levels = assessmentPayload.levels || [];
+                      const levelsFromPayload = Array.isArray(assessmentPayload.levels) ? assessmentPayload.levels : [];
+                      const levels = levelsFromPayload.length
+                        ? levelsFromPayload
+                        : (Array.isArray(r?.levelBreakdown)
+                          ? r.levelBreakdown.map((entry) => ({
+                            levelId: entry.levelId,
+                            levelName: entry.levelName,
+                            levelRank: entry.levelRank,
+                            studentCount: entry.studentCount
+                          }))
+                          : []);
                       const draft = draftConfigByListId[r.id] || [];
                       const validation = getDraftValidation(assessmentPayload, draft);
                       const draftByLevelId = new Map(draft.map((item) => [item.levelId, item]));

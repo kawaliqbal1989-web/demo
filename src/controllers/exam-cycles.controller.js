@@ -728,6 +728,33 @@ async function resolveExamCourseLevelContext({ tenantId, courseId, levelNumber }
   };
 }
 
+async function resolveExamCourseContext({ tenantId, courseId }) {
+  const normalizedCourseId = normalizeString(courseId);
+  if (!normalizedCourseId) {
+    return null;
+  }
+
+  const examCourse = await prisma.course.findFirst({
+    where: {
+      tenantId,
+      id: normalizedCourseId,
+      scope: "EXAM"
+    },
+    select: {
+      id: true
+    }
+  });
+
+  if (!examCourse) {
+    const error = new Error("Exam course not found");
+    error.statusCode = 404;
+    error.errorCode = "EXAM_COURSE_NOT_FOUND";
+    throw error;
+  }
+
+  return { courseId: examCourse.id };
+}
+
 function createScopeNotConfiguredError() {
   const error = new Error("Exam cycle assessment scope is not configured");
   error.statusCode = 409;
@@ -827,6 +854,124 @@ async function inferExamCourseLevelContext({ tenantId, examCycleId, listId, leve
   };
 }
 
+async function inferExamCourseContext({ tenantId, examCycleId, listId, levelsRaw = [] }) {
+  const expectedLevelIds = new Set((levelsRaw || []).map((level) => String(level.levelId || "")).filter(Boolean));
+  const candidateCourseIds = new Set();
+
+  const [selectionRows, configRows] = await Promise.all([
+    prisma.examEnrollmentLevelWorksheetSelection.findMany({
+      where: {
+        tenantId,
+        list: {
+          is: {
+            tenantId,
+            examCycleId,
+            type: "CENTER_COMBINED",
+            ...(listId ? { id: listId } : {})
+          }
+        }
+      },
+      select: {
+        levelId: true,
+        baseWorksheet: {
+          select: {
+            levelId: true,
+            courseId: true
+          }
+        }
+      }
+    }),
+    prisma.examLevelAssessmentConfig.findMany({
+      where: {
+        tenantId,
+        examCycleId,
+        ...(expectedLevelIds.size ? { levelId: { in: Array.from(expectedLevelIds) } } : {})
+      },
+      select: {
+        levelId: true,
+        worksheet: {
+          select: {
+            levelId: true,
+            courseId: true
+          }
+        }
+      }
+    })
+  ]);
+
+  for (const row of selectionRows) {
+    const worksheet = row?.baseWorksheet;
+    const levelId = String(row?.levelId || worksheet?.levelId || "");
+    if (!worksheet?.courseId || !levelId) continue;
+    if (expectedLevelIds.size && !expectedLevelIds.has(levelId)) continue;
+    candidateCourseIds.add(String(worksheet.courseId));
+  }
+
+  for (const row of configRows) {
+    const worksheet = row?.worksheet;
+    const levelId = String(row?.levelId || worksheet?.levelId || "");
+    if (!worksheet?.courseId || !levelId) continue;
+    if (expectedLevelIds.size && !expectedLevelIds.has(levelId)) continue;
+    candidateCourseIds.add(String(worksheet.courseId));
+  }
+
+  if (candidateCourseIds.size !== 1) {
+    return null;
+  }
+
+  return { courseId: Array.from(candidateCourseIds)[0] };
+}
+
+async function buildLevelScopeByLevelId({ tenantId, courseId, levelsRaw = [] }) {
+  const levelNumbers = Array.from(
+    new Set(levelsRaw.map((level) => Number(level?.levelRank)).filter((rank) => Number.isInteger(rank) && rank > 0))
+  );
+
+  if (!levelNumbers.length) {
+    throw createScopeNotConfiguredError();
+  }
+
+  const courseLevels = await prisma.courseLevel.findMany({
+    where: {
+      tenantId,
+      courseId,
+      levelNumber: { in: levelNumbers }
+    },
+    select: {
+      id: true,
+      levelNumber: true
+    }
+  });
+
+  const courseLevelByNumber = new Map(courseLevels.map((entry) => [Number(entry.levelNumber), entry]));
+  const levelScopeByLevelId = {};
+
+  for (const level of levelsRaw) {
+    const mappedLevelId = String(level?.levelId || "");
+    const parsedRank = Number(level?.levelRank);
+    if (!mappedLevelId || !Number.isInteger(parsedRank) || parsedRank <= 0) {
+      continue;
+    }
+
+    const courseLevel = courseLevelByNumber.get(parsedRank);
+    if (!courseLevel?.id) {
+      const error = new Error("Selected exam course does not include all participating levels");
+      error.statusCode = 409;
+      error.errorCode = "EXAM_LEVEL_NOT_IN_SCOPE";
+      throw error;
+    }
+
+    levelScopeByLevelId[mappedLevelId] = {
+      courseId,
+      courseLevelId: courseLevel.id,
+      levelNumber: courseLevel.levelNumber,
+      mappedLevelId
+    };
+  }
+
+  return levelScopeByLevelId;
+}
+
 async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = null, courseId = null, levelNumber = null }) {
   const levelsRaw = await getExamCycleLevels({
     tenantId,
@@ -838,40 +983,82 @@ async function resolvePendingAssessmentScope({ tenantId, examCycleId, listId = n
     throw createScopeNotConfiguredError();
   }
 
-  let examCourseContext = null;
+  const normalizedCourseId = normalizeString(courseId);
+  const normalizedLevelNumber = normalizeString(levelNumber);
 
-  if (courseId || levelNumber) {
-    examCourseContext = await resolveExamCourseLevelContext({
-      tenantId,
-      courseId,
-      levelNumber
-    });
-  } else {
-    examCourseContext = await inferExamCourseLevelContext({
+  if (!normalizedCourseId && normalizedLevelNumber) {
+    const error = new Error("courseId and levelNumber are required together");
+    error.statusCode = 400;
+    error.errorCode = "VALIDATION_ERROR";
+    throw error;
+  }
+
+  let resolvedCourseId = normalizedCourseId;
+  if (!resolvedCourseId) {
+    const inferredCourse = await inferExamCourseContext({
       tenantId,
       examCycleId,
       listId,
       levelsRaw
     });
+    resolvedCourseId = normalizeString(inferredCourse?.courseId);
   }
 
-  if (!examCourseContext) {
+  if (!resolvedCourseId) {
     throw createScopeNotConfiguredError();
   }
 
-  const levels = levelsRaw.filter((level) => level.levelId === examCourseContext.mappedLevelId);
+  if (normalizedLevelNumber) {
+    const examCourseContext = await resolveExamCourseLevelContext({
+      tenantId,
+      courseId: resolvedCourseId,
+      levelNumber: normalizedLevelNumber
+    });
+
+    const levels = levelsRaw.filter((level) => level.levelId === examCourseContext.mappedLevelId);
+    if (!levels.length) {
+      const error = new Error("Selected exam course level is not part of this exam cycle context");
+      error.statusCode = 409;
+      error.errorCode = "EXAM_LEVEL_NOT_IN_SCOPE";
+      throw error;
+    }
+
+    return {
+      examCourseContext,
+      levels,
+      levelIds: levels.map((level) => level.levelId),
+      levelScopeByLevelId: {
+        [examCourseContext.mappedLevelId]: examCourseContext
+      }
+    };
+  }
+
+  const examCourseContext = await resolveExamCourseContext({
+    tenantId,
+    courseId: resolvedCourseId
+  });
+  const levelScopeByLevelId = await buildLevelScopeByLevelId({
+    tenantId,
+    courseId: examCourseContext.courseId,
+    levelsRaw
+  });
+
+  const levels = levelsRaw.filter((level) => levelScopeByLevelId[String(level.levelId || "")]);
 
   if (!levels.length) {
-    const error = new Error("Selected exam course level is not part of this exam cycle context");
-    error.statusCode = 409;
-    error.errorCode = "EXAM_LEVEL_NOT_IN_SCOPE";
-    throw error;
+    throw createScopeNotConfiguredError();
   }
 
   return {
-    examCourseContext,
+    examCourseContext: {
+      courseId: examCourseContext.courseId,
+      courseLevelId: null,
+      levelNumber: null,
+      mappedLevelId: null
+    },
     levels,
-    levelIds: levels.map((level) => level.levelId)
+    levelIds: levels.map((level) => level.levelId),
+    levelScopeByLevelId
   };
 }
 
@@ -3286,6 +3473,12 @@ const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
 
   const enrichedLists = await Promise.all(
     lists.map(async (l) => {
+      const levelBreakdown = await getExamCycleLevels({
+        tenantId: req.auth.tenantId,
+        examCycleId,
+        listId: l.id
+      });
+
       let assessmentScope = {
         canConfigureAssessment: false,
         scopeError: "Exam cycle assessment scope is not configured"
@@ -3303,7 +3496,14 @@ const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
           examCourseId: scope.examCourseContext.courseId,
           examLevelNumber: scope.examCourseContext.levelNumber,
           examCourseLevelId: scope.examCourseContext.courseLevelId,
-          mappedLevelId: scope.examCourseContext.mappedLevelId
+          mappedLevelId: scope.examCourseContext.mappedLevelId,
+          scopedLevelNumbers: Array.from(
+            new Set(
+              Object.values(scope.levelScopeByLevelId || {})
+                .map((entry) => Number(entry?.levelNumber))
+                .filter((rank) => Number.isInteger(rank) && rank > 0)
+            )
+          )
         };
       } catch (scopeError) {
         assessmentScope = {
@@ -3319,6 +3519,7 @@ const listPendingEnrollmentLists = asyncHandler(async (req, res) => {
         ...l,
         entriesCount: l._count?.items ?? 0,
         _count: undefined,
+        levelBreakdown,
         assessmentScope
       };
     })
@@ -3404,7 +3605,8 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
       levelIds,
       provenanceContext: {
         courseId: scope.examCourseContext.courseId,
-        courseLevelId: scope.examCourseContext.courseLevelId
+        courseLevelId: scope.examCourseContext.courseLevelId,
+        levelScopeByLevelId: scope.levelScopeByLevelId || {}
       }
     }),
     getLevelQuestionBanks({
@@ -3412,7 +3614,8 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
       levelIds,
       provenanceContext: {
         courseId: scope.examCourseContext.courseId,
-        courseLevelId: scope.examCourseContext.courseLevelId
+        courseLevelId: scope.examCourseContext.courseLevelId,
+        levelScopeByLevelId: scope.levelScopeByLevelId || {}
       }
     })
   ]);
@@ -3449,7 +3652,8 @@ const saveExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
     allowedLevelIds: scope.levelIds,
     provenanceContext: {
       courseId: scope.examCourseContext.courseId,
-      courseLevelId: scope.examCourseContext.courseLevelId
+      courseLevelId: scope.examCourseContext.courseLevelId,
+      levelScopeByLevelId: scope.levelScopeByLevelId || {}
     }
   });
 
@@ -3504,7 +3708,8 @@ const generateExamCycleQuestionSet = asyncHandler(async (req, res) => {
     levelId: enrollment.enrolledLevelId,
     provenanceContext: {
       courseId: scope.examCourseContext.courseId,
-      courseLevelId: scope.examCourseContext.courseLevelId
+      courseLevelId: scope.examCourseContext.courseLevelId,
+      levelScopeByLevelId: scope.levelScopeByLevelId || {}
     }
   });
 
@@ -3625,7 +3830,8 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
       requiredLevelIds,
       provenanceContext: {
         courseId: scope.examCourseContext.courseId,
-        courseLevelId: scope.examCourseContext.courseLevelId
+        courseLevelId: scope.examCourseContext.courseLevelId,
+        levelScopeByLevelId: scope.levelScopeByLevelId || {}
       }
     });
   } catch (error) {
@@ -3658,7 +3864,8 @@ const superadminApproveEnrollmentList = asyncHandler(async (req, res) => {
     actorUserId: req.auth.userId,
     provenanceContext: {
       courseId: scope.examCourseContext.courseId,
-      courseLevelId: scope.examCourseContext.courseLevelId
+      courseLevelId: scope.examCourseContext.courseLevelId,
+      levelScopeByLevelId: scope.levelScopeByLevelId || {}
     }
   });
 

@@ -211,6 +211,30 @@ function shuffleDeterministic(items, seed) {
 }
 
 async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedListId, actorUserId, provenanceContext = null }) {
+  const getLevelScopeForLevelId = (levelId) => {
+    const normalizedLevelId = String(levelId || "").trim();
+    const map = provenanceContext?.levelScopeByLevelId || null;
+    if (map && normalizedLevelId && map[normalizedLevelId]) {
+      return map[normalizedLevelId];
+    }
+
+    if (provenanceContext?.courseId || provenanceContext?.courseLevelId) {
+      return {
+        courseId: provenanceContext?.courseId || null,
+        courseLevelId: provenanceContext?.courseLevelId || null
+      };
+    }
+
+    return null;
+  };
+
+  const matchesScope = (record, scope) => {
+    if (!scope) return true;
+    if (scope?.courseId && String(record?.courseId || "") !== String(scope.courseId)) return false;
+    if (scope?.courseLevelId && String(record?.courseLevelId || "") !== String(scope.courseLevelId)) return false;
+    return true;
+  };
+
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
     select: {
@@ -294,12 +318,7 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         where: {
           tenantId,
           id: { in: worksheetIds },
-          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-            ? {
-                courseId: provenanceContext.courseId,
-                courseLevelId: provenanceContext.courseLevelId
-              }
-            : {})
+          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {})
         },
         select: {
           id: true,
@@ -329,12 +348,7 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         where: {
           tenantId,
           levelId: { in: questionBankLevelIds },
-          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-            ? {
-                courseId: provenanceContext.courseId,
-                courseLevelId: provenanceContext.courseLevelId
-              }
-            : {}),
+          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
           isActive: true
         },
         select: {
@@ -352,6 +366,11 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
 
   const bankQuestionsByKey = new Map();
   for (const question of bankQuestionPool) {
+    const scope = getLevelScopeForLevelId(question.levelId);
+    if (!matchesScope(question, scope)) {
+      continue;
+    }
+
     const key = `${question.levelId}:${question.templateId || "DEFAULT"}`;
     if (!bankQuestionsByKey.has(key)) {
       bankQuestionsByKey.set(key, []);
@@ -408,13 +427,17 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         if (!baseWorksheet || baseWorksheet.levelId !== entry.enrolledLevelId) {
           throw createHttpError(409, "Configured worksheet is invalid", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
         }
+        const levelScope = getLevelScopeForLevelId(entry.enrolledLevelId);
+        if (!matchesScope(baseWorksheet, levelScope)) {
+          throw createHttpError(409, "Configured worksheet is outside exam course scope", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
+        }
         if (!Array.isArray(baseWorksheet.questions) || baseWorksheet.questions.length <= 0) {
           throw createHttpError(409, "Configured worksheet has no questions", "EXAM_WORKSHEET_QUESTIONS_MISSING");
         }
 
         templateId = baseWorksheet.templateId || null;
-        sourceCourseId = baseWorksheet.courseId || provenanceContext?.courseId || null;
-        sourceCourseLevelId = baseWorksheet.courseLevelId || provenanceContext?.courseLevelId || null;
+        sourceCourseId = baseWorksheet.courseId || levelScope?.courseId || provenanceContext?.courseId || null;
+        sourceCourseLevelId = baseWorksheet.courseLevelId || levelScope?.courseLevelId || provenanceContext?.courseLevelId || null;
         seed = `EXAM_SELECTED:${examCycleId}:${baseWorksheetId}:${entry.studentId}`;
         selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed);
       } else if (levelConfig.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK) {
@@ -441,8 +464,9 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         seed = `EXAM_BANK:${examCycleId}:${levelConfig.questionBankId}:${entry.studentId}`;
         selectedQuestions = shuffleDeterministic(bankQuestions, seed).slice(0, configuredCount);
         timeLimitSeconds = Math.max(60, Math.floor(Number(levelConfig.timeLimitMinutes || 0) * 60));
-        sourceCourseId = selectedQuestions[0]?.courseId || provenanceContext?.courseId || null;
-        sourceCourseLevelId = selectedQuestions[0]?.courseLevelId || provenanceContext?.courseLevelId || null;
+        const levelScope = getLevelScopeForLevelId(entry.enrolledLevelId);
+        sourceCourseId = selectedQuestions[0]?.courseId || levelScope?.courseId || provenanceContext?.courseId || null;
+        sourceCourseLevelId = selectedQuestions[0]?.courseLevelId || levelScope?.courseLevelId || provenanceContext?.courseLevelId || null;
 
         await tx.examGeneratedQuestionSet.upsert({
           where: {

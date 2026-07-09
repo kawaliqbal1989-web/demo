@@ -92,6 +92,42 @@ function bankKeyFromTemplateId(templateId) {
   return `TEMPLATE:${templateId || "DEFAULT"}`;
 }
 
+function getLevelScopeForLevelId({ provenanceContext = null, levelId = null }) {
+  const normalizedLevelId = String(levelId || "").trim();
+  const map = provenanceContext?.levelScopeByLevelId || null;
+  if (map && normalizedLevelId && map[normalizedLevelId]) {
+    return map[normalizedLevelId];
+  }
+
+  if (provenanceContext?.courseId || provenanceContext?.courseLevelId) {
+    return {
+      courseId: provenanceContext?.courseId || null,
+      courseLevelId: provenanceContext?.courseLevelId || null
+    };
+  }
+
+  return null;
+}
+
+function applyScopeToWhere(where, scope) {
+  if (!scope) {
+    return where;
+  }
+
+  return {
+    ...where,
+    ...(scope?.courseId ? { courseId: scope.courseId } : {}),
+    ...(scope?.courseLevelId ? { courseLevelId: scope.courseLevelId } : {})
+  };
+}
+
+function matchesScope(record, scope) {
+  if (!scope) return true;
+  if (scope?.courseId && String(record?.courseId || "") !== String(scope.courseId)) return false;
+  if (scope?.courseLevelId && String(record?.courseLevelId || "") !== String(scope.courseLevelId)) return false;
+  return true;
+}
+
 function createSeededRandom(seedValue) {
   const hashed = crypto.createHash("sha256").update(String(seedValue)).digest("hex");
   let state = parseInt(hashed.slice(0, 8), 16) || 1;
@@ -176,12 +212,7 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
     where: {
       tenantId,
       levelId: { in: levelIds },
-      ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-        ? {
-            courseId: provenanceContext.courseId,
-            courseLevelId: provenanceContext.courseLevelId
-          }
-        : {}),
+      ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
       isPublished: true,
       examCycleId: null
     },
@@ -189,6 +220,8 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
       id: true,
       title: true,
       levelId: true,
+      courseId: true,
+      courseLevelId: true,
       _count: { select: { questions: true } }
     },
     orderBy: [{ levelId: "asc" }, { createdAt: "desc" }]
@@ -196,6 +229,11 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
 
   const byLevelId = {};
   for (const worksheet of worksheets) {
+    const scope = getLevelScopeForLevelId({ provenanceContext, levelId: worksheet.levelId });
+    if (!matchesScope(worksheet, scope)) {
+      continue;
+    }
+
     const questionCount = worksheet?._count?.questions ?? 0;
     if (questionCount <= 0) continue;
 
@@ -221,23 +259,42 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
   const where = {
     tenantId,
     levelId: { in: levelIds },
-    ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-      ? {
-          courseId: provenanceContext.courseId,
-          courseLevelId: provenanceContext.courseLevelId
-        }
-      : {}),
+    ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
     isActive: true
   };
 
   try {
-    const grouped = await prisma.questionBank.groupBy({
-      by: ["levelId", "templateId"],
+    const rows = await prisma.questionBank.findMany({
       where,
-      _count: { _all: true }
+      select: {
+        id: true,
+        levelId: true,
+        templateId: true,
+        courseId: true,
+        courseLevelId: true
+      }
     });
 
-    const templateIds = Array.from(new Set(grouped.map((row) => row.templateId).filter(Boolean)));
+    const grouped = new Map();
+    for (const row of rows) {
+      const scope = getLevelScopeForLevelId({ provenanceContext, levelId: row.levelId });
+      if (!matchesScope(row, scope)) {
+        continue;
+      }
+
+      const key = `${row.levelId}::${String(row.templateId || "")}`;
+      const existing = grouped.get(key) || {
+        levelId: row.levelId,
+        templateId: row.templateId || null,
+        count: 0
+      };
+      existing.count += 1;
+      grouped.set(key, existing);
+    }
+
+    const groupedRows = Array.from(grouped.values());
+
+    const templateIds = Array.from(new Set(groupedRows.map((row) => row.templateId).filter(Boolean)));
     const templates = templateIds.length
       ? await prisma.worksheetTemplate.findMany({
           where: { tenantId, id: { in: templateIds } },
@@ -248,7 +305,7 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
     const templateNameById = new Map(templates.map((template) => [template.id, template.name]));
 
     const byLevelId = {};
-    for (const row of grouped) {
+    for (const row of groupedRows) {
       if (!byLevelId[row.levelId]) {
         byLevelId[row.levelId] = [];
       }
@@ -257,7 +314,7 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
       byLevelId[row.levelId].push({
         id: key,
         name: templateNameById.get(row.templateId) || (row.templateId ? "Question Bank" : "Default Level Bank"),
-        availableQuestionCount: row._count?._all || 0
+        availableQuestionCount: row.count || 0
       });
     }
 
@@ -272,18 +329,31 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
       throw error;
     }
 
-    const groupedLegacy = await prisma.questionBank.groupBy({
-      by: ["levelId"],
+    const legacyRows = await prisma.questionBank.findMany({
       where,
-      _count: { _all: true }
+      select: {
+        id: true,
+        levelId: true,
+        courseId: true,
+        courseLevelId: true
+      }
     });
 
+    const countByLevelId = new Map();
+    for (const row of legacyRows) {
+      const scope = getLevelScopeForLevelId({ provenanceContext, levelId: row.levelId });
+      if (!matchesScope(row, scope)) {
+        continue;
+      }
+      countByLevelId.set(row.levelId, Number(countByLevelId.get(row.levelId) || 0) + 1);
+    }
+
     const byLevelId = {};
-    for (const row of groupedLegacy) {
-      byLevelId[row.levelId] = [{
+    for (const [levelId, count] of countByLevelId.entries()) {
+      byLevelId[levelId] = [{
         id: bankKeyFromTemplateId(null),
         name: "Default Level Bank",
-        availableQuestionCount: row._count?._all || 0
+        availableQuestionCount: count || 0
       }];
     }
 
@@ -334,19 +404,14 @@ async function validateQuestionBankSelection({ tenantId, levelId, questionBankId
   }
 
   const templateId = extractTemplateIdFromQuestionBankKey(normalizedBankKey);
+  const levelScope = getLevelScopeForLevelId({ provenanceContext, levelId });
   const availableCount = await prisma.questionBank.count({
-    where: {
+    where: applyScopeToWhere({
       tenantId,
       levelId,
-      ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-        ? {
-            courseId: provenanceContext.courseId,
-            courseLevelId: provenanceContext.courseLevelId
-          }
-        : {}),
       isActive: true,
       ...(templateId ? { templateId } : { templateId: null })
-    }
+    }, levelScope)
   });
 
   if (availableCount <= 0) {
@@ -405,16 +470,13 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
         where: {
           tenantId,
           id: { in: worksheetIds },
-          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-            ? {
-                courseId: provenanceContext.courseId,
-                courseLevelId: provenanceContext.courseLevelId
-              }
-            : {})
+          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {})
         },
         select: {
           id: true,
           levelId: true,
+          courseId: true,
+          courseLevelId: true,
           isPublished: true,
           examCycleId: true,
           _count: { select: { questions: true } }
@@ -437,6 +499,10 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
       }
       if (worksheet.levelId !== config.levelId) {
         throw createHttpError(409, "Selected worksheet level mismatch", "EXAM_WORKSHEET_LEVEL_MISMATCH");
+      }
+      const levelScope = getLevelScopeForLevelId({ provenanceContext, levelId: config.levelId });
+      if (!matchesScope(worksheet, levelScope)) {
+        throw createHttpError(409, "Selected worksheet is outside exam course scope", "EXAM_WORKSHEET_SCOPE_MISMATCH");
       }
       if (worksheet.examCycleId) {
         throw createHttpError(409, "Selected worksheet must be a base worksheet", "EXAM_WORKSHEET_SOURCE_INVALID");
@@ -565,19 +631,13 @@ async function validateConfig({ tenantId, examCycleId, requiredLevelIds, provena
       }
 
       const worksheet = await prisma.worksheet.findFirst({
-        where: {
+        where: applyScopeToWhere({
           tenantId,
           id: config.worksheetId,
           levelId,
-          ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-            ? {
-                courseId: provenanceContext.courseId,
-                courseLevelId: provenanceContext.courseLevelId
-              }
-            : {}),
           isPublished: true,
           examCycleId: null
-        },
+        }, getLevelScopeForLevelId({ provenanceContext, levelId })),
         select: { id: true }
       });
 
@@ -681,19 +741,14 @@ async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId, 
   }
 
   const templateId = extractTemplateIdFromQuestionBankKey(questionBankId);
+  const levelScope = getLevelScopeForLevelId({ provenanceContext, levelId: normalizedLevelId });
   const pool = await prisma.questionBank.findMany({
-    where: {
+    where: applyScopeToWhere({
       tenantId,
       levelId: normalizedLevelId,
-      ...(provenanceContext?.courseId && provenanceContext?.courseLevelId
-        ? {
-            courseId: provenanceContext.courseId,
-            courseLevelId: provenanceContext.courseLevelId
-          }
-        : {}),
       isActive: true,
       ...(templateId ? { templateId } : { templateId: null })
-    },
+    }, levelScope),
     select: { id: true }
   });
 

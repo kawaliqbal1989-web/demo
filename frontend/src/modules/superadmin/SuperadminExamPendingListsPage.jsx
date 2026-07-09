@@ -227,7 +227,7 @@ function SuperadminExamPendingListsPage() {
       });
   }, [normalizeDraftConfig]);
 
-  const getDraftValidation = useCallback((assessmentPayload = {}, draftConfig = []) => {
+  const getDraftValidation = useCallback((assessmentPayload = {}, draftConfig = [], { requireAllLevels = true } = {}) => {
     const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
     const worksheetsByLevelId = assessmentPayload?.worksheetsByLevelId || {};
     const questionBanksByLevelId = assessmentPayload?.questionBanksByLevelId || {};
@@ -235,6 +235,7 @@ function SuperadminExamPendingListsPage() {
 
     const errorsByLevelId = {};
     let validCount = 0;
+    let requiredCount = 0;
 
     for (const level of levels) {
       const current = draftByLevelId.get(level.levelId);
@@ -247,6 +248,8 @@ function SuperadminExamPendingListsPage() {
         errorsByLevelId[level.levelId] = errors;
         continue;
       }
+
+      requiredCount += 1;
 
       if (!current) {
         errors.push("Missing configuration");
@@ -305,7 +308,7 @@ function SuperadminExamPendingListsPage() {
 
     return {
       errorsByLevelId,
-      isComplete: levels.length > 0 && validCount === levels.length
+      isComplete: requiredCount > 0 && validCount === requiredCount && (!requireAllLevels || requiredCount === levels.length)
     };
   }, []);
 
@@ -455,7 +458,7 @@ function SuperadminExamPendingListsPage() {
 
     const assessmentPayload = assessmentDataByListId[listId] || {};
     const draft = draftConfigByListId[listId] || [];
-    const validation = getDraftValidation(assessmentPayload, draft);
+    const validation = getDraftValidation(assessmentPayload, draft, { requireAllLevels: false });
     if (!validation.isComplete) {
       setError("Fix assessment configuration errors before saving.");
       throw new Error("ASSESSMENT_CONFIG_INCOMPLETE");
@@ -531,7 +534,10 @@ function SuperadminExamPendingListsPage() {
         return;
       }
 
-      await saveAssessmentConfig(listId);
+      const saved = await saveAssessmentConfig(listId);
+      if (!saved) {
+        return;
+      }
       await approveEnrollmentListAsSuperadmin(examCycleId, listId, {
         courseId: effectiveScope.courseId
       });
@@ -914,8 +920,16 @@ function SuperadminExamPendingListsPage() {
                       <button
                         className="button secondary"
                         type="button"
-                        onClick={() => void saveAssessmentConfig(r.id)}
-                        disabled={savingConfigListId === r.id || actingId === r.id || loadingApprovalId === r.id}
+                        onClick={() => {
+                          void saveAssessmentConfig(r.id).catch(() => {});
+                        }}
+                        disabled={
+                          savingConfigListId === r.id ||
+                          actingId === r.id ||
+                          loadingApprovalId === r.id ||
+                          !(assessmentDataByListId[r.id]?.levels || []).length ||
+                          !getDraftValidation(assessmentDataByListId[r.id] || {}, draftConfigByListId[r.id] || [], { requireAllLevels: false }).isComplete
+                        }
                         style={{ width: "auto" }}
                       >
                         {savingConfigListId === r.id ? "Saving..." : "Save Configuration"}

@@ -184,6 +184,7 @@ function resolveSuperadminExamTab(searchParams) {
 
 function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {}) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [rows, setRows] = useState([]);
   const [limit, setLimit] = useState(20);
   const [offset, setOffset] = useState(0);
@@ -292,6 +293,24 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
       ].some((value) => String(value || "").toLowerCase().includes(query));
     });
   }, [rows, searchQuery, resultFilter, hierarchyFilter]);
+
+  const selectedExamCourseId = String(searchParams.get("examCourseId") || "").trim();
+  const selectedExamLevelNumber = String(searchParams.get("examLevelNumber") || "").trim();
+
+  const buildPendingRouteTarget = useCallback((examCycleId) => {
+    const params = new URLSearchParams();
+    if (selectedExamCourseId) {
+      params.set("examCourseId", selectedExamCourseId);
+    }
+    if (selectedExamLevelNumber) {
+      params.set("examLevelNumber", selectedExamLevelNumber);
+    }
+
+    return {
+      pathname: `/superadmin/exam-cycles/${examCycleId}/pending`,
+      search: params.toString() ? `?${params.toString()}` : ""
+    };
+  }, [selectedExamCourseId, selectedExamLevelNumber]);
 
   const dashboardCards = useMemo(() => ([
     { label: "Total Cycles", value: total, hint: `${rows.length} loaded`, tone: "#2563eb" },
@@ -722,7 +741,20 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
             header: "Actions",
             render: (r) => (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minWidth: 360 }}>
-                <Link className="button secondary" style={{ width: "auto" }} to={`/superadmin/exam-cycles/${r.id}/pending`}>
+                <Link
+                  className="button secondary"
+                  style={{ width: "auto" }}
+                  to={buildPendingRouteTarget(r.id)}
+                  state={{
+                    examCycleContext: {
+                      examCycleId: r.id,
+                      examCycleCode: r.code,
+                      examCycleTitle: r.name,
+                      examCourseId: selectedExamCourseId || null,
+                      examLevelNumber: selectedExamLevelNumber || null
+                    }
+                  }}
+                >
                   Pending
                 </Link>
                 <Link className="button secondary" style={{ width: "auto" }} to={`/superadmin/exam-cycles/${r.id}/results`}>

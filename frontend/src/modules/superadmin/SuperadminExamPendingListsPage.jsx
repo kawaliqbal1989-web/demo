@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
@@ -26,11 +26,22 @@ function formatDateTime(value) {
 function SuperadminExamPendingListsPage() {
   const { examCycleId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams] = useSearchParams();
-  const examCourseContext = {
-    courseId: String(searchParams.get("examCourseId") || searchParams.get("courseId") || "").trim() || null,
-    levelNumber: String(searchParams.get("examLevelNumber") || searchParams.get("levelNumber") || "").trim() || null
-  };
+
+  const examCourseContext = useMemo(() => {
+    const routeStateContext = location.state?.examCycleContext || {};
+    const stateCourseId = String(routeStateContext.examCourseId || routeStateContext.courseId || "").trim();
+    const stateLevelNumber = String(routeStateContext.examLevelNumber || routeStateContext.levelNumber || "").trim();
+
+    const queryCourseId = String(searchParams.get("examCourseId") || searchParams.get("courseId") || "").trim();
+    const queryLevelNumber = String(searchParams.get("examLevelNumber") || searchParams.get("levelNumber") || "").trim();
+
+    return {
+      courseId: stateCourseId || queryCourseId || null,
+      levelNumber: stateLevelNumber || queryLevelNumber || null
+    };
+  }, [location.state, searchParams]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

@@ -846,28 +846,31 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
       : null;
 
     let attempt = latestAttempt;
-    const canStartAttempt2 = Boolean(
-      worksheet.examCycleId &&
-        examEnrollment?.allowSecondAttempt &&
-        (!latestAttempt || latestAttempt.attemptNo < 2)
+    const hasAttempt2 = Boolean(latestAttempt && Number(latestAttempt.attemptNo || 1) >= 2);
+    const latestAttemptStatus = latestAttempt
+      ? deriveAttemptStatus({
+          finalSubmittedAt: latestAttempt.finalSubmittedAt,
+          endsAt: getAttemptTiming({
+            startedAt: latestAttempt.submittedAt || now,
+            timeLimitSeconds: worksheet.timeLimitSeconds
+          }).endsAt,
+          now
+        })
+      : null;
+    const hasTerminalAttempt1 = Boolean(
+      latestAttempt &&
+        Number(latestAttempt.attemptNo || 1) === 1 &&
+        (latestAttempt.finalSubmittedAt || latestAttemptStatus === "TIMED_OUT")
     );
+    const shouldStartAttempt2 = Boolean(
+      worksheet.examCycleId &&
+        (examEnrollment?.allowSecondAttempt || examEnrollment?.attemptOverride === "SECOND_ATTEMPT_GRANTED") &&
+        !hasAttempt2 &&
+        hasTerminalAttempt1
+    );
+    const targetAttemptNo = shouldStartAttempt2 ? 2 : 1;
 
-    if (!attempt || (canStartAttempt2 && latestAttempt?.attemptNo === 1 && !latestAttempt?.finalSubmittedAt)) {
-      if (latestAttempt && latestAttempt.attemptNo === 1 && !latestAttempt.finalSubmittedAt && canStartAttempt2) {
-        await prisma.worksheetSubmission.updateMany({
-          where: {
-            tenantId: req.auth.tenantId,
-            worksheetId,
-            studentId: req.student.id,
-            id: latestAttempt.id
-          },
-          data: {
-            supersededAt: now,
-            supersededByUserId: req.auth.userId
-          }
-        });
-      }
-
+    if (!attempt || shouldStartAttempt2) {
       try {
         const nowIso = now.toISOString();
         const clientSessionId = worksheet.generationMode === "EXAM" ? getClientSessionId(req) : null;
@@ -880,7 +883,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
             tenantId: req.auth.tenantId,
             worksheetId,
             studentId: req.student.id,
-            attemptNo: canStartAttempt2 ? 2 : 1,
+            attemptNo: targetAttemptNo,
             status: "PENDING",
             submittedAt: now,
             submittedAnswers: {
@@ -904,7 +907,7 @@ const startOrResumeStudentWorksheetAttempt = asyncHandler(async (req, res) => {
               tenantId: req.auth.tenantId,
               worksheetId,
               studentId: req.student.id,
-              attemptNo: canStartAttempt2 ? 2 : 1
+              attemptNo: targetAttemptNo
             }
           });
         }
@@ -3409,6 +3412,9 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
       id: true,
       examCycleId: true,
       createdAt: true,
+      allowSecondAttempt: true,
+      attemptOverride: true,
+      secondAttemptGrantedAt: true,
       examCycle: {
         select: {
           id: true,
@@ -3497,14 +3503,22 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
           worksheetId: true,
           id: true,
           submittedAt: true,
-          finalSubmittedAt: true
+          finalSubmittedAt: true,
+          attemptNo: true
         }
       })
     : [];
 
   const latestSubmissionByWorksheetId = new Map();
+  const highestAttemptNoByWorksheetId = new Map();
   for (const s of submissions) {
     const current = latestSubmissionByWorksheetId.get(s.worksheetId);
+    const attemptNo = Number(s.attemptNo || 1);
+    const currentHighestAttemptNo = highestAttemptNoByWorksheetId.get(s.worksheetId) || 0;
+    if (attemptNo > currentHighestAttemptNo) {
+      highestAttemptNoByWorksheetId.set(s.worksheetId, attemptNo);
+    }
+
     if (!current) {
       latestSubmissionByWorksheetId.set(s.worksheetId, s);
       continue;
@@ -3592,16 +3606,33 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
         : "NOT_IN_COMBINED_LIST";
 
       const ws = worksheetsByExamCycleId.get(e.examCycleId) || { PRACTICE: null, EXAM: null };
+      const secondAttemptGranted = Boolean(
+        e.allowSecondAttempt ||
+        e.attemptOverride === "SECOND_ATTEMPT_GRANTED" ||
+        e.secondAttemptGrantedAt
+      );
 
       const mapWorksheet = (worksheet) => {
         if (!worksheet) return null;
         const status = getWorksheetStatus(worksheet);
+        const latestAttemptNo = highestAttemptNoByWorksheetId.get(worksheet.id) || 0;
+        const hasStartedSecondAttempt = latestAttemptNo >= 2;
+        const canStartSecondAttempt = Boolean(
+          secondAttemptGranted &&
+            latestAttemptNo >= 1 &&
+            !hasStartedSecondAttempt &&
+            ["SUBMITTED", "TIMED_OUT"].includes(status)
+        );
         return {
           worksheetId: worksheet.id,
           title: worksheet.title,
           generationMode: worksheet.generationMode,
           durationSeconds: worksheet.timeLimitSeconds || null,
-          status
+          status,
+          secondAttemptGranted,
+          canStartSecondAttempt,
+          hasStartedSecondAttempt,
+          latestAttemptNo
         };
       };
 

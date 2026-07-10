@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { DataTable } from "../../components/DataTable";
 import { LoadingState } from "../../components/LoadingState";
@@ -415,6 +415,14 @@ function StudentExamsPage() {
                     return (
                       <Link className="button secondary" style={{ width: "auto" }} to={`/student/exams/${r.examCycleId}/result`}>
                         View Result
+                      </Link>
+                    );
+                  }
+
+                  if (r.examWorksheet?.canStartSecondAttempt) {
+                    return (
+                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
+                        Start 2nd Attempt
                       </Link>
                     );
                   }

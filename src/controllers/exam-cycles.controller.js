@@ -82,11 +82,18 @@ function normalizeExamCompletionTime(completionTimeSeconds, timeLimitSeconds) {
   );
 }
 
-function deriveCandidateStatus(submission) {
+function deriveCandidateStatus(submission, { now = new Date() } = {}) {
   if (!submission) return "ABSENT";
   const remark = String(submission.remarks || "").trim().toLowerCase();
   const completionTimeSeconds = toNullableNumber(submission.completionTimeSeconds);
   const timeLimitSeconds = toNullableNumber(submission?.worksheet?.timeLimitSeconds);
+  const startedAtMs = submission.submittedAt ? new Date(submission.submittedAt).getTime() : NaN;
+  const nowMs = now.getTime();
+  const hasExpiredByWallClock =
+    Number.isFinite(startedAtMs) &&
+    timeLimitSeconds !== null &&
+    timeLimitSeconds > 0 &&
+    nowMs >= startedAtMs + timeLimitSeconds * 1000;
   const hasReachedTimeLimit =
     completionTimeSeconds !== null &&
     timeLimitSeconds !== null &&
@@ -97,7 +104,7 @@ function deriveCandidateStatus(submission) {
     return remark === "timed out" || hasReachedTimeLimit ? "TIMED_OUT" : "SUBMITTED";
   }
 
-  if (remark === "timed out" || hasReachedTimeLimit) {
+  if (remark === "timed out" || hasReachedTimeLimit || hasExpiredByWallClock) {
     return "TIMED_OUT";
   }
 
@@ -2794,6 +2801,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
   for (const bucket of submissionsByStudentAndLevel.values()) sortSubmissions(bucket);
   for (const bucket of submissionsByStudent.values()) sortSubmissions(bucket);
 
+  const now = new Date();
   const results = scopedItems.map((item) => {
     const e = item.entry;
     const candidates = submissionsByStudentAndLevel.get(`${e.studentId}:${e.enrolledLevelId}`) || [];
@@ -2854,7 +2862,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
         : null;
     const percentage = calculatedPercentage;
     const score = toNullableNumber(sub?.score ?? percentage);
-    const candidateStatus = deriveCandidateStatus(statusSubmission);
+    const candidateStatus = deriveCandidateStatus(statusSubmission, { now });
     const teacher =
       e.sourceTeacherUser ||
       e.student?.currentTeacher ||
@@ -2886,7 +2894,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
       enrollmentEntryId: e.id,
       activeAttemptNo: toNullableNumber(statusSubmission?.attemptNo),
       secondAttemptGranted,
-      attempt2Status: attempt2 ? deriveCandidateStatus(attempt2) : null,
+      attempt2Status: attempt2 ? deriveCandidateStatus(attempt2, { now }) : null,
       canGrantSecondAttempt,
       canRevokeSecondAttempt,
       candidateStatus,

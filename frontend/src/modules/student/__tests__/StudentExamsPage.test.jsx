@@ -147,4 +147,36 @@ describe("StudentExamsPage", () => {
 
     expect(await screen.findByRole("link", { name: /view submission/i })).toBeInTheDocument();
   });
+
+  it("shows View 2nd Submission when second attempt exists and is timed out", async () => {
+    vi.mocked(listStudentExamsOverview).mockResolvedValue({
+      data: {
+        data: [
+          buildExamRow({
+            examWorksheet: {
+              worksheetId: "worksheet-3",
+              title: "Exam Worksheet",
+              generationMode: "EXAM",
+              durationSeconds: 1800,
+              status: "TIMED_OUT",
+              secondAttemptGranted: true,
+              canStartSecondAttempt: false,
+              canResumeSecondAttempt: false,
+              hasActiveSecondAttempt: false,
+              hasStartedSecondAttempt: true,
+              latestAttemptNo: 2
+            }
+          })
+        ]
+      }
+    });
+
+    render(
+      <MemoryRouter>
+        <StudentExamsPage />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByRole("link", { name: /view 2nd submission/i })).toBeInTheDocument();
+  });
 });

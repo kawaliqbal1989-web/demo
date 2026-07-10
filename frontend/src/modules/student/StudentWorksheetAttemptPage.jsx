@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AuthContext } from "../../auth/AuthContext";
 import {
@@ -253,12 +253,32 @@ function StudentWorksheetAttemptPage() {
         const attempts = attemptsRes.status === "fulfilled" && Array.isArray(attemptsRes.value?.data?.data)
           ? attemptsRes.value.data.data
           : [];
-        const terminalAttempt = attempts.find((item) => ["SUBMITTED", "TIMED_OUT"].includes(String(item?.status || "").toUpperCase())) || null;
-        const isTerminalAttempt = !startSecondAttempt && Boolean(terminalAttempt);
-        setAlreadySubmitted(isTerminalAttempt);
-        if (isTerminalAttempt) {
+        const currentAttempt = attempts.reduce((best, item) => {
+          if (!best) {
+            return item;
+          }
+
+          const bestAttemptNo = Number(best?.attemptNo || 1);
+          const candidateAttemptNo = Number(item?.attemptNo || 1);
+          if (candidateAttemptNo > bestAttemptNo) {
+            return item;
+          }
+          if (candidateAttemptNo < bestAttemptNo) {
+            return best;
+          }
+
+          const bestTime = new Date(best?.submittedAt || best?.submitted_at || 0).getTime();
+          const candidateTime = new Date(item?.submittedAt || item?.submitted_at || 0).getTime();
+          return candidateTime > bestTime ? item : best;
+        }, null);
+
+        const currentAttemptStatus = String(currentAttempt?.status || "").toUpperCase();
+        const isCurrentAttemptTerminal = ["SUBMITTED", "TIMED_OUT"].includes(currentAttemptStatus);
+        const shouldBlockForSubmittedAttempt = !startSecondAttempt && isCurrentAttemptTerminal;
+        setAlreadySubmitted(shouldBlockForSubmittedAttempt);
+        if (shouldBlockForSubmittedAttempt) {
           setError(
-            String(terminalAttempt?.status || "").toUpperCase() === "TIMED_OUT"
+            currentAttemptStatus === "TIMED_OUT"
               ? "This worksheet attempt has already ended."
               : "This worksheet is already submitted."
           );

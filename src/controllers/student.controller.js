@@ -3509,10 +3509,10 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
       })
     : [];
 
-  const latestSubmissionByWorksheetId = new Map();
+  const currentSubmissionByWorksheetId = new Map();
   const highestAttemptNoByWorksheetId = new Map();
   for (const s of submissions) {
-    const current = latestSubmissionByWorksheetId.get(s.worksheetId);
+    const current = currentSubmissionByWorksheetId.get(s.worksheetId);
     const attemptNo = Number(s.attemptNo || 1);
     const currentHighestAttemptNo = highestAttemptNoByWorksheetId.get(s.worksheetId) || 0;
     if (attemptNo > currentHighestAttemptNo) {
@@ -3520,14 +3520,23 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
     }
 
     if (!current) {
-      latestSubmissionByWorksheetId.set(s.worksheetId, s);
+      currentSubmissionByWorksheetId.set(s.worksheetId, s);
+      continue;
+    }
+
+    const currentAttemptNo = Number(current.attemptNo || 1);
+    if (attemptNo > currentAttemptNo) {
+      currentSubmissionByWorksheetId.set(s.worksheetId, s);
+      continue;
+    }
+    if (attemptNo < currentAttemptNo) {
       continue;
     }
 
     const currentTime = new Date(current.finalSubmittedAt || current.submittedAt || 0).getTime();
     const nextTime = new Date(s.finalSubmittedAt || s.submittedAt || 0).getTime();
     if (nextTime > currentTime) {
-      latestSubmissionByWorksheetId.set(s.worksheetId, s);
+      currentSubmissionByWorksheetId.set(s.worksheetId, s);
     }
   }
 
@@ -3536,7 +3545,7 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
       return "NOT_STARTED";
     }
 
-    const submission = latestSubmissionByWorksheetId.get(worksheet.id) || null;
+    const submission = currentSubmissionByWorksheetId.get(worksheet.id) || null;
     if (!submission) {
       return "NOT_STARTED";
     }
@@ -3617,6 +3626,8 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
         const status = getWorksheetStatus(worksheet);
         const latestAttemptNo = highestAttemptNoByWorksheetId.get(worksheet.id) || 0;
         const hasStartedSecondAttempt = latestAttemptNo >= 2;
+        const hasActiveSecondAttempt = Boolean(hasStartedSecondAttempt && ["NOT_STARTED", "IN_PROGRESS"].includes(status));
+        const canResumeSecondAttempt = hasActiveSecondAttempt;
         const canStartSecondAttempt = Boolean(
           secondAttemptGranted &&
             latestAttemptNo >= 1 &&
@@ -3631,6 +3642,8 @@ const listStudentExamsOverview = asyncHandler(async (req, res) => {
           status,
           secondAttemptGranted,
           canStartSecondAttempt,
+          canResumeSecondAttempt,
+          hasActiveSecondAttempt,
           hasStartedSecondAttempt,
           latestAttemptNo
         };

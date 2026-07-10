@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { StudentWorksheetAttemptPage } from "../StudentWorksheetAttemptPage";
 
@@ -68,10 +71,15 @@ vi.mock("../../../services/studentPortalService", () => ({
 }));
 
 describe("StudentWorksheetAttemptPage", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.resetAllMocks();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-21T00:00:00.000Z"));
     localStorage.clear();
+
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+    startOrResumeStudentWorksheetAttempt.mockResolvedValue(buildAttemptResponse());
+
     mocks.saveStudentAttemptAnswers.mockResolvedValue({
       data: {
         data: {
@@ -103,8 +111,9 @@ describe("StudentWorksheetAttemptPage", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
   });
 
   it("allows a second-attempt intent to open the worksheet start flow", async () => {
@@ -128,7 +137,55 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.getByText("Addition")).toBeInTheDocument();
   });
 
-  it("shows elapsed timer for regular worksheets", async () => {
+  it("does not block when attempt 1 is timed out and attempt 2 is in progress", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            attemptId: "a1",
+            attemptNo: 1,
+            status: "TIMED_OUT",
+            submittedAt: "2026-02-20T23:00:00.000Z"
+          },
+          {
+            attemptId: "a2",
+            attemptNo: 2,
+            status: "IN_PROGRESS",
+            submittedAt: "2026-02-21T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(buildAttemptResponse({
+      attemptOverrides: {
+        attemptId: "a2",
+        attemptNo: 2,
+        status: "IN_PROGRESS"
+      }
+    }));
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    expect(screen.queryByText(/already submitted\. starting a new attempt is not available\./i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
+    expect(screen.getByText("Addition")).toBeInTheDocument();
+  });
+
+  it("shows countdown timer when worksheet has a hard time limit", async () => {
     render(
       <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
         <Routes>
@@ -143,15 +200,15 @@ describe("StudentWorksheetAttemptPage", () => {
     await flushAsync();
 
     expect(screen.getByText("Addition")).toBeInTheDocument();
-    expect(screen.getByText(/Timer:/)).toBeInTheDocument();
-    expect(screen.queryByText(/Count Down:/)).not.toBeInTheDocument();
-    expect(screen.getAllByText("0:00").length).toBeGreaterThan(0);
+    expect(screen.getByText(/Count Down:/)).toBeInTheDocument();
+    expect(screen.queryByText(/Timer:/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("10:00").length).toBeGreaterThan(0);
 
     act(() => {
       vi.advanceTimersByTime(5000);
     });
 
-    expect(screen.getByText("0:05")).toBeInTheDocument();
+    expect(screen.getByText("9:55")).toBeInTheDocument();
   });
 
   it("shows countdown for practice worksheets", async () => {

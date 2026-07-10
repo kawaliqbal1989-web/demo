@@ -34,7 +34,10 @@ function buildExamRow(overrides = {}) {
       status: "SUBMITTED",
       secondAttemptGranted: false,
       canStartSecondAttempt: false,
-      hasStartedSecondAttempt: false
+      canResumeSecondAttempt: false,
+      hasActiveSecondAttempt: false,
+      hasStartedSecondAttempt: false,
+      latestAttemptNo: 1
     },
     createdAt: "2026-07-09T08:00:00.000Z",
     ...overrides
@@ -44,6 +47,41 @@ function buildExamRow(overrides = {}) {
 describe("StudentExamsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("shows Resume 2nd Attempt when attempt 1 is timed out and attempt 2 is in progress", async () => {
+    vi.mocked(listStudentExamsOverview).mockResolvedValue({
+      data: {
+        data: [
+          buildExamRow({
+            examWorksheet: {
+              worksheetId: "worksheet-1",
+              title: "Exam Worksheet",
+              generationMode: "EXAM",
+              durationSeconds: 1800,
+              status: "IN_PROGRESS",
+              secondAttemptGranted: true,
+              canStartSecondAttempt: false,
+              canResumeSecondAttempt: true,
+              hasActiveSecondAttempt: true,
+              hasStartedSecondAttempt: true,
+              latestAttemptNo: 2
+            }
+          })
+        ]
+      }
+    });
+
+    render(
+      <MemoryRouter>
+        <StudentExamsPage />
+      </MemoryRouter>
+    );
+
+    const resumeLink = await screen.findByRole("link", { name: /resume 2nd attempt/i });
+    expect(resumeLink).toBeInTheDocument();
+    expect(resumeLink.getAttribute("href")).toBe("/student/worksheets/worksheet-1?startSecondAttempt=1");
+    expect(screen.queryByRole("link", { name: /view submission/i })).not.toBeInTheDocument();
   });
 
   it("shows Start 2nd Attempt when a second-attempt grant is available and attempt 2 has not started", async () => {
@@ -59,7 +97,10 @@ describe("StudentExamsPage", () => {
               status: "SUBMITTED",
               secondAttemptGranted: true,
               canStartSecondAttempt: true,
-              hasStartedSecondAttempt: false
+              canResumeSecondAttempt: false,
+              hasActiveSecondAttempt: false,
+              hasStartedSecondAttempt: false,
+              latestAttemptNo: 1
             }
           })
         ]
@@ -88,7 +129,10 @@ describe("StudentExamsPage", () => {
               status: "SUBMITTED",
               secondAttemptGranted: false,
               canStartSecondAttempt: false,
-              hasStartedSecondAttempt: false
+              canResumeSecondAttempt: false,
+              hasActiveSecondAttempt: false,
+              hasStartedSecondAttempt: false,
+              latestAttemptNo: 1
             }
           })
         ]

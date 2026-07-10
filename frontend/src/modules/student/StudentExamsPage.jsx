@@ -419,6 +419,14 @@ function StudentExamsPage() {
                     );
                   }
 
+                  if (r.examWorksheet?.canResumeSecondAttempt || r.examWorksheet?.hasActiveSecondAttempt) {
+                    return (
+                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}?startSecondAttempt=1`}>
+                        {r.attemptStatus === "IN_PROGRESS" ? "Resume 2nd Attempt" : "Continue Attempt"}
+                      </Link>
+                    );
+                  }
+
                   if (r.examWorksheet?.canStartSecondAttempt) {
                     return (
                       <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}?startSecondAttempt=1`}>
@@ -454,7 +462,7 @@ function StudentExamsPage() {
                   if (["SUBMITTED", "TIMED_OUT"].includes(r.attemptStatus)) {
                     return (
                       <Link className="button secondary" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
-                        View Submission
+                        {r.examWorksheet?.hasStartedSecondAttempt ? "View 2nd Submission" : "View Submission"}
                       </Link>
                     );
                   }

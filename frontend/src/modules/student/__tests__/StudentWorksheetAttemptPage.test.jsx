@@ -50,12 +50,18 @@ function buildAttemptResponse({
 
 const mocks = vi.hoisted(() => ({
   getStudentWorksheet: vi.fn(),
+  getStudentMe: vi.fn(),
+  getStudentMyCourse: vi.fn(),
+  listStudentWorksheetAttempts: vi.fn(),
   saveStudentAttemptAnswers: vi.fn(),
   submitStudentAttempt: vi.fn()
 }));
 
 vi.mock("../../../services/studentPortalService", () => ({
   getStudentWorksheet: mocks.getStudentWorksheet,
+  getStudentMe: mocks.getStudentMe,
+  getStudentMyCourse: mocks.getStudentMyCourse,
+  listStudentWorksheetAttempts: mocks.listStudentWorksheetAttempts,
   startOrResumeStudentWorksheetAttempt: vi.fn(async () => buildAttemptResponse()),
   saveStudentAttemptAnswers: mocks.saveStudentAttemptAnswers,
   submitStudentAttempt: mocks.submitStudentAttempt
@@ -91,11 +97,35 @@ describe("StudentWorksheetAttemptPage", () => {
         }
       }
     });
+    mocks.getStudentMe.mockResolvedValue({ data: { data: { id: "s1" } } });
+    mocks.getStudentMyCourse.mockResolvedValue({ data: { data: { id: "c1" } } });
+    mocks.listStudentWorksheetAttempts.mockResolvedValue({ data: { data: [] } });
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+  });
+
+  it("allows a second-attempt intent to open the worksheet start flow", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(buildAttemptResponse());
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
+    expect(screen.getByText("Addition")).toBeInTheDocument();
   });
 
   it("shows elapsed timer for regular worksheets", async () => {

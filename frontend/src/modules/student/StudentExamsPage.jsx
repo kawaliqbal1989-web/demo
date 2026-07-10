@@ -421,7 +421,7 @@ function StudentExamsPage() {
 
                   if (r.examWorksheet?.canStartSecondAttempt) {
                     return (
-                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
+                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}?startSecondAttempt=1`}>
                         Start 2nd Attempt
                       </Link>
                     );

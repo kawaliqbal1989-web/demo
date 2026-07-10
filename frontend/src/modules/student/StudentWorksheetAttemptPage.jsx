@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { AuthContext } from "../../auth/AuthContext";
 import {
   getStudentMe,
@@ -161,6 +161,7 @@ function formatCourseLevelLabel({ courseLevelLabel, courseCode, levelTitle, cour
 
 function StudentWorksheetAttemptPage() {
   const { worksheetId } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const auth = useContext(AuthContext);
   const logout = auth?.logout;
@@ -194,6 +195,7 @@ function StudentWorksheetAttemptPage() {
     }
   });
 
+  const startSecondAttempt = new URLSearchParams(location.search).get("startSecondAttempt") === "1";
   const attemptId = attempt?.attemptId || null;
   const serverOffsetMsRef = useRef(0);
   const versionRef = useRef(0);
@@ -252,7 +254,7 @@ function StudentWorksheetAttemptPage() {
           ? attemptsRes.value.data.data
           : [];
         const terminalAttempt = attempts.find((item) => ["SUBMITTED", "TIMED_OUT"].includes(String(item?.status || "").toUpperCase())) || null;
-        const isTerminalAttempt = Boolean(terminalAttempt);
+        const isTerminalAttempt = !startSecondAttempt && Boolean(terminalAttempt);
         setAlreadySubmitted(isTerminalAttempt);
         if (isTerminalAttempt) {
           setError(
@@ -282,7 +284,7 @@ function StudentWorksheetAttemptPage() {
         autoSubmitRetryTimerRef.current = null;
       }
     };
-  }, [worksheetId]);
+  }, [worksheetId, startSecondAttempt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -316,7 +318,7 @@ function StudentWorksheetAttemptPage() {
       return;
     }
 
-    if (alreadySubmitted) {
+    if (alreadySubmitted && !startSecondAttempt) {
       setError("This worksheet attempt is no longer available.");
       setLoading(false);
       return;
@@ -395,7 +397,7 @@ function StudentWorksheetAttemptPage() {
     return () => {
       cancelled = true;
     };
-  }, [alreadySubmitted, startConfirmed, worksheetId, worksheetPreview]);
+  }, [alreadySubmitted, startConfirmed, worksheetId, worksheetPreview, startSecondAttempt]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -935,7 +937,7 @@ function StudentWorksheetAttemptPage() {
     const previewTimeLimit = Number.isFinite(Number(worksheetPreview.timeLimitSeconds))
       ? formatSeconds(worksheetPreview.timeLimitSeconds)
       : "No limit";
-    const isExamWorksheetAlreadySubmitted = alreadySubmitted;
+    const isExamWorksheetAlreadySubmitted = alreadySubmitted && !startSecondAttempt;
 
     return (
       <div className="card" style={{ display: "grid", gap: 16, maxWidth: 760, margin: "0 auto" }}>

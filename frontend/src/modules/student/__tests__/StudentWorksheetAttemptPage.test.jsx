@@ -185,6 +185,64 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.getByText("Addition")).toBeInTheDocument();
   });
 
+  it("opens timed-out second attempt in read-only submission mode", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            attemptId: "a1",
+            attemptNo: 1,
+            status: "SUBMITTED",
+            submittedAt: "2026-02-20T22:00:00.000Z"
+          },
+          {
+            attemptId: "a2",
+            attemptNo: 2,
+            status: "TIMED_OUT",
+            submittedAt: "2026-02-21T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValue(
+      buildAttemptResponse({
+        attemptOverrides: {
+          attemptId: "a2",
+          attemptNo: 2,
+          status: "TIMED_OUT",
+          attemptTimerMode: "COUNTDOWN"
+        },
+        answersByQuestionId: {
+          q1: { value: "44" }
+        },
+        worksheetOverrides: {
+          attemptTimerMode: "COUNTDOWN"
+        },
+        result: null
+      })
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?viewSubmission=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+    await flushAsync();
+
+    expect(screen.queryByText(/already submitted\. starting a new attempt is not available\./i)).not.toBeInTheDocument();
+    expect(screen.queryByText("I Understand, Start Worksheet")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Time Up" })).toBeInTheDocument();
+    expect(screen.getByText(/Attempt ended due to time limit\./i)).toBeInTheDocument();
+    expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
+  });
+
   it("shows countdown timer when worksheet has a hard time limit", async () => {
     render(
       <MemoryRouter initialEntries={["/student/worksheets/w1"]}>

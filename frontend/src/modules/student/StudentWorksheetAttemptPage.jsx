@@ -196,6 +196,7 @@ function StudentWorksheetAttemptPage() {
   });
 
   const startSecondAttempt = new URLSearchParams(location.search).get("startSecondAttempt") === "1";
+  const viewSubmissionMode = new URLSearchParams(location.search).get("viewSubmission") === "1";
   const attemptId = attempt?.attemptId || null;
   const serverOffsetMsRef = useRef(0);
   const versionRef = useRef(0);
@@ -226,7 +227,7 @@ function StudentWorksheetAttemptPage() {
     setWorksheetPreview(null);
     setAttempt(null);
     setAnswersByQuestionId({});
-    setStartConfirmed(false);
+    setStartConfirmed(viewSubmissionMode);
     setAlreadySubmitted(false);
     autoSubmitTriggeredRef.current = false;
     autoSubmitRetryCountRef.current = 0;
@@ -274,7 +275,7 @@ function StudentWorksheetAttemptPage() {
 
         const currentAttemptStatus = String(currentAttempt?.status || "").toUpperCase();
         const isCurrentAttemptTerminal = ["SUBMITTED", "TIMED_OUT"].includes(currentAttemptStatus);
-        const shouldBlockForSubmittedAttempt = !startSecondAttempt && isCurrentAttemptTerminal;
+        const shouldBlockForSubmittedAttempt = !startSecondAttempt && !viewSubmissionMode && isCurrentAttemptTerminal;
         setAlreadySubmitted(shouldBlockForSubmittedAttempt);
         if (shouldBlockForSubmittedAttempt) {
           setError(
@@ -304,7 +305,7 @@ function StudentWorksheetAttemptPage() {
         autoSubmitRetryTimerRef.current = null;
       }
     };
-  }, [worksheetId, startSecondAttempt]);
+  }, [worksheetId, startSecondAttempt, viewSubmissionMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -338,7 +339,7 @@ function StudentWorksheetAttemptPage() {
       return;
     }
 
-    if (alreadySubmitted && !startSecondAttempt) {
+    if (alreadySubmitted && !startSecondAttempt && !viewSubmissionMode) {
       setError("This worksheet attempt is no longer available.");
       setLoading(false);
       return;
@@ -361,6 +362,7 @@ function StudentWorksheetAttemptPage() {
                 attemptId: payload.attemptId,
                 worksheetId: payload.worksheetId,
                 status: payload.status,
+                attemptNo: payload.attemptNo,
                 startedAt: payload.startedAt,
                 endsAt: payload.endsAt,
                 serverNow: payload.serverNow,
@@ -417,7 +419,7 @@ function StudentWorksheetAttemptPage() {
     return () => {
       cancelled = true;
     };
-  }, [alreadySubmitted, startConfirmed, worksheetId, worksheetPreview, startSecondAttempt]);
+  }, [alreadySubmitted, startConfirmed, worksheetId, worksheetPreview, startSecondAttempt, viewSubmissionMode]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -957,7 +959,7 @@ function StudentWorksheetAttemptPage() {
     const previewTimeLimit = Number.isFinite(Number(worksheetPreview.timeLimitSeconds))
       ? formatSeconds(worksheetPreview.timeLimitSeconds)
       : "No limit";
-    const isExamWorksheetAlreadySubmitted = alreadySubmitted && !startSecondAttempt;
+    const isExamWorksheetAlreadySubmitted = alreadySubmitted && !startSecondAttempt && !viewSubmissionMode;
 
     return (
       <div className="card" style={{ display: "grid", gap: 16, maxWidth: 760, margin: "0 auto" }}>
@@ -1064,6 +1066,7 @@ function StudentWorksheetAttemptPage() {
   const submittedAttemptedTime = result?.resultBreakdown?.completionTime;
   const submittedAtText = result?.submittedAt ? new Date(result.submittedAt).toLocaleString() : null;
   const isResultEmbargoed = Boolean(result?.resultEmbargoed);
+  const terminalStatusWithoutResult = !result && (attemptStatus === "TIMED_OUT" || attemptStatus === "SUBMITTED");
   const headerScoreText = Number.isFinite(Number(submittedCorrect)) && Number.isFinite(Number(submittedTotal))
     ? `${submittedCorrect}/${submittedTotal}`
     : (scoreSoFar.totalWithKey ? `${scoreSoFar.correct}/${scoreSoFar.totalWithKey}` : null);
@@ -1384,6 +1387,33 @@ function StudentWorksheetAttemptPage() {
               📄 Download PDF
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {terminalStatusWithoutResult ? (
+        <div className="card" role="status" aria-live="polite">
+          <h3 style={{ marginTop: 0 }}>{attemptStatus === "TIMED_OUT" ? "Time Up" : "Submitted"}</h3>
+          <div style={{ display: "grid", gap: 8 }}>
+            <p style={{ margin: 0 }}>
+              {attemptStatus === "TIMED_OUT"
+                ? "Attempt ended due to time limit."
+                : "This attempt is finalized and available in read-only mode."}
+            </p>
+            <p style={{ margin: 0 }}>
+              Attempt No: <strong>{Number(attempt?.attemptNo || 1)}</strong>
+            </p>
+            <p style={{ margin: 0 }}>
+              Status: <strong>{statusText}</strong>
+            </p>
+            <p style={{ margin: 0 }}>
+              Answered: <strong>{answeredCount}</strong> · Unanswered: <strong>{Math.max(0, totalQuestions - answeredCount)}</strong>
+            </p>
+            {timeLimitSeconds ? (
+              <p style={{ margin: 0 }}>
+                Taken Time: <strong>{attemptStatus === "TIMED_OUT" ? totalTimeText : timerText}</strong>
+              </p>
+            ) : null}
+          </div>
         </div>
       ) : null}
 

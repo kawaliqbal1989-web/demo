@@ -145,7 +145,9 @@ describe("StudentExamsPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("link", { name: /view submission/i })).toBeInTheDocument();
+    const viewSubmissionLink = await screen.findByRole("link", { name: /view submission/i });
+    expect(viewSubmissionLink).toBeInTheDocument();
+    expect(viewSubmissionLink.getAttribute("href")).toBe("/student/worksheets/worksheet-2?viewSubmission=1");
   });
 
   it("shows View 2nd Submission when second attempt exists and is timed out", async () => {
@@ -177,6 +179,8 @@ describe("StudentExamsPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("link", { name: /view 2nd submission/i })).toBeInTheDocument();
+    const viewSecondSubmissionLink = await screen.findByRole("link", { name: /view 2nd submission/i });
+    expect(viewSecondSubmissionLink).toBeInTheDocument();
+    expect(viewSecondSubmissionLink.getAttribute("href")).toBe("/student/worksheets/worksheet-3?viewSubmission=1");
   });
 });

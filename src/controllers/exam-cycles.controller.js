@@ -138,6 +138,84 @@ function deriveResultOutcome({ candidateStatus, percentage }) {
   return "SCORED";
 }
 
+function deriveSavedAnswerMetrics(submission) {
+  const questions = Array.isArray(submission?.worksheet?.questions) ? submission.worksheet.questions : [];
+  if (!questions.length) {
+    return null;
+  }
+
+  const totalQuestions = questions.length;
+  const questionNumberToCorrect = new Map();
+  const questionIdToNumber = new Map();
+  for (const question of questions) {
+    const questionNumber = Number(question?.questionNumber);
+    if (!Number.isFinite(questionNumber)) {
+      continue;
+    }
+    questionNumberToCorrect.set(questionNumber, Number(question?.correctAnswer));
+    if (question?.id) {
+      questionIdToNumber.set(String(question.id), questionNumber);
+    }
+  }
+
+  const answersByQuestionNumber = new Map();
+  const saved = submission?.submittedAnswers;
+
+  if (Array.isArray(saved)) {
+    for (const item of saved) {
+      const questionNumber = Number(item?.questionNumber);
+      const answer = Number(item?.answer);
+      if (!Number.isFinite(questionNumber) || !Number.isFinite(answer)) {
+        continue;
+      }
+      if (!questionNumberToCorrect.has(questionNumber)) {
+        continue;
+      }
+      answersByQuestionNumber.set(questionNumber, answer);
+    }
+  } else if (saved && typeof saved === "object") {
+    const byId = saved.answersByQuestionId;
+    if (byId && typeof byId === "object" && !Array.isArray(byId)) {
+      for (const [questionId, valueObj] of Object.entries(byId)) {
+        const questionNumber = questionIdToNumber.get(String(questionId));
+        if (!Number.isFinite(questionNumber)) {
+          continue;
+        }
+        const answer = Number(valueObj?.value);
+        if (!Number.isFinite(answer)) {
+          continue;
+        }
+        answersByQuestionNumber.set(questionNumber, answer);
+      }
+    }
+  }
+
+  let correctCount = 0;
+  for (const [questionNumber, answer] of answersByQuestionNumber.entries()) {
+    const key = questionNumberToCorrect.get(questionNumber);
+    if (!Number.isFinite(key)) {
+      continue;
+    }
+    if (Math.trunc(answer) === Math.trunc(key)) {
+      correctCount += 1;
+    }
+  }
+
+  const answeredCount = answersByQuestionNumber.size;
+  const wrongCount = Math.max(0, answeredCount - correctCount);
+  const unansweredCount = Math.max(0, totalQuestions - answeredCount);
+  const percentage = totalQuestions > 0 ? roundPercentage((correctCount / totalQuestions) * 100) : 0;
+
+  return {
+    totalQuestions,
+    correctCount,
+    wrongCount,
+    unansweredCount,
+    percentage,
+    answeredCount
+  };
+}
+
 function compareExamRankRows(left, right) {
   const leftScore = toNullableNumber(left.score) ?? -Infinity;
   const rightScore = toNullableNumber(right.score) ?? -Infinity;
@@ -2763,7 +2841,20 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
           submittedAt: true,
           createdAt: true,
           remarks: true,
-          worksheet: { select: { id: true, levelId: true, timeLimitSeconds: true } }
+          worksheet: {
+            select: {
+              id: true,
+              levelId: true,
+              timeLimitSeconds: true,
+              questions: {
+                select: {
+                  id: true,
+                  questionNumber: true,
+                  correctAnswer: true
+                }
+              }
+            }
+          }
         }
       })
     : [];
@@ -2845,8 +2936,8 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     const totalQuestions = toNullableNumber(sub?.totalQuestions);
     const submittedAnswerCount = Array.isArray(sub?.submittedAnswers)
       ? sub.submittedAnswers.length
-      : sub?.submittedAnswers && typeof sub.submittedAnswers === "object"
-        ? Object.keys(sub.submittedAnswers).length
+      : sub?.submittedAnswers?.answersByQuestionId && typeof sub.submittedAnswers.answersByQuestionId === "object"
+        ? Object.keys(sub.submittedAnswers.answersByQuestionId).length
         : null;
     const unansweredCount =
       totalQuestions !== null && submittedAnswerCount !== null
@@ -2863,6 +2954,31 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     const percentage = calculatedPercentage;
     const score = toNullableNumber(sub?.score ?? percentage);
     const candidateStatus = deriveCandidateStatus(statusSubmission, { now });
+    const fallbackMetrics =
+      sub &&
+      ["TIMED_OUT", "SUBMITTED"].includes(candidateStatus) &&
+      (score === null || correctCount === null || totalQuestions === null)
+        ? deriveSavedAnswerMetrics(sub)
+        : null;
+    const resolvedCorrectCount = correctCount ?? fallbackMetrics?.correctCount ?? null;
+    const resolvedTotalQuestions = totalQuestions ?? fallbackMetrics?.totalQuestions ?? null;
+    const resolvedWrongCount = wrongCount ?? fallbackMetrics?.wrongCount ?? null;
+    const resolvedUnansweredCount = unansweredCount ?? fallbackMetrics?.unansweredCount ?? null;
+    const resolvedPercentage = percentage ?? fallbackMetrics?.percentage ?? null;
+    const resolvedScore = score ?? resolvedPercentage;
+    const resolvedCompletionTime = sub
+      ? (() => {
+          const normalized = normalizeExamCompletionTime(sub.completionTimeSeconds, sub.worksheet?.timeLimitSeconds);
+          if (normalized !== null) {
+            return normalized;
+          }
+          const limit = toNullableNumber(sub?.worksheet?.timeLimitSeconds);
+          if (candidateStatus === "TIMED_OUT" && limit !== null && limit > 0) {
+            return Math.floor(limit);
+          }
+          return null;
+        })()
+      : null;
     const teacher =
       e.sourceTeacherUser ||
       e.student?.currentTeacher ||
@@ -2898,17 +3014,15 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
       canGrantSecondAttempt,
       canRevokeSecondAttempt,
       candidateStatus,
-      resultOutcome: deriveResultOutcome({ candidateStatus, percentage }),
+      resultOutcome: deriveResultOutcome({ candidateStatus, percentage: resolvedPercentage }),
       rank: null,
-      score,
-      percentage,
-      correctCount,
-      wrongCount,
-      unansweredCount,
-      totalQuestions,
-      completionTimeSeconds: sub
-        ? normalizeExamCompletionTime(sub.completionTimeSeconds, sub.worksheet?.timeLimitSeconds)
-        : null,
+      score: resolvedScore,
+      percentage: resolvedPercentage,
+      correctCount: resolvedCorrectCount,
+      wrongCount: resolvedWrongCount,
+      unansweredCount: resolvedUnansweredCount,
+      totalQuestions: resolvedTotalQuestions,
+      completionTimeSeconds: resolvedCompletionTime,
       submittedAt: statusSubmission?.finalSubmittedAt ?? null,
       worksheetId: sub?.worksheet?.id ?? null,
       resultConflict: hasDuplicateFinalizedAttemptNo || hasLevelMismatchSubmission || hasAttemptLimitViolation,

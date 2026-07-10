@@ -461,7 +461,7 @@ function StudentExamsPage() {
 
                   if (["SUBMITTED", "TIMED_OUT"].includes(r.attemptStatus)) {
                     return (
-                      <Link className="button secondary" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
+                      <Link className="button secondary" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}?viewSubmission=1`}>
                         {r.examWorksheet?.hasStartedSecondAttempt ? "View 2nd Submission" : "View Submission"}
                       </Link>
                     );

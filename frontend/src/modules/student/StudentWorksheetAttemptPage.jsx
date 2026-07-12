@@ -96,19 +96,21 @@ function getUnifiedExamDisplayRows(q) {
 
   if (terms.length) {
     return terms.map((term, index) => {
-      if (index === 0) return String(term);
+      if (index === 0) return { operator: "", value: String(term) };
       const rowOperation = operation === "MIX"
         ? String(Array.isArray(operands.operators) ? operands.operators[index - 1] || "ADD" : "ADD").toUpperCase()
         : operation;
-      if (rowOperation === "ADD" || rowOperation === "COLUMN_SUM") {
-        return term < 0 ? `- ${Math.abs(term)}` : `+ ${term}`;
+      if (operation !== "MIX" && (rowOperation === "ADD" || rowOperation === "COLUMN_SUM")) {
+        return { operator: "", value: String(term) };
       }
-      if (rowOperation === "SUB") return `- ${Math.abs(term)}`;
-      return `${symbols[rowOperation] || rowOperation} ${term}`.trim();
+      if (rowOperation === "SUB") return { operator: "-", value: String(Math.abs(term)) };
+      return { operator: symbols[rowOperation] || rowOperation, value: String(term) };
     });
   }
 
-  return typeof operands.expr === "string" && operands.expr.trim() ? [operands.expr.trim()] : [];
+  return typeof operands.expr === "string" && operands.expr.trim()
+    ? [{ operator: "", value: operands.expr.trim(), expression: true }]
+    : [];
 }
 
 function formatQuestionPrompt(q) {
@@ -208,6 +210,7 @@ function StudentWorksheetAttemptPage() {
   const [startConfirmed, setStartConfirmed] = useState(false);
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
   const [examModeWarning, setExamModeWarning] = useState("");
+  const [dedicatedHeaderHeight, setDedicatedHeaderHeight] = useState(0);
   const [questionFontPx, setQuestionFontPx] = useState(() => {
     try {
       const raw = localStorage.getItem("student_ws_question_font_px");
@@ -241,6 +244,7 @@ function StudentWorksheetAttemptPage() {
   const latestAnswersRef = useRef({});
   const tabIdRef = useRef(`${Date.now()}_${Math.floor(Math.random() * 100000)}`);
   const examLostVisibilityRef = useRef(false);
+  const dedicatedHeaderRef = useRef(null);
 
   useEffect(() => {
     latestAnswersRef.current = answersByQuestionId;
@@ -603,6 +607,24 @@ function StudentWorksheetAttemptPage() {
   }, [questionRows]);
   const useUnifiedExamGrid = isDedicatedExamMode && isOfficialExamWorksheet;
 
+  useEffect(() => {
+    if (!useUnifiedExamGrid) {
+      setDedicatedHeaderHeight(0);
+      return;
+    }
+    const header = dedicatedHeaderRef.current;
+    if (!header) return;
+    const measure = () => setDedicatedHeaderHeight(Math.ceil(header.getBoundingClientRect().height));
+    measure();
+    const observer = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    observer?.observe(header);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [useUnifiedExamGrid]);
+
   const isWrongAnswer = (q) => {
     if (!result) return false;
     const qid = q?.questionId || q?.id;
@@ -682,10 +704,37 @@ function StudentWorksheetAttemptPage() {
       <div key={qid || q.questionNumber} className="card ws-colsum-card" data-qid={qid || undefined}>
         <div className="ws-colsum-card__num">{q.questionNumber}</div>
         <div className="ws-colsum-card__mid">
-          <div className="ws-colsum-card__numbers" style={{ fontSize: questionFontPx }} aria-label={`Question ${q.questionNumber} column`}>
-            {displayRows.map((row, idx) => <div key={idx}>{row}</div>)}
-          </div>
-          <div className="ws-colsum-card__line" />
+          {useUnifiedExamGrid ? (
+            <div
+              data-exam-arithmetic-block="true"
+              style={{ display: "inline-grid", justifySelf: "center", minWidth: "56px", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}
+            >
+              <div
+                className="ws-colsum-card__numbers"
+                style={{ display: "grid", width: "auto", maxWidth: "none", margin: 0, alignItems: "stretch", fontSize: questionFontPx, textAlign: "right" }}
+                aria-label={`Question ${q.questionNumber} column`}
+              >
+                {displayRows.map((row, idx) => (
+                  <div
+                    key={idx}
+                    data-exam-arithmetic-row="true"
+                    style={{ display: "grid", gridTemplateColumns: "1.25em minmax(2ch, auto)", alignItems: "baseline" }}
+                  >
+                    <span data-exam-operator="true" style={{ textAlign: "right" }}>{row.operator}</span>
+                    <span data-exam-value="true" style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{row.value}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="ws-colsum-card__line" data-exam-arithmetic-line="true" style={{ width: "100%", margin: "6px 0 0" }} />
+            </div>
+          ) : (
+            <>
+              <div className="ws-colsum-card__numbers" style={{ fontSize: questionFontPx }} aria-label={`Question ${q.questionNumber} column`}>
+                {displayRows.map((row, idx) => <div key={idx}>{row}</div>)}
+              </div>
+              <div className="ws-colsum-card__line" />
+            </>
+          )}
         </div>
 
         <div>
@@ -1375,14 +1424,21 @@ function StudentWorksheetAttemptPage() {
       className={useExamPageStyling ? "ws-attempt-page ws-attempt-page--exam" : "ws-attempt-page"}
       style={isDedicatedExamMode ? { position: "fixed", inset: 0, zIndex: 10000, width: "100vw", height: "100dvh", minHeight: "100vh", overflowY: "auto", background: "var(--color-bg-primary)" } : undefined}
     >
-      <div className={useExamPageStyling ? "ws-attempt-page__panel" : ""} style={{ display: "grid", gap: 12, paddingBottom: 110 }}>
-        <div className={useExamPageStyling ? "ws-exam-shell" : ""}>
+      <div
+        className={useExamPageStyling ? "ws-attempt-page__panel" : ""}
+        style={{ display: "grid", gap: 12, paddingBottom: 110, paddingTop: useUnifiedExamGrid ? dedicatedHeaderHeight || 96 : undefined }}
+      >
+        <div className={useExamPageStyling ? "ws-exam-shell" : ""} style={useUnifiedExamGrid ? { overflow: "visible" } : undefined}>
         <div
+          ref={dedicatedHeaderRef}
           className={useExamPageStyling ? "card ws-exam-header" : "card"}
           style={{
-            position: useExamPageStyling ? "static" : "sticky",
-            top: useExamPageStyling ? "auto" : 0,
-            zIndex: 5,
+            position: useUnifiedExamGrid ? "fixed" : useExamPageStyling ? "static" : "sticky",
+            top: useUnifiedExamGrid ? 0 : useExamPageStyling ? "auto" : 0,
+            left: useUnifiedExamGrid ? 0 : undefined,
+            right: useUnifiedExamGrid ? 0 : undefined,
+            width: useUnifiedExamGrid ? "100vw" : undefined,
+            zIndex: useUnifiedExamGrid ? 10001 : 5,
             display: "flex",
             justifyContent: "space-between",
             gap: 12,

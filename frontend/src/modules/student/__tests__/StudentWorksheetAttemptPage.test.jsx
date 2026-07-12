@@ -175,11 +175,23 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(grid).toBeInTheDocument();
     expect(grid.querySelectorAll(".ws-colsum-card")).toHaveLength(5);
     expect(grid.querySelectorAll(":scope > .card:not(.ws-colsum-card)")).toHaveLength(0);
-    expect(screen.getByText("× 20")).toBeInTheDocument();
-    expect(screen.getByText("÷ 4")).toBeInTheDocument();
-    expect(screen.getAllByText("+ 10").length).toBeGreaterThan(0);
-    expect(screen.getByText("× 2")).toBeInTheDocument();
-    expect(screen.getAllByText("- 4").length).toBeGreaterThan(0);
+    const addBlock = grid.querySelector('[data-qid="q1"] [data-exam-arithmetic-block="true"]');
+    const addRows = [...addBlock.querySelectorAll('[data-exam-arithmetic-row="true"]')];
+    const addValues = [...addBlock.querySelectorAll('[data-exam-value="true"]')];
+    expect(addBlock).toHaveStyle({ display: "inline-grid", justifySelf: "center", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" });
+    expect(addValues.map((value) => value.textContent)).toEqual(["8", "10", "6"]);
+    expect(addValues.every((value) => value.style.textAlign === "right")).toBe(true);
+    expect(addValues.every((value) => value.style.fontVariantNumeric === "tabular-nums")).toBe(true);
+    expect(addRows.every((row) => row.style.gridTemplateColumns === "1.25em minmax(2ch, auto)")).toBe(true);
+    expect([...addBlock.querySelectorAll('[data-exam-operator="true"]')].every((operator) => operator.textContent === "")).toBe(true);
+    expect(addBlock.querySelector('[data-exam-arithmetic-line="true"]')?.parentElement).toBe(addBlock);
+
+    const mulOperators = [...grid.querySelectorAll('[data-qid="q3"] [data-exam-operator="true"]')].map((node) => node.textContent);
+    const divOperators = [...grid.querySelectorAll('[data-qid="q4"] [data-exam-operator="true"]')].map((node) => node.textContent);
+    const mixOperators = [...grid.querySelectorAll('[data-qid="q5"] [data-exam-operator="true"]')].map((node) => node.textContent);
+    expect(mulOperators).toEqual(["", "×", "×", "×"]);
+    expect(divOperators).toEqual(["", "÷"]);
+    expect(mixOperators).toEqual(["", "+", "×", "-"]);
     questions.forEach((question) => {
       expect(screen.getByLabelText(`Answer for question ${question.questionNumber}`)).toBeInTheDocument();
     });
@@ -187,6 +199,7 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.queryByText(/Flagged: 0/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /back to worksheets/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Font")).not.toBeInTheDocument();
+    expect(document.querySelector(".ws-exam-header")).toHaveStyle({ position: "fixed", top: "0px", left: "0px", right: "0px", width: "100vw" });
     expect(screen.getAllByRole("button", { name: "Force Exit & Submit" })).toHaveLength(1);
   });
 

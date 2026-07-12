@@ -140,6 +140,80 @@ describe("StudentWorksheetAttemptPage", () => {
 
     expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
     expect(screen.getByText("Addition")).toBeInTheDocument();
+    expect(document.querySelector(".ws-colsum-grid")).toBeInTheDocument();
+    expect(document.querySelectorAll(".ws-colsum-card")).toHaveLength(2);
+  });
+
+  it("uses the unified compact grid for every dedicated official exam operation", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+    const questions = [
+      { questionId: "q1", questionNumber: 1, operation: "ADD", operands: { nums: [8, 10, 6] } },
+      { questionId: "q2", questionNumber: 2, operation: "SUB", operands: { nums: [20, 5, 3] } },
+      { questionId: "q3", questionNumber: 3, operation: "MUL", operands: { nums: [3, 1, 20, 4] } },
+      { questionId: "q4", questionNumber: 4, operation: "DIV", operands: { nums: [20, 4] } },
+      { questionId: "q5", questionNumber: 5, operation: "MIX", operands: { nums: [8, 10, 2, 4], operators: ["ADD", "MUL", "SUB"] } }
+    ];
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: { data: { id: "w1", title: "Mixed Exam", generationMode: "EXAM", timeLimitSeconds: 600, questions } }
+    });
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(buildAttemptResponse({
+      worksheetOverrides: { title: "Mixed Exam", generationMode: "EXAM", questions }
+    }));
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?examMode=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    await flushAsync();
+    fireEvent.click(screen.getByText("Start Exam"));
+    await flushAsync();
+
+    const grid = document.querySelector(".ws-colsum-grid");
+    expect(grid).toBeInTheDocument();
+    expect(grid.querySelectorAll(".ws-colsum-card")).toHaveLength(5);
+    expect(grid.querySelectorAll(":scope > .card:not(.ws-colsum-card)")).toHaveLength(0);
+    expect(screen.getByText("× 20")).toBeInTheDocument();
+    expect(screen.getByText("÷ 4")).toBeInTheDocument();
+    expect(screen.getAllByText("+ 10").length).toBeGreaterThan(0);
+    expect(screen.getByText("× 2")).toBeInTheDocument();
+    expect(screen.getAllByText("- 4").length).toBeGreaterThan(0);
+    questions.forEach((question) => {
+      expect(screen.getByLabelText(`Answer for question ${question.questionNumber}`)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Optional")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Flagged: 0/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /back to worksheets/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("Font")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Force Exit & Submit" })).toHaveLength(1);
+  });
+
+  it("keeps non-EXAM mixed-operation worksheets on the standard layout", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+    const questions = [{ questionId: "q1", questionNumber: 1, operation: "MUL", operands: { nums: [3, 4] } }];
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: { data: { id: "w1", title: "Practice Multiplication", generationMode: "PRACTICE", timeLimitSeconds: 600, questions } }
+    });
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(buildAttemptResponse({
+      worksheetOverrides: { title: "Practice Multiplication", generationMode: "PRACTICE", questions }
+    }));
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    await flushAsync();
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    expect(screen.getByText("Optional")).toBeInTheDocument();
+    expect(document.querySelector(".ws-colsum-grid")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /back to worksheets/i })).toBeInTheDocument();
   });
 
   it("opens an official second attempt in a dedicated exam tab without starting it", async () => {

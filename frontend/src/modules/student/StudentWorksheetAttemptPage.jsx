@@ -88,6 +88,29 @@ function getQuestionTerms(q) {
   return [];
 }
 
+function getUnifiedExamDisplayRows(q) {
+  const operation = String(q?.operation || "").trim().toUpperCase();
+  const operands = q?.operands && typeof q.operands === "object" ? q.operands : {};
+  const terms = getQuestionTerms(q).filter((term) => Number.isFinite(Number(term))).map(Number);
+  const symbols = { ADD: "+", SUB: "-", MUL: "×", DIV: "÷" };
+
+  if (terms.length) {
+    return terms.map((term, index) => {
+      if (index === 0) return String(term);
+      const rowOperation = operation === "MIX"
+        ? String(Array.isArray(operands.operators) ? operands.operators[index - 1] || "ADD" : "ADD").toUpperCase()
+        : operation;
+      if (rowOperation === "ADD" || rowOperation === "COLUMN_SUM") {
+        return term < 0 ? `- ${Math.abs(term)}` : `+ ${term}`;
+      }
+      if (rowOperation === "SUB") return `- ${Math.abs(term)}`;
+      return `${symbols[rowOperation] || rowOperation} ${term}`.trim();
+    });
+  }
+
+  return typeof operands.expr === "string" && operands.expr.trim() ? [operands.expr.trim()] : [];
+}
+
 function formatQuestionPrompt(q) {
   const operation = q?.operation ? String(q.operation).trim().toUpperCase() : "";
   const operands = q?.operands && typeof q.operands === "object" ? q.operands : {};
@@ -578,6 +601,7 @@ function StudentWorksheetAttemptPage() {
       return Array.isArray(terms) && terms.length > 0;
     });
   }, [questionRows]);
+  const useUnifiedExamGrid = isDedicatedExamMode && isOfficialExamWorksheet;
 
   const isWrongAnswer = (q) => {
     if (!result) return false;
@@ -648,6 +672,9 @@ function StudentWorksheetAttemptPage() {
   const renderColumnSumCard = (q) => {
     const qid = q.questionId || q.id;
     const nums = getQuestionTerms(q);
+    const displayRows = useUnifiedExamGrid
+      ? getUnifiedExamDisplayRows(q)
+      : nums.filter((n) => typeof n === "number" && Number.isFinite(n)).map(String);
     const inlineError = qid ? inlineErrorsByQuestionId[qid] : null;
     const wrong = isWrongAnswer(q);
 
@@ -656,13 +683,7 @@ function StudentWorksheetAttemptPage() {
         <div className="ws-colsum-card__num">{q.questionNumber}</div>
         <div className="ws-colsum-card__mid">
           <div className="ws-colsum-card__numbers" style={{ fontSize: questionFontPx }} aria-label={`Question ${q.questionNumber} column`}>
-            {Array.isArray(nums)
-              ? nums
-                  .filter((n) => typeof n === "number" && Number.isFinite(n))
-                  .map((n, idx) => (
-                    <div key={idx}>{String(n)}</div>
-                  ))
-              : null}
+            {displayRows.map((row, idx) => <div key={idx}>{row}</div>)}
           </div>
           <div className="ws-colsum-card__line" />
         </div>
@@ -1268,7 +1289,7 @@ function StudentWorksheetAttemptPage() {
     };
 
   const isExamWorksheet = isOfficialExamWorksheet;
-  const useExamPageStyling = isColumnSumGrid;
+  const useExamPageStyling = isColumnSumGrid || useUnifiedExamGrid;
   const worksheetTitle = String(worksheet?.title || "Worksheet");
   const currentEnrollment = studentCourseSummary?.currentEnrollment || null;
   const currentCourse = studentCourseSummary?.myCourse || null;
@@ -1629,13 +1650,13 @@ function StudentWorksheetAttemptPage() {
         </div>
       ) : null}
 
-      {isColumnSumGrid ? (
+      {isColumnSumGrid || useUnifiedExamGrid ? (
         <div className="ws-colsum-grid" aria-label="Worksheet questions">
           {questionRows.map(renderColumnSumCard)}
         </div>
       ) : null}
 
-      {!isColumnSumGrid ? (
+      {!isColumnSumGrid && !useUnifiedExamGrid ? (
         <div style={{ display: "grid", gap: 12 }} aria-label="Worksheet questions">
           {questionRows.map(renderStandardQuestionCard)}
         </div>
@@ -1671,7 +1692,7 @@ function StudentWorksheetAttemptPage() {
         </div>
       ) : null}
 
-      {useExamPageStyling || isDedicatedExamMode ? (
+      {(useExamPageStyling || isDedicatedExamMode) && !useUnifiedExamGrid ? (
         <div
           className="card ws-exam-footer"
           style={{

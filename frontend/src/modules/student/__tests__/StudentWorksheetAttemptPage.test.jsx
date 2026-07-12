@@ -387,6 +387,46 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.getAllByText("0:10").length).toBeGreaterThan(0);
   });
 
+  it("submits current local answers even when autosave debounce has not completed", async () => {
+    mocks.submitStudentAttempt.mockResolvedValueOnce({
+      data: {
+        data: {
+          status: "SUBMITTED",
+          score: 100,
+          total: 2,
+          submittedAt: "2026-02-21T00:00:10.000Z",
+          resultBreakdown: { correctCount: 2, completionTime: 10 }
+        }
+      }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "44" } });
+
+    // Do not advance timers, so the debounce autosave has not fired yet.
+    fireEvent.click(screen.getAllByText("Submit")[0]);
+    fireEvent.click(screen.getByText("Confirm submit"));
+    await flushAsync();
+
+    expect(mocks.submitStudentAttempt).toHaveBeenCalledWith("a1", {
+      answersByQuestionId: {
+        q1: { value: "44" }
+      }
+    });
+  });
+
   it("allows submitting before all questions are attempted", async () => {
     mocks.submitStudentAttempt.mockResolvedValueOnce({
       data: {

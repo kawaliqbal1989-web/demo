@@ -591,6 +591,117 @@ describe("STUDENT PORTAL (API)", () => {
     expect(submit.body?.data?.resultBreakdown).toBeUndefined();
   });
 
+  test("POST /api/student/attempts/:id/submit persists submittedAnswers and evaluates from answersByQuestionId payload", async () => {
+    const { examWorksheet } = await createExamAttemptFixture({ published: true });
+    const sessionId = `test-session-${randomId("cs")}`;
+
+    const start = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    const question = (start.body?.data?.worksheet?.questions || [])[0];
+    expect(attemptId).toBeTruthy();
+    expect(question?.questionId).toBeTruthy();
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({
+        answersByQuestionId: {
+          [question.questionId]: {
+            value: 9
+          }
+        }
+      });
+
+    expect(submit.status).toBe(200);
+
+    const submission = await prisma.worksheetSubmission.findUnique({
+      where: { id: attemptId },
+      select: {
+        status: true,
+        score: true,
+        correctCount: true,
+        totalQuestions: true,
+        submittedAnswers: true,
+        finalSubmittedAt: true
+      }
+    });
+
+    expect(submission?.finalSubmittedAt).toBeTruthy();
+    expect(submission?.status).toBe("REVIEWED");
+    expect(Number(submission?.score || 0)).toBe(100);
+    expect(submission?.correctCount).toBe(1);
+    expect(submission?.totalQuestions).toBe(1);
+    expect(Array.isArray(submission?.submittedAnswers)).toBe(true);
+    expect(submission?.submittedAnswers?.length).toBe(1);
+    expect(submission?.submittedAnswers?.[0]).toMatchObject({ questionNumber: 1, answer: 9 });
+  });
+
+  test("POST /api/student/attempts/:id/submit does not overwrite existing saved answers when payload is empty", async () => {
+    const { examWorksheet } = await createExamAttemptFixture({ published: true });
+    const sessionId = `test-session-${randomId("cs")}`;
+
+    const start = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    const question = (start.body?.data?.worksheet?.questions || [])[0];
+    expect(attemptId).toBeTruthy();
+    expect(question?.questionId).toBeTruthy();
+
+    const save = await http
+      .patch(`/api/student/attempts/${attemptId}/answers`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({
+        version: 0,
+        answersByQuestionId: {
+          [question.questionId]: {
+            value: 9
+          }
+        }
+      });
+
+    expect(save.status).toBe(200);
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect(submit.status).toBe(200);
+
+    const submission = await prisma.worksheetSubmission.findUnique({
+      where: { id: attemptId },
+      select: {
+        score: true,
+        correctCount: true,
+        totalQuestions: true,
+        submittedAnswers: true,
+        finalSubmittedAt: true
+      }
+    });
+
+    expect(submission?.finalSubmittedAt).toBeTruthy();
+    expect(Number(submission?.score || 0)).toBe(100);
+    expect(submission?.correctCount).toBe(1);
+    expect(submission?.totalQuestions).toBe(1);
+    expect(Array.isArray(submission?.submittedAnswers)).toBe(true);
+    expect(submission?.submittedAnswers?.length).toBe(1);
+    expect(submission?.submittedAnswers?.[0]).toMatchObject({ questionNumber: 1, answer: 9 });
+  });
+
   test("start/resume returns embargoed result for already submitted unpublished exam", async () => {
     const { examWorksheet } = await createExamAttemptFixture({ published: false });
 

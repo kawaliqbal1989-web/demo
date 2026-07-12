@@ -1029,8 +1029,9 @@ const saveStudentAttemptAnswers = asyncHandler(async (req, res) => {
 
   const now = new Date();
   // Enforce device/session lock for EXAM attempts.
+  let lockedAttempt = attempt;
   try {
-    await enforceExamAttemptDeviceLock({ req, attempt, worksheet });
+    lockedAttempt = await enforceExamAttemptDeviceLock({ req, attempt, worksheet });
   } catch (e) {
     return res.apiError(e.statusCode || 409, e.message || "Exam attempt locked", e.errorCode || "EXAM_DEVICE_LOCKED");
   }
@@ -1174,7 +1175,7 @@ const submitStudentAttempt = asyncHandler(async (req, res) => {
 
   const timing = getAttemptTiming({ startedAt: attempt.submittedAt || now, timeLimitSeconds: worksheet.timeLimitSeconds });
   const derivedStatus = deriveAttemptStatus({ finalSubmittedAt: attempt.finalSubmittedAt, endsAt: timing.endsAt, now });
-  const draft = getAttemptDraftFromSubmission(attempt);
+  const draft = getAttemptDraftFromSubmission(lockedAttempt);
   const mergedAnswersByQuestionId = Object.keys(submittedAnswersByQuestionId).length
     ? { ...draft.answersByQuestionId, ...submittedAnswersByQuestionId }
     : draft.answersByQuestionId;

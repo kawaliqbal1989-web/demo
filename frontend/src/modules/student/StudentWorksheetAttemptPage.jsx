@@ -885,14 +885,47 @@ function StudentWorksheetAttemptPage() {
   const runSubmit = async ({ dueToTimeout = false } = {}) => {
     if (!attemptId || submittingRef.current) return;
 
+    const answersSnapshot = latestAnswersRef.current && typeof latestAnswersRef.current === "object"
+      ? latestAnswersRef.current
+      : {};
+
     submittingRef.current = true;
     setConfirmOpen(false);
     setSubmitting(true);
     setError("");
 
     try {
+      if (!isLocked) {
+        if (saveTimerRef.current) {
+          window.clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+        }
+
+        try {
+          const saveRes = await saveStudentAttemptAnswers(attemptId, {
+            version: versionRef.current,
+            answersByQuestionId: answersSnapshot
+          });
+          const savePayload = saveRes?.data?.data || {};
+          serverOffsetMsRef.current = computeServerOffsetMs(savePayload.serverNow);
+          versionRef.current = Number(savePayload.version || versionRef.current);
+          setAttempt((prev) => (
+            prev
+              ? {
+                  ...prev,
+                  status: savePayload.status || prev.status,
+                  endsAt: savePayload.endsAt || prev.endsAt,
+                  serverNow: savePayload.serverNow || prev.serverNow
+                }
+              : prev
+          ));
+        } catch {
+          // Final submit still carries full answers snapshot to avoid data loss when save endpoint fails.
+        }
+      }
+
       const res = await submitStudentAttempt(attemptId, {
-        answersByQuestionId: latestAnswersRef.current
+        answersByQuestionId: answersSnapshot
       });
       const payload = res.data?.data || null;
       setResult(payload);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { LoadingState } from "../../components/LoadingState";
 import { ErrorState } from "../../components/ErrorState";
@@ -35,6 +35,13 @@ function downloadBlob(blob, filename) {
 function renderExpression(question) {
   return formatWorksheetQuestionPrompt(question);
 }
+
+const EMPTY_BANK_FORM = {
+  prompt: "",
+  operation: "ADD",
+  numbers: ["", ""],
+  operators: ["", "+"]
+};
 
 function normalizeCalculatedAnswer(value) {
   if (!Number.isFinite(value)) {
@@ -121,16 +128,13 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
   const [bankQ, setBankQ] = useState("");
   const [pageLimit, setPageLimit] = useState(10);
   const [pageOffset, setPageOffset] = useState(0);
-  const [bankCreateForm, setBankCreateForm] = useState({
-    prompt: "",
-    operation: "ADD",
-    numbers: ["", ""],
-    operators: ["", "+"]
-  });
+  const [bankCreateForm, setBankCreateForm] = useState({ ...EMPTY_BANK_FORM });
   const [bankCreating, setBankCreating] = useState(false);
   const [editingQuestionId, setEditingQuestionId] = useState(null);
   const [deleteQuestionTarget, setDeleteQuestionTarget] = useState(null);
   const [previewQuestionId, setPreviewQuestionId] = useState(null);
+  const activeBankContextRef = useRef("");
+  const bankRequestIdRef = useRef(0);
 
   const courseLevel = useMemo(() => {
     return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
@@ -143,6 +147,13 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
       levelNumber: levelNumberInt
     });
   }, [academicLevels, courseLevel, levelNumberInt]);
+
+  const scopedBankContextKey = useMemo(() => {
+    if (!academicLevel?.id) {
+      return "";
+    }
+    return `${String(academicLevel.id)}::${String(courseId)}::${String(levelNumberInt)}`;
+  }, [academicLevel?.id, courseId, levelNumberInt]);
 
   const visibleBankItems = useMemo(() => {
     return bankItems.slice(pageOffset, pageOffset + pageLimit);
@@ -192,7 +203,8 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
     }
   };
 
-  const loadBank = async (levelId) => {
+  const loadBank = async (levelId, contextKey = activeBankContextRef.current) => {
+    const requestId = ++bankRequestIdRef.current;
     setBankLoading(true);
     setBankError("");
     try {
@@ -202,13 +214,21 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
         levelNumber: levelNumberInt,
         q: bankQ || undefined
       });
+      if (requestId !== bankRequestIdRef.current || activeBankContextRef.current !== contextKey) {
+        return;
+      }
       setBankItems(resp?.data?.items || []);
       setPageOffset(0);
       setPreviewQuestionId(null);
     } catch (err) {
+      if (requestId !== bankRequestIdRef.current || activeBankContextRef.current !== contextKey) {
+        return;
+      }
       setBankError(getFriendlyErrorMessage(err) || "Failed to load question bank.");
     } finally {
-      setBankLoading(false);
+      if (requestId === bankRequestIdRef.current && activeBankContextRef.current === contextKey) {
+        setBankLoading(false);
+      }
     }
   };
 
@@ -217,11 +237,21 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
   }, [courseId, levelNumber]);
 
   useEffect(() => {
-    if (!academicLevel?.id) {
+    if (!academicLevel?.id || !scopedBankContextKey) {
       return;
     }
-    void loadBank(academicLevel.id);
-  }, [academicLevel?.id]);
+
+    activeBankContextRef.current = scopedBankContextKey;
+    setBankItems([]);
+    setBankError("");
+    setPageOffset(0);
+    setPreviewQuestionId(null);
+    setDeleteQuestionTarget(null);
+    setEditingQuestionId(null);
+    setBankCreateForm({ ...EMPTY_BANK_FORM });
+
+    void loadBank(academicLevel.id, scopedBankContextKey);
+  }, [academicLevel?.id, courseId, levelNumberInt, scopedBankContextKey]);
 
   if (loading) {
     return <LoadingState label="Loading question bank..." />;
@@ -328,8 +358,8 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
         });
       }
 
-      setBankCreateForm((prev) => ({ ...prev, prompt: "", numbers: ["", ""], operators: ["", "+"] }));
-  await loadBank(academicLevel.id);
+        setBankCreateForm((prev) => ({ ...prev, prompt: "", numbers: ["", ""], operators: ["", "+"] }));
+        await loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to create question.");
     } finally {
@@ -488,7 +518,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
         levelNumber: levelNumberInt,
         workspaceScope: String(course?.scope || "").toUpperCase() || undefined
       });
-      await loadBank(academicLevel.id);
+      await loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to import question bank.");
     }
@@ -589,7 +619,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
             className="button secondary"
             type="button"
             style={{ width: "auto" }}
-            onClick={() => void loadBank(academicLevel.id)}
+            onClick={() => void loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey)}
             disabled={bankLoading}
           >
             {bankLoading ? "Loading..." : "Refresh"}
@@ -737,7 +767,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
                   className="button secondary"
                   onClick={() => {
                     setEditingQuestionId(null);
-                    setBankCreateForm({ prompt: "", operation: "ADD", numbers: ["", ""], operators: ["", "+"] });
+                    setBankCreateForm({ ...EMPTY_BANK_FORM });
                     setBankError("");
                   }}
                 >
@@ -845,7 +875,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
             courseId,
             levelNumber: levelNumberInt
           });
-          await loadBank(academicLevel.id);
+          await loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey);
         }}
         onCancel={() => setDeleteQuestionTarget(null)}
       />

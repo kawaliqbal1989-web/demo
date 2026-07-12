@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { DataTable, PaginationBar } from "../../components/DataTable";
@@ -1659,11 +1659,18 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
   const [studentId, setStudentId] = useState("");
   const [generateBusy, setGenerateBusy] = useState(false);
   const [generatedQuestionSet, setGeneratedQuestionSet] = useState(null);
+  const activeAssessmentContextRef = useRef("");
+  const assessmentRequestIdRef = useRef(0);
+  const [loadedAssessmentContextKey, setLoadedAssessmentContextKey] = useState("");
 
   const examContext = useMemo(() => ({
     courseId: examCourse?.id,
     levelNumber: examCourseLevel?.levelNumber
   }), [examCourse?.id, examCourseLevel?.levelNumber]);
+
+  const paperBuilderContextKey = useMemo(() => {
+    return `${String(selectedExamCycleId || "")}::${String(examContext.courseId || "")}::${String(examContext.levelNumber || "")}`;
+  }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber]);
 
   const loadCycleOptions = useCallback(async () => {
     setCyclesLoading(true);
@@ -1704,29 +1711,46 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     }
   }, [selectedExamCycleId, onExamCycleChange]);
 
-  const loadAssessmentConfig = useCallback(async () => {
+  const loadAssessmentConfig = useCallback(async (contextKey = activeAssessmentContextRef.current) => {
+    const requestId = ++assessmentRequestIdRef.current;
     if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
-      setAssessmentPayload(null);
-      setDraftConfig([]);
+      if (requestId === assessmentRequestIdRef.current && activeAssessmentContextRef.current === contextKey) {
+        setAssessmentPayload(null);
+        setDraftConfig([]);
+        setLoadedAssessmentContextKey("");
+        setAssessmentLoading(false);
+      }
       return;
     }
 
-    setAssessmentLoading(true);
-    setAssessmentError("");
+    if (activeAssessmentContextRef.current === contextKey) {
+      setAssessmentLoading(true);
+      setAssessmentError("");
+    }
     try {
       const response = await getExamCycleAssessmentConfig(selectedExamCycleId, {
         courseId: examContext.courseId,
         levelNumber: examContext.levelNumber
       });
+      if (requestId !== assessmentRequestIdRef.current || activeAssessmentContextRef.current !== contextKey) {
+        return;
+      }
       const payload = response?.data || {};
       setAssessmentPayload(payload);
       setDraftConfig(buildPaperBuilderDraftFromAssessment(payload));
+      setLoadedAssessmentContextKey(contextKey);
     } catch (err) {
+      if (requestId !== assessmentRequestIdRef.current || activeAssessmentContextRef.current !== contextKey) {
+        return;
+      }
       setAssessmentPayload(null);
       setDraftConfig([]);
+      setLoadedAssessmentContextKey("");
       setAssessmentError(getFriendlyErrorMessage(err) || "Failed to load paper builder configuration.");
     } finally {
-      setAssessmentLoading(false);
+      if (requestId === assessmentRequestIdRef.current && activeAssessmentContextRef.current === contextKey) {
+        setAssessmentLoading(false);
+      }
     }
   }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber]);
 
@@ -1748,9 +1772,21 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
   }, [selectedExamCycleId, examCycleOptions, onExamCycleChange]);
 
   useEffect(() => {
+    activeAssessmentContextRef.current = paperBuilderContextKey;
+    setAssessmentPayload(null);
+    setDraftConfig([]);
+    setAssessmentError("");
     setGeneratedQuestionSet(null);
-    void loadAssessmentConfig();
-  }, [loadAssessmentConfig]);
+    setStudentId("");
+    setLoadedAssessmentContextKey("");
+
+    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
+      setAssessmentLoading(false);
+      return;
+    }
+
+    void loadAssessmentConfig(paperBuilderContextKey);
+  }, [paperBuilderContextKey, selectedExamCycleId, examContext.courseId, examContext.levelNumber, loadAssessmentConfig]);
 
   const selectedCycle = useMemo(() => {
     return examCycleOptions.find((cycle) => String(cycle.id) === String(selectedExamCycleId)) || null;
@@ -1790,8 +1826,16 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     });
   }, []);
 
+  const isAssessmentContextReady = Boolean(
+    selectedExamCycleId
+    && examContext.courseId
+    && examContext.levelNumber
+    && loadedAssessmentContextKey === paperBuilderContextKey
+    && !assessmentLoading
+  );
+
   const handleSaveConfig = useCallback(async () => {
-    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
+    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber || !isAssessmentContextReady) {
       return;
     }
     if (!validation.isComplete) {
@@ -1821,16 +1865,25 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
       );
 
       toast.success("Paper builder configuration saved.");
-      await loadAssessmentConfig();
+      await loadAssessmentConfig(activeAssessmentContextRef.current || paperBuilderContextKey);
     } catch (err) {
       setAssessmentError(getFriendlyErrorMessage(err) || "Failed to save paper builder configuration.");
     } finally {
       setSavingConfig(false);
     }
-  }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber, validation.isComplete, draftConfig, loadAssessmentConfig]);
+  }, [
+    selectedExamCycleId,
+    examContext.courseId,
+    examContext.levelNumber,
+    validation.isComplete,
+    draftConfig,
+    loadAssessmentConfig,
+    isAssessmentContextReady,
+    paperBuilderContextKey
+  ]);
 
   const handleGenerateQuestionSet = useCallback(async () => {
-    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
+    if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber || !isAssessmentContextReady) {
       return;
     }
     const normalizedStudentId = String(studentId || "").trim();
@@ -1859,6 +1912,9 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
         }
       );
 
+      if (activeAssessmentContextRef.current !== paperBuilderContextKey) {
+        return;
+      }
       setGeneratedQuestionSet(response?.data || null);
       toast.success("Question set generated.");
     } catch (err) {
@@ -1866,7 +1922,15 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     } finally {
       setGenerateBusy(false);
     }
-  }, [selectedExamCycleId, examContext.courseId, examContext.levelNumber, studentId, assessmentPayload]);
+  }, [
+    selectedExamCycleId,
+    examContext.courseId,
+    examContext.levelNumber,
+    studentId,
+    assessmentPayload,
+    isAssessmentContextReady,
+    paperBuilderContextKey
+  ]);
 
   const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
   const primaryLevel = levels[0] || null;
@@ -2111,8 +2175,8 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                 type="button"
                 className="button secondary"
                 style={{ width: "auto" }}
-                onClick={() => void loadAssessmentConfig()}
-                disabled={assessmentLoading || savingConfig}
+                onClick={() => void loadAssessmentConfig(activeAssessmentContextRef.current || paperBuilderContextKey)}
+                disabled={assessmentLoading || savingConfig || !selectedExamCycleId || !examContext.courseId || !examContext.levelNumber}
               >
                 Refresh
               </button>
@@ -2121,7 +2185,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                 className="button"
                 style={{ width: "auto" }}
                 onClick={() => void handleSaveConfig()}
-                disabled={isCycleLocked || !validation.isComplete || savingConfig || assessmentLoading || !levels.length}
+                disabled={isCycleLocked || !validation.isComplete || savingConfig || assessmentLoading || !levels.length || !isAssessmentContextReady}
               >
                 {savingConfig ? "Saving..." : "Save Configuration"}
               </button>
@@ -2164,7 +2228,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                 className="button"
                 style={{ width: "auto" }}
                 onClick={() => void handleGenerateQuestionSet()}
-                disabled={isCycleLocked || generateBusy || !String(studentId || "").trim() || !levels.length || !isPrimaryQuestionBankMode}
+                disabled={isCycleLocked || generateBusy || !String(studentId || "").trim() || !levels.length || !isPrimaryQuestionBankMode || !isAssessmentContextReady}
               >
                 {generateBusy ? "Generating..." : "Generate Question Set"}
               </button>

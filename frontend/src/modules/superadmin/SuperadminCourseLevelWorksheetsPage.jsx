@@ -84,6 +84,7 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
   const [questionAddBankId, setQuestionAddBankId] = useState("");
   const [questionAdding, setQuestionAdding] = useState(false);
   const [bulkQuestionIds, setBulkQuestionIds] = useState([]);
+  const [bulkPreviewQuestionId, setBulkPreviewQuestionId] = useState("");
   const [bulkAdding, setBulkAdding] = useState(false);
   const [worksheetMetaForm, setWorksheetMetaForm] = useState({
     title: "",
@@ -98,6 +99,12 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
 
   const [dirtyOrder, setDirtyOrder] = useState(false);
   const dragIdRef = useRef(null);
+  const activeScopedContextRef = useRef("");
+  const isContextResettingRef = useRef(false);
+  const templateRequestIdRef = useRef(0);
+  const bankRequestIdRef = useRef(0);
+  const worksheetsRequestIdRef = useRef(0);
+  const worksheetRequestIdRef = useRef(0);
 
   const courseLevel = useMemo(() => {
     return courseLevels.find((item) => Number(item.levelNumber) === levelNumberInt) || null;
@@ -110,6 +117,20 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
       levelNumber: levelNumberInt
     });
   }, [academicLevels, courseLevel, levelNumberInt]);
+
+  const bulkPreviewQuestion = useMemo(() => {
+    if (!bulkPreviewQuestionId) {
+      return null;
+    }
+    return bankItems.find((item) => item.id === bulkPreviewQuestionId) || null;
+  }, [bankItems, bulkPreviewQuestionId]);
+
+  const scopedContextKey = useMemo(() => {
+    if (!academicLevel?.id) {
+      return "";
+    }
+    return `${String(courseId)}::${String(levelNumberInt)}::${String(academicLevel.id)}`;
+  }, [academicLevel?.id, courseId, levelNumberInt]);
 
   const load = async () => {
     setLoading(true);
@@ -143,10 +164,14 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
     }
   };
 
-  const loadTemplate = async (levelId) => {
+  const loadTemplate = async (levelId, contextKey = activeScopedContextRef.current) => {
+    const requestId = ++templateRequestIdRef.current;
     setTemplateError("");
     try {
       const resp = await getWorksheetTemplate(levelId);
+      if (requestId !== templateRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       const next = resp?.data || null;
       setTemplate(next);
       if (next) {
@@ -161,11 +186,15 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         });
       }
     } catch (err) {
+      if (requestId !== templateRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setTemplateError(getFriendlyErrorMessage(err) || "Failed to load worksheet template.");
     }
   };
 
-  const loadBank = async (levelId) => {
+  const loadBank = async (levelId, contextKey = activeScopedContextRef.current) => {
+    const requestId = ++bankRequestIdRef.current;
     setBankLoading(true);
     try {
       const resp = await listQuestionBank({
@@ -173,15 +202,24 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         courseId,
         levelNumber: levelNumberInt
       });
+      if (requestId !== bankRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setBankItems(resp?.data?.items || []);
     } catch {
+      if (requestId !== bankRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setBankItems([]);
     } finally {
-      setBankLoading(false);
+      if (requestId === bankRequestIdRef.current && activeScopedContextRef.current === contextKey) {
+        setBankLoading(false);
+      }
     }
   };
 
-  const loadWorksheets = async (levelId, options = {}) => {
+  const loadWorksheets = async (levelId, options = {}, contextKey = activeScopedContextRef.current) => {
+    const requestId = ++worksheetsRequestIdRef.current;
     const next = {
       limit: options.limit ?? worksheetsLimit,
       offset: options.offset ?? worksheetsOffset,
@@ -203,6 +241,9 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         difficulty: next.difficulty || undefined,
         q: next.q || undefined
       });
+      if (requestId !== worksheetsRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setWorksheets(resp?.data || []);
       setWorksheetsLimit(next.limit);
       setWorksheetsOffset(next.offset);
@@ -212,13 +253,19 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         setSelectedWorksheet(null);
       }
     } catch (err) {
+      if (requestId !== worksheetsRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setWorksheetsError(getFriendlyErrorMessage(err) || "Failed to load worksheets.");
     } finally {
-      setWorksheetsLoading(false);
+      if (requestId === worksheetsRequestIdRef.current && activeScopedContextRef.current === contextKey) {
+        setWorksheetsLoading(false);
+      }
     }
   };
 
-  const loadWorksheet = async (id) => {
+  const loadWorksheet = async (id, contextKey = activeScopedContextRef.current) => {
+    const requestId = ++worksheetRequestIdRef.current;
     setWorksheetLoading(true);
     setWorksheetError("");
     setDirtyOrder(false);
@@ -227,12 +274,20 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         courseId,
         levelNumber: levelNumberInt
       });
+      if (requestId !== worksheetRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setSelectedWorksheet(resp?.data || null);
     } catch (err) {
+      if (requestId !== worksheetRequestIdRef.current || activeScopedContextRef.current !== contextKey) {
+        return;
+      }
       setWorksheetError(getFriendlyErrorMessage(err) || "Failed to load worksheet.");
       setSelectedWorksheet(null);
     } finally {
-      setWorksheetLoading(false);
+      if (requestId === worksheetRequestIdRef.current && activeScopedContextRef.current === contextKey) {
+        setWorksheetLoading(false);
+      }
     }
   };
 
@@ -241,21 +296,53 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
   }, [courseId, levelNumber]);
 
   useEffect(() => {
-    if (!academicLevel?.id) {
+    if (!academicLevel?.id || !scopedContextKey) {
       return;
     }
-    void loadTemplate(academicLevel.id);
-    void loadBank(academicLevel.id);
-    void loadWorksheets(academicLevel.id, { offset: 0 });
-  }, [academicLevel?.id]);
+
+    activeScopedContextRef.current = scopedContextKey;
+    isContextResettingRef.current = true;
+
+    setBankItems([]);
+    setWorksheets([]);
+    setSelectedWorksheetId(null);
+    setSelectedWorksheet(null);
+    setWorksheetError("");
+    setWorksheetsError("");
+    setQuestionAddBankId("");
+    setBulkQuestionIds([]);
+    setBulkPreviewQuestionId("");
+    setDirtyOrder(false);
+    dragIdRef.current = null;
+    setWorksheetsOffset(0);
+
+    const runScopedLoads = async () => {
+      try {
+        await Promise.all([
+          loadTemplate(academicLevel.id, scopedContextKey),
+          loadBank(academicLevel.id, scopedContextKey),
+          loadWorksheets(academicLevel.id, { offset: 0 }, scopedContextKey)
+        ]);
+      } finally {
+        if (activeScopedContextRef.current === scopedContextKey) {
+          isContextResettingRef.current = false;
+        }
+      }
+    };
+
+    void runScopedLoads();
+  }, [academicLevel?.id, courseId, levelNumberInt, scopedContextKey]);
 
   useEffect(() => {
     if (!selectedWorksheetId) {
       setSelectedWorksheet(null);
       return;
     }
-    void loadWorksheet(selectedWorksheetId);
-  }, [selectedWorksheetId]);
+    if (isContextResettingRef.current) {
+      return;
+    }
+    void loadWorksheet(selectedWorksheetId, activeScopedContextRef.current || scopedContextKey);
+  }, [selectedWorksheetId, courseId, levelNumberInt, scopedContextKey]);
 
   useEffect(() => {
     if (!selectedWorksheet) {
@@ -269,6 +356,15 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
       isPublished: Boolean(selectedWorksheet.isPublished)
     });
   }, [selectedWorksheet]);
+
+  useEffect(() => {
+    if (!bulkPreviewQuestionId) {
+      return;
+    }
+    if (!bankItems.some((item) => item.id === bulkPreviewQuestionId)) {
+      setBulkPreviewQuestionId("");
+    }
+  }, [bankItems, bulkPreviewQuestionId]);
 
   if (loading) {
     return <LoadingState label="Loading worksheets..." />;
@@ -509,6 +605,7 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
         levelNumber: levelNumberInt
       });
       setBulkQuestionIds([]);
+      setBulkPreviewQuestionId("");
       await loadWorksheet(selectedWorksheet.id);
       await loadWorksheets(academicLevel.id);
     } catch (err) {
@@ -856,30 +953,89 @@ function SuperadminCourseLevelWorksheetsPage({ forcedCourseId, forcedLevelNumber
                     <div style={{ maxHeight: 180, overflow: "auto", border: "1px solid var(--color-border)", borderRadius: 8, padding: 8 }}>
                       {bankItems.map((question) => {
                         const checked = bulkQuestionIds.includes(question.id);
+                        const isPreviewing = bulkPreviewQuestionId === question.id;
                         return (
-                          <label key={question.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0" }}>
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={(event) => {
-                                const nextChecked = event.target.checked;
-                                setBulkQuestionIds((prev) => {
-                                  if (nextChecked) {
-                                    if (prev.includes(question.id)) {
-                                      return prev;
+                          <div
+                            key={question.id}
+                            style={{
+                              display: "flex",
+                              gap: 8,
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "6px 8px",
+                              borderRadius: 8,
+                              border: isPreviewing ? "1px solid var(--color-border)" : "1px solid transparent",
+                              background: isPreviewing ? "var(--color-surface-soft, rgba(127,127,127,0.08))" : "transparent"
+                            }}
+                          >
+                            <label htmlFor={`bulk-question-${question.id}`} style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0, flex: "1 1 auto" }}>
+                              <input
+                                id={`bulk-question-${question.id}`}
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(event) => {
+                                  const nextChecked = event.target.checked;
+                                  setBulkQuestionIds((prev) => {
+                                    if (nextChecked) {
+                                      if (prev.includes(question.id)) {
+                                        return prev;
+                                      }
+                                      return [...prev, question.id];
                                     }
-                                    return [...prev, question.id];
+                                    return prev.filter((id) => id !== question.id);
+                                  });
+                                  if (nextChecked) {
+                                    setBulkPreviewQuestionId(question.id);
                                   }
-                                  return prev.filter((id) => id !== question.id);
-                                });
-                              }}
-                            />
-                            <span style={{ fontSize: 13 }}>{question.difficulty}: {question.prompt}</span>
-                          </label>
+                                }}
+                              />
+                              <span style={{ fontSize: 13, overflowWrap: "anywhere" }}>{question.difficulty}: {question.prompt}</span>
+                            </label>
+                            <button
+                              className="button secondary"
+                              type="button"
+                              style={{ width: "auto", padding: "4px 8px", fontSize: 12, whiteSpace: "nowrap" }}
+                              onClick={() => setBulkPreviewQuestionId(question.id)}
+                            >
+                              {isPreviewing ? "Previewing" : "Preview"}
+                            </button>
+                          </div>
                         );
                       })}
                       {!bankItems.length ? <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>No question bank entries available.</div> : null}
                     </div>
+
+                    <div className="card" style={{ display: "grid", gap: 8, borderColor: "var(--color-border)", padding: 10 }}>
+                      <div style={{ fontWeight: 700 }}>Question Preview Before Adding</div>
+                      {!bulkPreviewQuestion ? (
+                        <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+                          Select a question or click Preview to inspect it before adding.
+                        </div>
+                      ) : (
+                        <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+                          <div>
+                            <span style={{ color: "var(--color-text-muted)" }}>Prompt:</span> {bulkPreviewQuestion.prompt || "-"}
+                          </div>
+                          <div>
+                            <span style={{ color: "var(--color-text-muted)" }}>Expression:</span> {formatWorksheetQuestionPreview(bulkPreviewQuestion)}
+                          </div>
+                          <div>
+                            <span style={{ color: "var(--color-text-muted)" }}>Difficulty:</span> {bulkPreviewQuestion.difficulty || "-"}
+                          </div>
+                          <div>
+                            <span style={{ color: "var(--color-text-muted)" }}>Operation:</span> {bulkPreviewQuestion.operation || "-"}
+                          </div>
+                          <div>
+                            <span style={{ color: "var(--color-text-muted)" }}>Correct Answer:</span> {bulkPreviewQuestion.correctAnswer ?? "-"}
+                          </div>
+                          <div>
+                            <span style={{ color: "var(--color-text-muted)" }}>Selected for bulk add:</span>{" "}
+                            {bulkQuestionIds.includes(bulkPreviewQuestion.id) ? "Yes" : "No"}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       <button
                         className="button"

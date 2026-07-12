@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { resolveActorExamScope } from "../services/exam-scope.service.js";
+import { getExamCycleLevels } from "../services/assessmentConfig.service.js";
 import { recordAudit } from "../utils/audit.js";
 
 function createHttpError(statusCode, message, errorCode) {
@@ -19,6 +20,198 @@ const LATE_ENROLLMENT_ALLOWED_LIST_STATUSES = [
   "SUBMITTED_TO_SUPERADMIN",
   "APPROVED"
 ];
+
+function mapLateRequestForResponse(request) {
+  const students = Array.isArray(request?.students) ? request.students : [];
+  const uniqueLevelRows = [];
+  const seenLevelIds = new Set();
+
+  for (const row of students) {
+    const levelId = String(row?.level?.id || row?.levelId || "").trim();
+    if (!levelId || seenLevelIds.has(levelId)) continue;
+    seenLevelIds.add(levelId);
+    uniqueLevelRows.push({
+      id: levelId,
+      name: row?.level?.name || null,
+      rank: row?.level?.rank ?? null
+    });
+  }
+
+  const requestedLevel = uniqueLevelRows.length === 1 ? uniqueLevelRows[0] : null;
+
+  return {
+    ...request,
+    studentCount: students.length,
+    requestedLevels: uniqueLevelRows,
+    requestedLevel
+  };
+}
+
+async function assertCenterExamCycleScope({ tenantId, actor, examCycle }) {
+  const scope = await resolveActorExamScope({ tenantId, actor });
+  if (scope?.businessPartnerId && scope.businessPartnerId !== examCycle.businessPartnerId) {
+    throw createHttpError(403, "Hierarchy scope denied", "HIERARCHY_SCOPE_DENIED");
+  }
+}
+
+async function inferMappedExamCourseIdForCycle({ tenantId, examCycleId, levelIds = [] }) {
+  const normalizedLevelIds = Array.from(new Set((Array.isArray(levelIds) ? levelIds : []).map((id) => String(id || "").trim()).filter(Boolean)));
+
+  const [selectionRows, configRows] = await Promise.all([
+    prisma.examEnrollmentLevelWorksheetSelection.findMany({
+      where: {
+        tenantId,
+        ...(normalizedLevelIds.length ? { levelId: { in: normalizedLevelIds } } : {}),
+        list: {
+          is: {
+            tenantId,
+            examCycleId,
+            type: "CENTER_COMBINED"
+          }
+        }
+      },
+      select: {
+        levelId: true,
+        baseWorksheet: {
+          select: {
+            courseId: true
+          }
+        }
+      }
+    }),
+    prisma.examLevelAssessmentConfig.findMany({
+      where: {
+        tenantId,
+        examCycleId,
+        ...(normalizedLevelIds.length ? { levelId: { in: normalizedLevelIds } } : {})
+      },
+      select: {
+        levelId: true,
+        questionBankId: true,
+        worksheet: {
+          select: {
+            courseId: true
+          }
+        }
+      }
+    })
+  ]);
+
+  const questionBankIds = Array.from(new Set(configRows.map((row) => String(row?.questionBankId || "").trim()).filter(Boolean)));
+  const questionBanks = questionBankIds.length
+    ? await prisma.questionBank.findMany({
+        where: {
+          tenantId,
+          id: { in: questionBankIds }
+        },
+        select: {
+          id: true,
+          courseId: true
+        }
+      })
+    : [];
+  const questionBankById = new Map(questionBanks.map((row) => [row.id, row]));
+
+  const candidateCourseIds = new Set();
+
+  for (const row of selectionRows) {
+    const courseId = String(row?.baseWorksheet?.courseId || "").trim();
+    if (courseId) {
+      candidateCourseIds.add(courseId);
+    }
+  }
+
+  for (const row of configRows) {
+    const worksheetCourseId = String(row?.worksheet?.courseId || "").trim();
+    const bankCourseId = String(questionBankById.get(String(row?.questionBankId || "").trim())?.courseId || "").trim();
+    const courseId = worksheetCourseId || bankCourseId;
+    if (courseId) {
+      candidateCourseIds.add(courseId);
+    }
+  }
+
+  if (candidateCourseIds.size !== 1) {
+    return null;
+  }
+
+  return Array.from(candidateCourseIds)[0];
+}
+
+async function getLateEnrollmentMappedLevels({ tenantId, examCycleId }) {
+  const levelsRaw = await getExamCycleLevels({ tenantId, examCycleId });
+  if (!levelsRaw.length) {
+    return [];
+  }
+
+  const levelIds = levelsRaw.map((row) => String(row?.levelId || "")).filter(Boolean);
+  const courseId = await inferMappedExamCourseIdForCycle({
+    tenantId,
+    examCycleId,
+    levelIds
+  });
+
+  if (!courseId) {
+    return [];
+  }
+
+  const levelNumbers = Array.from(
+    new Set(
+      levelsRaw
+        .map((row) => Number(row?.levelRank))
+        .filter((levelRank) => Number.isInteger(levelRank) && levelRank > 0)
+    )
+  );
+
+  const courseLevels = levelNumbers.length
+    ? await prisma.courseLevel.findMany({
+        where: {
+          tenantId,
+          courseId,
+          levelNumber: { in: levelNumbers }
+        },
+        select: {
+          id: true,
+          levelNumber: true
+        }
+      })
+    : [];
+
+  const courseLevelByNumber = new Map(courseLevels.map((row) => [Number(row.levelNumber), row]));
+
+  return levelsRaw
+    .map((row) => {
+      const parsedRank = Number(row?.levelRank);
+      const courseLevel = Number.isInteger(parsedRank) ? courseLevelByNumber.get(parsedRank) : null;
+      if (!courseLevel?.id) {
+        return null;
+      }
+
+      return {
+        levelId: String(row.levelId),
+        levelName: row.levelName || null,
+        levelRank: row.levelRank ?? null,
+        courseId,
+        courseLevelId: courseLevel.id,
+        levelNumber: courseLevel.levelNumber
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aNum = Number(a?.levelNumber);
+      const bNum = Number(b?.levelNumber);
+      if (Number.isInteger(aNum) && Number.isInteger(bNum) && aNum !== bNum) {
+        return aNum - bNum;
+      }
+
+      const aRank = Number(a?.levelRank);
+      const bRank = Number(b?.levelRank);
+      if (Number.isInteger(aRank) && Number.isInteger(bRank) && aRank !== bRank) {
+        return aRank - bRank;
+      }
+
+      return String(a?.levelName || "").localeCompare(String(b?.levelName || ""));
+    });
+}
 
 async function getExamCycleOrThrow({ tenantId, examCycleId }) {
   const examCycle = await prisma.examCycle.findFirst({
@@ -275,19 +468,58 @@ async function resolveReusableExamPackage({ tx, tenantId, examCycleId, levelId }
 
 const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
-  const levelId = String(req.query?.levelId || "").trim();
-
-  if (!levelId) {
-    return res.apiError(400, "levelId is required", "VALIDATION_ERROR");
-  }
+  const requestedLevelId = String(req.query?.levelId || "").trim();
 
   if (!req.auth?.hierarchyNodeId) {
     return res.apiError(400, "Center scope missing", "CENTER_SCOPE_REQUIRED");
   }
 
   const examCycle = await getExamCycleOrThrow({ tenantId: req.auth.tenantId, examCycleId });
+  await assertCenterExamCycleScope({
+    tenantId: req.auth.tenantId,
+    actor: req.auth,
+    examCycle
+  });
   await expirePendingRequestsForCycle({ tenantId: req.auth.tenantId, examCycleId });
   assertLateEnrollmentWriteAllowed(examCycle);
+
+  const mappedLevels = await getLateEnrollmentMappedLevels({
+    tenantId: req.auth.tenantId,
+    examCycleId
+  });
+
+  if (!mappedLevels.length) {
+    return res.apiError(409, "No approved exam package exists for this exam cycle.", "LATE_ENROLLMENT_PACKAGE_NOT_AVAILABLE");
+  }
+
+  const defaultLevelId = mappedLevels[0].levelId;
+  const selectedLevelId = requestedLevelId || defaultLevelId;
+  const selectedLevel = mappedLevels.find((level) => level.levelId === selectedLevelId) || null;
+
+  if (!requestedLevelId) {
+    const counts = await getEnrollmentCounts({
+      tenantId: req.auth.tenantId,
+      examCycleId,
+      centerNodeId: req.auth.hierarchyNodeId
+    });
+
+    return res.apiSuccess("Eligible late enrollment students", {
+      examCycleId,
+      levelId: selectedLevelId,
+      availableLevels: mappedLevels,
+      selectedLevel,
+      eligibleStudents: [],
+      counts
+    });
+  }
+
+  const mappedLevelById = new Map(mappedLevels.map((level) => [level.levelId, level]));
+  const levelId = selectedLevelId;
+
+  if (!mappedLevelById.has(levelId)) {
+    return res.apiError(409, "Selected level is not part of the mapped exam course for this exam cycle", "EXAM_LEVEL_NOT_IN_SCOPE");
+  }
+
   await assertLateEnrollmentAvailabilityForCenter({
     tenantId: req.auth.tenantId,
     examCycleId,
@@ -295,9 +527,17 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
     levelId
   });
 
-  const [enrolledEntries, pendingLateRows, centerEnrollments, counts] = await Promise.all([
+  const [enrolledEntries, pendingLateRows, centerStudents, counts] = await Promise.all([
     prisma.examEnrollmentEntry.findMany({
-      where: { tenantId: req.auth.tenantId, examCycleId },
+      where: {
+        tenantId: req.auth.tenantId,
+        examCycleId,
+        student: {
+          is: {
+            hierarchyNodeId: req.auth.hierarchyNodeId
+          }
+        }
+      },
       select: { studentId: true }
     }),
     prisma.examLateEnrollmentStudent.findMany({
@@ -315,48 +555,52 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
       },
       select: { studentId: true }
     }),
-    prisma.enrollment.findMany({
+    prisma.student.findMany({
       where: {
         tenantId: req.auth.tenantId,
         hierarchyNodeId: req.auth.hierarchyNodeId,
-        status: "ACTIVE",
-        levelId,
-        student: {
-          is: {
-            isActive: true,
-            OR: [
-              { courseId: { not: null } },
-              {
-                assignedCourses: {
-                  some: { tenantId: req.auth.tenantId }
-                }
-              }
-            ]
+        isActive: true,
+        OR: [
+          { courseId: { not: null } },
+          {
+            assignedCourses: {
+              some: { tenantId: req.auth.tenantId }
+            }
+          }
+        ],
+        batchEnrollments: {
+          some: {
+            tenantId: req.auth.tenantId,
+            hierarchyNodeId: req.auth.hierarchyNodeId,
+            status: "ACTIVE",
+            levelId
           }
         }
       },
       select: {
-        levelId: true,
-        level: { select: { id: true, name: true, rank: true } },
-        student: {
-          select: {
-            id: true,
-            admissionNo: true,
-            firstName: true,
-            lastName: true,
-            course: { select: { id: true, code: true, name: true } },
-            assignedCourses: {
-              where: { tenantId: req.auth.tenantId },
-              select: { course: { select: { id: true, code: true, name: true } } },
-              orderBy: { createdAt: "desc" },
-              take: 1
-            }
-          }
+        id: true,
+        admissionNo: true,
+        firstName: true,
+        lastName: true,
+        course: { select: { id: true, code: true, name: true } },
+        assignedCourses: {
+          where: { tenantId: req.auth.tenantId },
+          select: { course: { select: { id: true, code: true, name: true } } },
+          orderBy: { createdAt: "desc" },
+          take: 1
         }
       },
-      orderBy: [{ student: { firstName: "asc" } }, { student: { lastName: "asc" } }]
+      orderBy: [
+        { firstName: "asc" },
+        { lastName: "asc" },
+        { id: "asc" }
+      ]
     }),
-    getEnrollmentCounts({ tenantId: req.auth.tenantId, examCycleId })
+    getEnrollmentCounts({
+      tenantId: req.auth.tenantId,
+      examCycleId,
+      centerNodeId: req.auth.hierarchyNodeId
+    })
   ]);
 
   const excludedStudentIds = new Set([
@@ -364,24 +608,35 @@ const listLateEnrollmentEligibleStudents = asyncHandler(async (req, res) => {
     ...pendingLateRows.map((row) => row.studentId)
   ]);
 
-  const eligibleStudents = centerEnrollments
-    .filter((enrollment) => enrollment?.student?.id && !excludedStudentIds.has(enrollment.student.id))
-    .map((enrollment) => {
-      const fallbackCourse = enrollment.student.assignedCourses?.[0]?.course || null;
+  const selectedLevelForResponse = mappedLevelById.get(levelId);
+  const levelMeta = selectedLevelForResponse
+    ? {
+        id: selectedLevelForResponse.levelId,
+        name: selectedLevelForResponse.levelName,
+        rank: selectedLevelForResponse.levelRank
+      }
+    : null;
+
+  const eligibleStudents = centerStudents
+    .filter((student) => student?.id && !excludedStudentIds.has(student.id))
+    .map((student) => {
+      const fallbackCourse = student.assignedCourses?.[0]?.course || null;
       return {
-        id: enrollment.student.id,
-        admissionNo: enrollment.student.admissionNo,
-        firstName: enrollment.student.firstName,
-        lastName: enrollment.student.lastName,
-        levelId: enrollment.levelId,
-        level: enrollment.level || null,
-        course: enrollment.student.course || fallbackCourse
+        id: student.id,
+        admissionNo: student.admissionNo,
+        firstName: student.firstName,
+        lastName: student.lastName,
+        levelId,
+        level: levelMeta,
+        course: student.course || fallbackCourse
       };
     });
 
   return res.apiSuccess("Eligible late enrollment students", {
     examCycleId,
     levelId,
+    availableLevels: mappedLevels,
+    selectedLevel: selectedLevelForResponse || null,
     eligibleStudents,
     counts
   });
@@ -405,6 +660,16 @@ const createLateEnrollmentRequest = asyncHandler(async (req, res) => {
   }
 
   const examCycle = await getExamCycleOrThrow({ tenantId: req.auth.tenantId, examCycleId });
+  await assertCenterExamCycleScope({
+    tenantId: req.auth.tenantId,
+    actor: req.auth,
+    examCycle
+  });
+  const mappedLevels = await getLateEnrollmentMappedLevels({ tenantId: req.auth.tenantId, examCycleId });
+  if (!mappedLevels.some((level) => String(level?.levelId) === levelId)) {
+    return res.apiError(409, "Selected level is not part of the mapped exam course for this exam cycle", "EXAM_LEVEL_NOT_IN_SCOPE");
+  }
+
   await expirePendingRequestsForCycle({ tenantId: req.auth.tenantId, examCycleId });
   assertLateEnrollmentWriteAllowed(examCycle);
   await assertLateEnrollmentAvailabilityForCenter({
@@ -468,7 +733,8 @@ const createLateEnrollmentRequest = asyncHandler(async (req, res) => {
     })
   ]);
 
-  if (assignedEnrollments.length !== studentIds.length) {
+  const assignedStudentIds = new Set(assignedEnrollments.map((enrollment) => enrollment.studentId));
+  if (assignedStudentIds.size !== studentIds.length) {
     return res.apiError(409, "One or more students are not actively assigned to the selected level", "LATE_ENROLLMENT_LEVEL_MISMATCH");
   }
 
@@ -542,7 +808,11 @@ const createLateEnrollmentRequest = asyncHandler(async (req, res) => {
     }
   });
 
-  const counts = await getEnrollmentCounts({ tenantId: req.auth.tenantId, examCycleId });
+  const counts = await getEnrollmentCounts({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    centerNodeId: centerId
+  });
 
   return res.apiSuccess("Late enrollment request submitted", { request: created, counts }, 201);
 });
@@ -564,6 +834,11 @@ const listLateEnrollmentRequests = asyncHandler(async (req, res) => {
     if (!req.auth.hierarchyNodeId) {
       return res.apiError(400, "Center scope missing", "CENTER_SCOPE_REQUIRED");
     }
+    await assertCenterExamCycleScope({
+      tenantId: req.auth.tenantId,
+      actor: req.auth,
+      examCycle
+    });
     where.centerId = req.auth.hierarchyNodeId;
   } else if (req.auth.role === "FRANCHISE" || req.auth.role === "BP") {
     const scope = await resolveActorExamScope({ tenantId: req.auth.tenantId, actor: req.auth });
@@ -595,12 +870,24 @@ const listLateEnrollmentRequests = asyncHandler(async (req, res) => {
     orderBy: [{ submittedAt: "desc" }, { createdAt: "desc" }]
   });
 
-  const counts = await getEnrollmentCounts({ tenantId: req.auth.tenantId, examCycleId });
+  const counts = await getEnrollmentCounts({
+    tenantId: req.auth.tenantId,
+    examCycleId,
+    ...(req.auth.role === "CENTER" ? { centerNodeId: req.auth.hierarchyNodeId } : {})
+  });
+
+  const normalizedRequests = requests.map(mapLateRequestForResponse);
+  const requestStatusSummary = normalizedRequests.reduce((acc, request) => {
+    const key = String(request?.status || "UNKNOWN");
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   return res.apiSuccess("Late enrollment requests", {
     examCycleId,
     status,
-    requests,
+    requests: normalizedRequests,
+    requestStatusSummary,
     counts
   });
 });

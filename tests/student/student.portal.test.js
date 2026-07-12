@@ -273,6 +273,88 @@ describe("STUDENT PORTAL (API)", () => {
     return { examCycle, examWorksheet };
   }
 
+  async function createTermsMismatchExamAttemptFixture({ published = true } = {}) {
+    const now = Date.now();
+    const examCycle = await prisma.examCycle.create({
+      data: {
+        tenantId: tenant.id,
+        businessPartnerId: businessPartner.id,
+        name: `Terms Mismatch Exam ${randomId("exam")}`,
+        code: `TM-${randomId("code")}`,
+        enrollmentStartAt: new Date(now - 24 * 60 * 60 * 1000),
+        enrollmentEndAt: new Date(now + 24 * 60 * 60 * 1000),
+        practiceStartAt: new Date(now - 12 * 60 * 60 * 1000),
+        examStartsAt: new Date(now - 6 * 60 * 60 * 1000),
+        examEndsAt: new Date(now + 6 * 60 * 60 * 1000),
+        examDurationMinutes: 45,
+        attemptLimit: 1,
+        createdByUserId: superadminUser.id,
+        resultStatus: published ? "PUBLISHED" : "DRAFT",
+        resultPublishedAt: published ? new Date() : null
+      }
+    });
+
+    await prisma.examEnrollmentEntry.create({
+      data: {
+        tenantId: tenant.id,
+        examCycleId: examCycle.id,
+        studentId: student.id,
+        enrolledLevelId: level1.id,
+        isTemporary: false,
+        sourceTeacherUserId: null,
+        createdByUserId: centerUser.id
+      }
+    });
+
+    const examWorksheet = await prisma.worksheet.create({
+      data: {
+        tenantId: tenant.id,
+        title: `Terms Mismatch Worksheet ${randomId("ews")}`,
+        description: "Exam worksheet with stale correctAnswer for terms display tests",
+        levelId: level1.id,
+        createdByUserId: centerUser.id,
+        isPublished: true,
+        generationMode: "EXAM",
+        examCycleId: examCycle.id,
+        timeLimitSeconds: 2700
+      }
+    });
+
+    const termsList = [
+      [4, 5, 15],
+      [4, 5, 16],
+      [4, 5, 13],
+      [4, 5, 17],
+      [4, 5, 12],
+      [4, 5, 14]
+    ];
+
+    await prisma.worksheetQuestion.createMany({
+      data: termsList.map((terms, index) => ({
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        questionNumber: index + 1,
+        operands: { terms, operators: ["", "ADD", "SUB"] },
+        operation: "ADD",
+        // Intentionally stale to assert derived-terms scoring behavior.
+        correctAnswer: 7
+      }))
+    });
+
+    await prisma.worksheetAssignment.create({
+      data: {
+        tenantId: tenant.id,
+        worksheetId: examWorksheet.id,
+        studentId: student.id,
+        createdByUserId: centerUser.id,
+        isActive: true,
+        assignedAt: new Date()
+      }
+    });
+
+    return { examCycle, examWorksheet };
+  }
+
   async function createAssignedWorksheetFixture({ titlePrefix = "WS-SEC", dueDate = null } = {}) {
     const createdWorksheet = await prisma.worksheet.create({
       data: {
@@ -700,6 +782,108 @@ describe("STUDENT PORTAL (API)", () => {
     expect(Array.isArray(submission?.submittedAnswers)).toBe(true);
     expect(submission?.submittedAnswers?.length).toBe(1);
     expect(submission?.submittedAnswers?.[0]).toMatchObject({ questionNumber: 1, answer: 9 });
+  });
+
+  test("POST /api/student/attempts/:id/submit scores terms fixture as 6 correct when answers match displayed column sums", async () => {
+    const { examWorksheet } = await createTermsMismatchExamAttemptFixture({ published: true });
+    const sessionId = `test-session-${randomId("cs")}`;
+
+    const start = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    const questions = start.body?.data?.worksheet?.questions || [];
+    expect(attemptId).toBeTruthy();
+    expect(questions.length).toBe(6);
+
+    const byNumber = new Map(questions.map((q) => [Number(q.questionNumber), q.questionId]));
+    const submitPayload = {
+      [byNumber.get(1)]: { value: 24 },
+      [byNumber.get(2)]: { value: 25 },
+      [byNumber.get(3)]: { value: 22 },
+      [byNumber.get(4)]: { value: 26 },
+      [byNumber.get(5)]: { value: 21 },
+      [byNumber.get(6)]: { value: 23 }
+    };
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({ answersByQuestionId: submitPayload });
+
+    expect(submit.status).toBe(200);
+
+    const submission = await prisma.worksheetSubmission.findUnique({
+      where: { id: attemptId },
+      select: {
+        score: true,
+        correctCount: true,
+        totalQuestions: true,
+        submittedAnswers: true
+      }
+    });
+
+    expect(submission?.correctCount).toBe(6);
+    expect(submission?.totalQuestions).toBe(6);
+    expect(Number(submission?.score || 0)).toBe(100);
+    expect(Array.isArray(submission?.submittedAnswers)).toBe(true);
+    expect(submission?.submittedAnswers?.length).toBe(6);
+  });
+
+  test("POST /api/student/attempts/:id/submit scores terms fixture as 5 correct and 1 wrong when last answer is wrong", async () => {
+    const { examWorksheet } = await createTermsMismatchExamAttemptFixture({ published: true });
+    const sessionId = `test-session-${randomId("cs")}`;
+
+    const start = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    const questions = start.body?.data?.worksheet?.questions || [];
+    expect(attemptId).toBeTruthy();
+    expect(questions.length).toBe(6);
+
+    const byNumber = new Map(questions.map((q) => [Number(q.questionNumber), q.questionId]));
+    const submitPayload = {
+      [byNumber.get(1)]: { value: 24 },
+      [byNumber.get(2)]: { value: 25 },
+      [byNumber.get(3)]: { value: 22 },
+      [byNumber.get(4)]: { value: 26 },
+      [byNumber.get(5)]: { value: 21 },
+      [byNumber.get(6)]: { value: 2 }
+    };
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({ answersByQuestionId: submitPayload });
+
+    expect(submit.status).toBe(200);
+
+    const submission = await prisma.worksheetSubmission.findUnique({
+      where: { id: attemptId },
+      select: {
+        score: true,
+        correctCount: true,
+        totalQuestions: true,
+        submittedAnswers: true
+      }
+    });
+
+    expect(submission?.correctCount).toBe(5);
+    expect(submission?.totalQuestions).toBe(6);
+    expect(Number(submission?.score || 0)).toBeCloseTo(83.33, 2);
+    expect(Array.isArray(submission?.submittedAnswers)).toBe(true);
+    expect(submission?.submittedAnswers?.length).toBe(6);
   });
 
   test("start/resume returns embargoed result for already submitted unpublished exam", async () => {

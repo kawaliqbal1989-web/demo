@@ -2,6 +2,33 @@ import { prisma } from "../lib/prisma.js";
 import crypto from "crypto";
 import { detectAndFlagAbuse } from "./abuse-detection.service.js";
 
+function getWorksheetQuestionTerms(question) {
+  const operands = question?.operands && typeof question.operands === "object" ? question.operands : {};
+  const rawTerms = Array.isArray(operands?.nums)
+    ? operands.nums
+    : Array.isArray(operands?.terms)
+      ? operands.terms
+      : [];
+
+  return rawTerms
+    .map((term) => Number(term))
+    .filter((term) => Number.isFinite(term));
+}
+
+function deriveWorksheetQuestionExpectedAnswer(question) {
+  const operation = String(question?.operation || "").trim().toUpperCase();
+  const terms = getWorksheetQuestionTerms(question);
+
+  // Align scoring with what is rendered to students for vertical/column arithmetic cards.
+  if ((operation === "COLUMN_SUM" || operation === "ADD") && terms.length) {
+    const sum = terms.reduce((acc, term) => acc + term, 0);
+    return Number.isFinite(sum) ? sum : null;
+  }
+
+  const correctAnswer = Number(question?.correctAnswer);
+  return Number.isFinite(correctAnswer) ? correctAnswer : null;
+}
+
 function normalizeAnswers(answers) {
   if (!Array.isArray(answers)) {
     return [];
@@ -57,6 +84,8 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
           },
           select: {
             questionNumber: true,
+            operands: true,
+            operation: true,
             correctAnswer: true
           }
         }
@@ -145,13 +174,13 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
     }
 
     const expectedByQuestion = new Map(
-      worksheet.questions.map((question) => [question.questionNumber, question.correctAnswer])
+      worksheet.questions.map((question) => [question.questionNumber, deriveWorksheetQuestionExpectedAnswer(question)])
     );
 
     let correctCount = 0;
     for (const answer of normalizedAnswers) {
       const expected = expectedByQuestion.get(answer.questionNumber);
-      if (expected !== undefined && answer.answer === expected) {
+      if (expected !== null && expected !== undefined && answer.answer === expected) {
         correctCount += 1;
       }
     }
@@ -255,4 +284,4 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
   return result;
 }
 
-export { submitWorksheet };
+export { submitWorksheet, deriveWorksheetQuestionExpectedAnswer };

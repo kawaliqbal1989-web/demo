@@ -1,6 +1,96 @@
 import { __examResultsInternals } from "../../src/controllers/exam-cycles.controller.js";
 
 describe("exam results fallback metrics", () => {
+  test("array submittedAnswers with terms fixture derives 6 correct using displayed-term expected answers", () => {
+    const submission = {
+      worksheet: {
+        questions: [
+          { id: "wq1", questionNumber: 1, operation: "ADD", operands: { terms: [4, 5, 15], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq2", questionNumber: 2, operation: "ADD", operands: { terms: [4, 5, 16], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq3", questionNumber: 3, operation: "ADD", operands: { terms: [4, 5, 13], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq4", questionNumber: 4, operation: "ADD", operands: { terms: [4, 5, 17], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq5", questionNumber: 5, operation: "ADD", operands: { terms: [4, 5, 12], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq6", questionNumber: 6, operation: "ADD", operands: { terms: [4, 5, 14], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 }
+        ]
+      },
+      submittedAnswers: [
+        { questionNumber: 1, answer: 24 },
+        { questionNumber: 2, answer: 25 },
+        { questionNumber: 3, answer: 22 },
+        { questionNumber: 4, answer: 26 },
+        { questionNumber: 5, answer: 21 },
+        { questionNumber: 6, answer: 23 }
+      ]
+    };
+
+    const metrics = __examResultsInternals.deriveSavedAnswerMetrics(submission);
+
+    expect(metrics).toMatchObject({
+      totalQuestions: 6,
+      answeredCount: 6,
+      correctCount: 6,
+      wrongCount: 0,
+      unansweredCount: 0,
+      percentage: 100
+    });
+  });
+
+  test("array submittedAnswers with last answer wrong derives 5 correct and 1 wrong", () => {
+    const submission = {
+      worksheet: {
+        questions: [
+          { id: "wq1", questionNumber: 1, operation: "ADD", operands: { terms: [4, 5, 15], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq2", questionNumber: 2, operation: "ADD", operands: { terms: [4, 5, 16], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq3", questionNumber: 3, operation: "ADD", operands: { terms: [4, 5, 13], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq4", questionNumber: 4, operation: "ADD", operands: { terms: [4, 5, 17], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq5", questionNumber: 5, operation: "ADD", operands: { terms: [4, 5, 12], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq6", questionNumber: 6, operation: "ADD", operands: { terms: [4, 5, 14], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 }
+        ]
+      },
+      submittedAnswers: [
+        { questionNumber: 1, answer: 24 },
+        { questionNumber: 2, answer: 25 },
+        { questionNumber: 3, answer: 22 },
+        { questionNumber: 4, answer: 26 },
+        { questionNumber: 5, answer: 21 },
+        { questionNumber: 6, answer: 2 }
+      ]
+    };
+
+    const metrics = __examResultsInternals.deriveSavedAnswerMetrics(submission);
+
+    expect(metrics).toMatchObject({
+      totalQuestions: 6,
+      answeredCount: 6,
+      correctCount: 5,
+      wrongCount: 1,
+      unansweredCount: 0
+    });
+  });
+
+  test("empty submitted answers remain safe with unanswered counts", () => {
+    const submission = {
+      worksheet: {
+        questions: [
+          { id: "wq1", questionNumber: 1, operation: "ADD", operands: { terms: [4, 5, 15] }, correctAnswer: 7 },
+          { id: "wq2", questionNumber: 2, operation: "ADD", operands: { terms: [4, 5, 16] }, correctAnswer: 7 }
+        ]
+      },
+      submittedAnswers: []
+    };
+
+    const metrics = __examResultsInternals.deriveSavedAnswerMetrics(submission);
+
+    expect(metrics).toMatchObject({
+      totalQuestions: 2,
+      answeredCount: 0,
+      correctCount: 0,
+      wrongCount: 0,
+      unansweredCount: 2,
+      percentage: 0
+    });
+  });
+
   test("operands fixture keyed by questionBankId scores 6 correct, 0 wrong, 0 unanswered", () => {
     const submission = {
       worksheet: {

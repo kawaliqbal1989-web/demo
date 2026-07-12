@@ -20,6 +20,7 @@ import {
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { generateUsername } from "../utils/username-generator.js";
 import { getEnrollmentCounts } from "./exam-late-enrollment.controller.js";
+import { deriveWorksheetQuestionExpectedAnswer } from "../services/worksheet-submission.service.js";
 
 function csvEscape(value) {
   if (value === null || value === undefined) return "";
@@ -307,7 +308,7 @@ function deriveSavedAnswerMetrics(submission) {
     if (!Number.isFinite(questionNumber)) {
       continue;
     }
-    questionNumberToCorrect.set(questionNumber, normalizeAnswerForComparison(question?.correctAnswer));
+    questionNumberToCorrect.set(questionNumber, normalizeAnswerForComparison(deriveWorksheetQuestionExpectedAnswer(question)));
     if (question?.id) {
       questionIdToNumber.set(String(question.id), questionNumber);
     }
@@ -3025,6 +3026,8 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
                   id: true,
                   questionBankId: true,
                   questionNumber: true,
+                  operands: true,
+                  operation: true,
                   correctAnswer: true
                 }
               }

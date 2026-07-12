@@ -311,6 +311,9 @@ function deriveSavedAnswerMetrics(submission) {
     if (question?.id) {
       questionIdToNumber.set(String(question.id), questionNumber);
     }
+    if (question?.questionBankId) {
+      questionIdToNumber.set(String(question.questionBankId), questionNumber);
+    }
   }
 
   const answersByQuestionNumber = new Map();
@@ -3020,6 +3023,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
               questions: {
                 select: {
                   id: true,
+                  questionBankId: true,
                   questionNumber: true,
                   correctAnswer: true
                 }

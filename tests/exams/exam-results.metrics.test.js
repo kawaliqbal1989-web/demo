@@ -1,6 +1,112 @@
 import { __examResultsInternals } from "../../src/controllers/exam-cycles.controller.js";
 
 describe("exam results fallback metrics", () => {
+  test("operands fixture keyed by questionBankId scores 6 correct, 0 wrong, 0 unanswered", () => {
+    const submission = {
+      worksheet: {
+        questions: [
+          { id: "wq1", questionBankId: "qb1", questionNumber: 1, operands: { nums: [4, 5, 15] }, operation: "COLUMN_SUM", correctAnswer: 24 },
+          { id: "wq2", questionBankId: "qb2", questionNumber: 2, operands: { nums: [4, 5, 16] }, operation: "COLUMN_SUM", correctAnswer: 25 },
+          { id: "wq3", questionBankId: "qb3", questionNumber: 3, operands: { nums: [4, 5, 13] }, operation: "COLUMN_SUM", correctAnswer: 22 },
+          { id: "wq4", questionBankId: "qb4", questionNumber: 4, operands: { nums: [4, 5, 17] }, operation: "COLUMN_SUM", correctAnswer: 26 },
+          { id: "wq5", questionBankId: "qb5", questionNumber: 5, operands: { nums: [4, 5, 12] }, operation: "COLUMN_SUM", correctAnswer: 21 },
+          { id: "wq6", questionBankId: "qb6", questionNumber: 6, operands: { nums: [4, 5, 14] }, operation: "COLUMN_SUM", correctAnswer: 23 }
+        ]
+      },
+      submittedAnswers: {
+        answersByQuestionId: {
+          qb1: { value: "24" },
+          qb2: { value: "25" },
+          qb3: { value: "22" },
+          qb4: { value: "26" },
+          qb5: { value: "21" },
+          qb6: { value: "23" }
+        }
+      }
+    };
+
+    const metrics = __examResultsInternals.deriveSavedAnswerMetrics(submission);
+
+    expect(metrics).toMatchObject({
+      totalQuestions: 6,
+      answeredCount: 6,
+      correctCount: 6,
+      wrongCount: 0,
+      unansweredCount: 0,
+      percentage: 100
+    });
+  });
+
+  test("operands fixture with one wrong answer returns 5 correct and 1 wrong", () => {
+    const submission = {
+      worksheet: {
+        questions: [
+          { id: "wq1", questionBankId: "qb1", questionNumber: 1, operands: { nums: [4, 5, 15] }, operation: "COLUMN_SUM", correctAnswer: 24 },
+          { id: "wq2", questionBankId: "qb2", questionNumber: 2, operands: { nums: [4, 5, 16] }, operation: "COLUMN_SUM", correctAnswer: 25 },
+          { id: "wq3", questionBankId: "qb3", questionNumber: 3, operands: { nums: [4, 5, 13] }, operation: "COLUMN_SUM", correctAnswer: 22 },
+          { id: "wq4", questionBankId: "qb4", questionNumber: 4, operands: { nums: [4, 5, 17] }, operation: "COLUMN_SUM", correctAnswer: 26 },
+          { id: "wq5", questionBankId: "qb5", questionNumber: 5, operands: { nums: [4, 5, 12] }, operation: "COLUMN_SUM", correctAnswer: 21 },
+          { id: "wq6", questionBankId: "qb6", questionNumber: 6, operands: { nums: [4, 5, 14] }, operation: "COLUMN_SUM", correctAnswer: 23 }
+        ]
+      },
+      submittedAnswers: {
+        answersByQuestionId: {
+          qb1: { value: "24" },
+          qb2: { value: "25" },
+          qb3: { value: "22" },
+          qb4: { value: "26" },
+          qb5: { value: "20" },
+          qb6: { value: "23" }
+        }
+      }
+    };
+
+    const metrics = __examResultsInternals.deriveSavedAnswerMetrics(submission);
+
+    expect(metrics).toMatchObject({
+      totalQuestions: 6,
+      answeredCount: 6,
+      correctCount: 5,
+      wrongCount: 1,
+      unansweredCount: 0
+    });
+  });
+
+  test("operands fixture with one blank answer counts blank as unanswered", () => {
+    const submission = {
+      worksheet: {
+        questions: [
+          { id: "wq1", questionBankId: "qb1", questionNumber: 1, operands: { nums: [4, 5, 15] }, operation: "COLUMN_SUM", correctAnswer: 24 },
+          { id: "wq2", questionBankId: "qb2", questionNumber: 2, operands: { nums: [4, 5, 16] }, operation: "COLUMN_SUM", correctAnswer: 25 },
+          { id: "wq3", questionBankId: "qb3", questionNumber: 3, operands: { nums: [4, 5, 13] }, operation: "COLUMN_SUM", correctAnswer: 22 },
+          { id: "wq4", questionBankId: "qb4", questionNumber: 4, operands: { nums: [4, 5, 17] }, operation: "COLUMN_SUM", correctAnswer: 26 },
+          { id: "wq5", questionBankId: "qb5", questionNumber: 5, operands: { nums: [4, 5, 12] }, operation: "COLUMN_SUM", correctAnswer: 21 },
+          { id: "wq6", questionBankId: "qb6", questionNumber: 6, operands: { nums: [4, 5, 14] }, operation: "COLUMN_SUM", correctAnswer: 23 }
+        ]
+      },
+      submittedAnswers: {
+        answersByQuestionId: {
+          qb1: { value: "24" },
+          qb2: { value: "25" },
+          qb3: { value: "22" },
+          qb4: { value: "26" },
+          qb5: { value: " " },
+          qb6: { value: "23" }
+        }
+      }
+    };
+
+    const metrics = __examResultsInternals.deriveSavedAnswerMetrics(submission);
+
+    expect(metrics).toMatchObject({
+      totalQuestions: 6,
+      answeredCount: 5,
+      correctCount: 5,
+      wrongCount: 0,
+      unansweredCount: 1
+    });
+  });
+
   test("saved answers with 5 correct and 1 wrong are derived correctly", () => {
     const submission = {
       worksheet: {

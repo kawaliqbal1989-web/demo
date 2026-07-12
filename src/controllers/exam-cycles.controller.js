@@ -390,6 +390,94 @@ function deriveSavedAnswerMetrics(submission) {
   };
 }
 
+function hasSubmittedAnswersPayload(submission) {
+  if (!submission) return false;
+  const saved = submission.submittedAnswers;
+  if (Array.isArray(saved)) return true;
+  return Boolean(saved && typeof saved === "object");
+}
+
+function countSubmittedAnswersFromPayload(submission) {
+  const saved = submission?.submittedAnswers;
+  if (Array.isArray(saved)) {
+    return saved.length;
+  }
+  if (saved?.answersByQuestionId && typeof saved.answersByQuestionId === "object") {
+    return Object.keys(saved.answersByQuestionId).length;
+  }
+  return null;
+}
+
+function resolveExamResultMetricsForSubmission({ submission, candidateStatus }) {
+  const correctCount = toNullableNumber(submission?.correctCount);
+  const totalQuestions = toNullableNumber(submission?.totalQuestions);
+  const submittedAnswerCount = countSubmittedAnswersFromPayload(submission);
+  const unansweredCount =
+    totalQuestions !== null && submittedAnswerCount !== null
+      ? Math.max(0, totalQuestions - submittedAnswerCount)
+      : null;
+  const wrongCount =
+    totalQuestions !== null && correctCount !== null
+      ? Math.max(0, totalQuestions - correctCount - (unansweredCount || 0))
+      : null;
+  const calculatedPercentage =
+    totalQuestions && totalQuestions > 0 && correctCount !== null && correctCount !== undefined
+      ? roundPercentage((Number(correctCount) / Number(totalQuestions)) * 100)
+      : null;
+  const percentage = calculatedPercentage;
+  const score = toNullableNumber(submission?.score ?? percentage);
+
+  const submissionStatus = String(submission?.status || "").trim().toUpperCase();
+  const isFinalizedCandidate = ["SUBMITTED", "TIMED_OUT"].includes(String(candidateStatus || "").toUpperCase())
+    || ["SUBMITTED", "TIMED_OUT", "REVIEWED"].includes(submissionStatus);
+
+  const derivedMetrics =
+    submission && hasSubmittedAnswersPayload(submission) && isFinalizedCandidate
+      ? deriveSavedAnswerMetrics(submission)
+      : null;
+
+  const preferDerivedMetrics = Boolean(
+    derivedMetrics &&
+      toNullableNumber(derivedMetrics.totalQuestions) !== null &&
+      Number(derivedMetrics.totalQuestions) > 0
+  );
+
+  const resolvedCorrectCount = preferDerivedMetrics
+    ? derivedMetrics.correctCount
+    : correctCount ?? derivedMetrics?.correctCount ?? null;
+  const resolvedTotalQuestions = preferDerivedMetrics
+    ? derivedMetrics.totalQuestions
+    : totalQuestions ?? derivedMetrics?.totalQuestions ?? null;
+  const resolvedWrongCount = preferDerivedMetrics
+    ? derivedMetrics.wrongCount
+    : wrongCount ?? derivedMetrics?.wrongCount ?? null;
+  const resolvedUnansweredCount = preferDerivedMetrics
+    ? derivedMetrics.unansweredCount
+    : unansweredCount ?? derivedMetrics?.unansweredCount ?? null;
+  const resolvedPercentage = preferDerivedMetrics
+    ? derivedMetrics.percentage
+    : percentage ?? derivedMetrics?.percentage ?? null;
+  const resolvedScore = preferDerivedMetrics
+    ? toNullableNumber(derivedMetrics.percentage)
+    : score ?? resolvedPercentage;
+  const resolvedAnsweredCount =
+    resolvedTotalQuestions !== null && resolvedUnansweredCount !== null
+      ? Math.max(0, Number(resolvedTotalQuestions) - Number(resolvedUnansweredCount))
+      : derivedMetrics?.answeredCount ?? submittedAnswerCount ?? 0;
+
+  return {
+    submittedAnswerCount,
+    resolvedCorrectCount,
+    resolvedTotalQuestions,
+    resolvedWrongCount,
+    resolvedUnansweredCount,
+    resolvedPercentage,
+    resolvedScore,
+    resolvedAnsweredCount,
+    preferDerivedMetrics
+  };
+}
+
 function compareExamRankRows(left, right) {
   const leftScore = toNullableNumber(left.score) ?? -Infinity;
   const rightScore = toNullableNumber(right.score) ?? -Infinity;
@@ -3005,6 +3093,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
         select: {
           id: true,
           studentId: true,
+          status: true,
           attemptNo: true,
           score: true,
           correctCount: true,
@@ -3110,44 +3199,18 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     }, new Map());
     const hasDuplicateFinalizedAttemptNo = Array.from(finalizedAttemptNoCounts.values()).some((count) => count > 1);
     const hasAttemptLimitViolation = candidates.some((candidate) => Number(candidate.attemptNo || 1) > 2);
-    const correctCount = toNullableNumber(sub?.correctCount);
-    const totalQuestions = toNullableNumber(sub?.totalQuestions);
-    const submittedAnswerCount = Array.isArray(sub?.submittedAnswers)
-      ? sub.submittedAnswers.length
-      : sub?.submittedAnswers?.answersByQuestionId && typeof sub.submittedAnswers.answersByQuestionId === "object"
-        ? Object.keys(sub.submittedAnswers.answersByQuestionId).length
-        : null;
-    const unansweredCount =
-      totalQuestions !== null && submittedAnswerCount !== null
-        ? Math.max(0, totalQuestions - submittedAnswerCount)
-        : null;
-    const wrongCount =
-      totalQuestions !== null && correctCount !== null
-        ? Math.max(0, totalQuestions - correctCount - (unansweredCount || 0))
-        : null;
-    const calculatedPercentage =
-      totalQuestions && totalQuestions > 0 && correctCount !== null && correctCount !== undefined
-        ? roundPercentage((Number(correctCount) / Number(totalQuestions)) * 100)
-        : null;
-    const percentage = calculatedPercentage;
-    const score = toNullableNumber(sub?.score ?? percentage);
     const candidateStatus = deriveCandidateStatus(statusSubmission, { now });
-    const fallbackMetrics =
-      sub &&
-      ["TIMED_OUT", "SUBMITTED"].includes(candidateStatus) &&
-      (score === null || correctCount === null || totalQuestions === null)
-        ? deriveSavedAnswerMetrics(sub)
-        : null;
-    const resolvedCorrectCount = correctCount ?? fallbackMetrics?.correctCount ?? null;
-    const resolvedTotalQuestions = totalQuestions ?? fallbackMetrics?.totalQuestions ?? null;
-    const resolvedWrongCount = wrongCount ?? fallbackMetrics?.wrongCount ?? null;
-    const resolvedUnansweredCount = unansweredCount ?? fallbackMetrics?.unansweredCount ?? null;
-    const resolvedPercentage = percentage ?? fallbackMetrics?.percentage ?? null;
-    const resolvedScore = score ?? resolvedPercentage;
-    const resolvedAnsweredCount =
-      resolvedTotalQuestions !== null && resolvedUnansweredCount !== null
-        ? Math.max(0, Number(resolvedTotalQuestions) - Number(resolvedUnansweredCount))
-        : fallbackMetrics?.answeredCount ?? submittedAnswerCount ?? 0;
+    const metricResolution = resolveExamResultMetricsForSubmission({
+      submission: sub,
+      candidateStatus
+    });
+    const resolvedCorrectCount = metricResolution.resolvedCorrectCount;
+    const resolvedTotalQuestions = metricResolution.resolvedTotalQuestions;
+    const resolvedWrongCount = metricResolution.resolvedWrongCount;
+    const resolvedUnansweredCount = metricResolution.resolvedUnansweredCount;
+    const resolvedPercentage = metricResolution.resolvedPercentage;
+    const resolvedScore = metricResolution.resolvedScore;
+    const resolvedAnsweredCount = metricResolution.resolvedAnsweredCount;
     const resolvedCompletionTime = resolveCompletionTimeSecondsFromSubmission({
       submission: sub,
       candidateStatus,
@@ -5182,7 +5245,8 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
 const __examResultsInternals = Object.freeze({
   normalizeAnswerForComparison,
   deriveSavedAnswerMetrics,
-  resolveCompletionTimeSecondsFromSubmission
+  resolveCompletionTimeSecondsFromSubmission,
+  resolveExamResultMetricsForSubmission
 });
 
 export {

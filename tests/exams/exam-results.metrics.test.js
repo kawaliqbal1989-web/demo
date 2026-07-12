@@ -1,6 +1,125 @@
 import { __examResultsInternals } from "../../src/controllers/exam-cycles.controller.js";
 
 describe("exam results fallback metrics", () => {
+  test("resolved metrics prefer recomputed values over stale stored score/correctCount for finalized rows", () => {
+    const submission = {
+      status: "REVIEWED",
+      score: 0,
+      correctCount: 0,
+      totalQuestions: 6,
+      worksheet: {
+        questions: [
+          { id: "wq1", questionNumber: 1, operation: "ADD", operands: { terms: [4, 5, 15], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq2", questionNumber: 2, operation: "ADD", operands: { terms: [4, 5, 16], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq3", questionNumber: 3, operation: "ADD", operands: { terms: [4, 5, 13], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq4", questionNumber: 4, operation: "ADD", operands: { terms: [4, 5, 17], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq5", questionNumber: 5, operation: "ADD", operands: { terms: [4, 5, 12], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq6", questionNumber: 6, operation: "ADD", operands: { terms: [4, 5, 14], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 }
+        ]
+      },
+      submittedAnswers: [
+        { questionNumber: 1, answer: 24 },
+        { questionNumber: 2, answer: 25 },
+        { questionNumber: 3, answer: 22 },
+        { questionNumber: 4, answer: 26 },
+        { questionNumber: 5, answer: 21 },
+        { questionNumber: 6, answer: 23 }
+      ]
+    };
+
+    const resolved = __examResultsInternals.resolveExamResultMetricsForSubmission({
+      submission,
+      candidateStatus: "SUBMITTED"
+    });
+
+    expect(resolved).toMatchObject({
+      resolvedCorrectCount: 6,
+      resolvedWrongCount: 0,
+      resolvedUnansweredCount: 0,
+      resolvedTotalQuestions: 6,
+      resolvedPercentage: 100,
+      resolvedScore: 100,
+      preferDerivedMetrics: true
+    });
+  });
+
+  test("resolved metrics derive 5 correct and 1 wrong for one-wrong array answer case", () => {
+    const submission = {
+      status: "REVIEWED",
+      score: 0,
+      correctCount: 0,
+      totalQuestions: 6,
+      worksheet: {
+        questions: [
+          { id: "wq1", questionNumber: 1, operation: "ADD", operands: { terms: [4, 5, 15], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq2", questionNumber: 2, operation: "ADD", operands: { terms: [4, 5, 16], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq3", questionNumber: 3, operation: "ADD", operands: { terms: [4, 5, 13], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq4", questionNumber: 4, operation: "ADD", operands: { terms: [4, 5, 17], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq5", questionNumber: 5, operation: "ADD", operands: { terms: [4, 5, 12], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 },
+          { id: "wq6", questionNumber: 6, operation: "ADD", operands: { terms: [4, 5, 14], operators: ["", "ADD", "SUB"] }, correctAnswer: 7 }
+        ]
+      },
+      submittedAnswers: [
+        { questionNumber: 1, answer: 24 },
+        { questionNumber: 2, answer: 25 },
+        { questionNumber: 3, answer: 22 },
+        { questionNumber: 4, answer: 26 },
+        { questionNumber: 5, answer: 21 },
+        { questionNumber: 6, answer: 2 }
+      ]
+    };
+
+    const resolved = __examResultsInternals.resolveExamResultMetricsForSubmission({
+      submission,
+      candidateStatus: "SUBMITTED"
+    });
+
+    expect(resolved).toMatchObject({
+      resolvedCorrectCount: 5,
+      resolvedWrongCount: 1,
+      resolvedUnansweredCount: 0,
+      resolvedTotalQuestions: 6,
+      resolvedPercentage: 83.33,
+      resolvedScore: 83.33,
+      preferDerivedMetrics: true
+    });
+  });
+
+  test("resolved metrics remain safe when submittedAnswers payload is empty", () => {
+    const submission = {
+      status: "REVIEWED",
+      score: 0,
+      correctCount: 0,
+      totalQuestions: 6,
+      worksheet: {
+        questions: [
+          { id: "wq1", questionNumber: 1, operation: "ADD", operands: { terms: [4, 5, 15] }, correctAnswer: 7 },
+          { id: "wq2", questionNumber: 2, operation: "ADD", operands: { terms: [4, 5, 16] }, correctAnswer: 7 },
+          { id: "wq3", questionNumber: 3, operation: "ADD", operands: { terms: [4, 5, 13] }, correctAnswer: 7 },
+          { id: "wq4", questionNumber: 4, operation: "ADD", operands: { terms: [4, 5, 17] }, correctAnswer: 7 },
+          { id: "wq5", questionNumber: 5, operation: "ADD", operands: { terms: [4, 5, 12] }, correctAnswer: 7 },
+          { id: "wq6", questionNumber: 6, operation: "ADD", operands: { terms: [4, 5, 14] }, correctAnswer: 7 }
+        ]
+      },
+      submittedAnswers: []
+    };
+
+    const resolved = __examResultsInternals.resolveExamResultMetricsForSubmission({
+      submission,
+      candidateStatus: "SUBMITTED"
+    });
+
+    expect(resolved).toMatchObject({
+      resolvedCorrectCount: 0,
+      resolvedWrongCount: 0,
+      resolvedUnansweredCount: 6,
+      resolvedTotalQuestions: 6,
+      resolvedPercentage: 0,
+      resolvedScore: 0,
+      preferDerivedMetrics: true
+    });
+  });
+
   test("array submittedAnswers with terms fixture derives 6 correct using displayed-term expected answers", () => {
     const submission = {
       worksheet: {

@@ -236,15 +236,20 @@ function resolveCompletionTimeSecondsFromSubmission({ submission, candidateStatu
   }
 
   const timeLimitSeconds = toNullableNumber(submission?.worksheet?.timeLimitSeconds);
-  const startMs = toValidDateMs(submission.submittedAt || submission.createdAt);
+  const stored = normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+  const startMs = toValidDateMs(submission.createdAt || submission.submittedAt);
   const finalSubmittedMs = toValidDateMs(submission.finalSubmittedAt);
 
   if (Number.isFinite(finalSubmittedMs)) {
+    if (stored !== null && stored > 0) {
+      return stored;
+    }
     if (!Number.isFinite(startMs)) {
-      return normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+      return stored;
     }
     const elapsed = Math.max(0, Math.floor((finalSubmittedMs - startMs) / 1000));
-    return normalizeExamCompletionTime(elapsed, timeLimitSeconds);
+    const derived = normalizeExamCompletionTime(elapsed, timeLimitSeconds);
+    return derived ?? stored;
   }
 
   if (candidateStatus === "TIMED_OUT") {
@@ -252,9 +257,13 @@ function resolveCompletionTimeSecondsFromSubmission({ submission, candidateStatu
       return 0;
     }
 
+    if (stored !== null && stored > 0) {
+      return stored;
+    }
+
     if (Number.isFinite(startMs)) {
       const lastMeaningfulSaveMs = extractLastMeaningfulAnswerSaveMs(submission);
-      const fallbackUpdatedMs = toValidDateMs(submission.updatedAt);
+      const fallbackUpdatedMs = toValidDateMs(submission.updatedAt || submission.submittedAt);
       const endMs = Number.isFinite(lastMeaningfulSaveMs) ? lastMeaningfulSaveMs : fallbackUpdatedMs;
 
       if (Number.isFinite(endMs)) {
@@ -263,9 +272,8 @@ function resolveCompletionTimeSecondsFromSubmission({ submission, candidateStatu
       }
     }
 
-    const storedTimedOut = normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
-    if (storedTimedOut !== null) {
-      return storedTimedOut;
+    if (stored !== null) {
+      return stored;
     }
 
     if (timeLimitSeconds !== null && timeLimitSeconds > 0) {
@@ -275,7 +283,6 @@ function resolveCompletionTimeSecondsFromSubmission({ submission, candidateStatu
     return null;
   }
 
-  const stored = normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
   if (stored !== null) {
     return stored;
   }
@@ -284,7 +291,13 @@ function resolveCompletionTimeSecondsFromSubmission({ submission, candidateStatu
     return null;
   }
 
-  return normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+  return stored;
+}
+
+function computeAverageCompletionTimeSeconds(rows = []) {
+  const scoredRows = rows.filter((row) => row?.percentage !== null && row?.percentage !== undefined);
+  const totalCompletionTime = scoredRows.reduce((sum, row) => sum + Number(row?.completionTimeSeconds || 0), 0);
+  return scoredRows.length ? Number((totalCompletionTime / scoredRows.length).toFixed(2)) : 0;
 }
 
 function deriveResultOutcome({ candidateStatus, percentage }) {
@@ -3548,8 +3561,7 @@ async function buildExamResultReviewSummary({ tenantId, examCycleId, actor }) {
   const lateEnrollmentCount = results.filter((row) => row.isLateEnrollment).length;
   const totalScore = scored.reduce((sum, row) => sum + Number(row.percentage || 0), 0);
   const avgScore = scored.length ? Number((totalScore / scored.length).toFixed(2)) : 0;
-  const totalCompletionTime = scored.reduce((sum, row) => sum + Number(row.completionTimeSeconds || 0), 0);
-  const avgCompletionTimeSeconds = scored.length ? Number((totalCompletionTime / scored.length).toFixed(2)) : 0;
+  const avgCompletionTimeSeconds = computeAverageCompletionTimeSeconds(results);
 
   const levelWiseMap = new Map();
   for (const row of results) {
@@ -5246,7 +5258,8 @@ const __examResultsInternals = Object.freeze({
   normalizeAnswerForComparison,
   deriveSavedAnswerMetrics,
   resolveCompletionTimeSecondsFromSubmission,
-  resolveExamResultMetricsForSubmission
+  resolveExamResultMetricsForSubmission,
+  computeAverageCompletionTimeSeconds
 });
 
 export {

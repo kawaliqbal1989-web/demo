@@ -1,6 +1,48 @@
 import { __examResultsInternals } from "../../src/controllers/exam-cycles.controller.js";
 
 describe("exam results fallback metrics", () => {
+  test("stored completionTimeSeconds=37 is preserved for finalized rows even when derived elapsed is zero", () => {
+    const completion = __examResultsInternals.resolveCompletionTimeSecondsFromSubmission({
+      submission: {
+        createdAt: "2026-07-12T10:00:00.000Z",
+        // Legacy rows may have submittedAt rewritten to final submit time.
+        submittedAt: "2026-07-12T10:00:37.000Z",
+        finalSubmittedAt: "2026-07-12T10:00:37.000Z",
+        completionTimeSeconds: 37,
+        worksheet: { timeLimitSeconds: 600 }
+      },
+      candidateStatus: "SUBMITTED",
+      answeredCount: 6
+    });
+
+    expect(completion).toBe(37);
+  });
+
+  test("average completion uses resolved completion seconds from scored rows", () => {
+    const avg = __examResultsInternals.computeAverageCompletionTimeSeconds([
+      { percentage: 100, completionTimeSeconds: 37 },
+      { percentage: 83.33, completionTimeSeconds: 29 },
+      { percentage: null, completionTimeSeconds: 999 }
+    ]);
+
+    expect(avg).toBe(33);
+  });
+
+  test("completion resolver keeps no-answer timed-out row at 0 when no reliable duration evidence exists", () => {
+    const completion = __examResultsInternals.resolveCompletionTimeSecondsFromSubmission({
+      submission: {
+        createdAt: "2026-07-12T10:00:00.000Z",
+        submittedAt: "2026-07-12T10:00:00.000Z",
+        worksheet: { timeLimitSeconds: 600 },
+        submittedAnswers: []
+      },
+      candidateStatus: "TIMED_OUT",
+      answeredCount: 0
+    });
+
+    expect(completion).toBe(0);
+  });
+
   test("resolved metrics prefer recomputed values over stale stored score/correctCount for finalized rows", () => {
     const submission = {
       status: "REVIEWED",

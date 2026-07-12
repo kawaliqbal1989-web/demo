@@ -76,6 +76,10 @@ describe("StudentWorksheetAttemptPage", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-21T00:00:00.000Z"));
     localStorage.clear();
+    Object.defineProperty(document.documentElement, "requestFullscreen", {
+      configurable: true,
+      value: vi.fn().mockResolvedValue(undefined)
+    });
 
     const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
     startOrResumeStudentWorksheetAttempt.mockResolvedValue(buildAttemptResponse());
@@ -112,6 +116,7 @@ describe("StudentWorksheetAttemptPage", () => {
 
   afterEach(() => {
     cleanup();
+    delete document.documentElement.requestFullscreen;
     vi.useRealTimers();
     vi.resetAllMocks();
   });
@@ -135,6 +140,56 @@ describe("StudentWorksheetAttemptPage", () => {
 
     expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
     expect(screen.getByText("Addition")).toBeInTheDocument();
+  });
+
+  it("opens an official second attempt in a dedicated exam tab without starting it", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: { data: { id: "w1", title: "Exam Worksheet", generationMode: "EXAM", timeLimitSeconds: 600, questions: [] } }
+    });
+    const openSpy = vi.spyOn(window, "open").mockReturnValue({});
+    window.history.replaceState({}, "", "/student/worksheets/w1?startSecondAttempt=1");
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("Open Exam Page"));
+
+    const openedUrl = new URL(openSpy.mock.calls[0][0]);
+    expect(openedUrl.pathname).toBe("/student/worksheets/w1");
+    expect(openedUrl.searchParams.get("examMode")).toBe("1");
+    expect(openedUrl.searchParams.get("startSecondAttempt")).toBe("1");
+    expect(openSpy).toHaveBeenCalledWith(expect.any(String), "_blank", "noopener,noreferrer");
+    expect(startOrResumeStudentWorksheetAttempt).not.toHaveBeenCalled();
+  });
+
+  it("shows the popup-blocked message without starting an official attempt", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: { data: { id: "w1", title: "Exam Worksheet", generationMode: "EXAM", timeLimitSeconds: 600, questions: [] } }
+    });
+    vi.spyOn(window, "open").mockReturnValue(null);
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("Open Exam Page"));
+
+    expect(screen.getByText("The Exam page was blocked by your browser. Allow pop-ups and try again.")).toBeInTheDocument();
+    expect(startOrResumeStudentWorksheetAttempt).not.toHaveBeenCalled();
   });
 
   it("does not block when attempt 1 is timed out and attempt 2 is in progress", async () => {
@@ -189,7 +244,7 @@ describe("StudentWorksheetAttemptPage", () => {
     }));
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1&examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
         </Routes>
@@ -200,7 +255,7 @@ describe("StudentWorksheetAttemptPage", () => {
 
     expect(screen.queryByText(/already submitted\. starting a new attempt is not available\./i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
@@ -256,7 +311,7 @@ describe("StudentWorksheetAttemptPage", () => {
     );
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1&examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
           <Route path="/student/exams" element={<div>Exams Landing</div>} />
@@ -266,7 +321,7 @@ describe("StudentWorksheetAttemptPage", () => {
 
     await flushAsync();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     expect(screen.getByText("Exams Landing")).toBeInTheDocument();
@@ -322,7 +377,7 @@ describe("StudentWorksheetAttemptPage", () => {
     );
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1&examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
           <Route path="/student/exams" element={<div>Exams Landing</div>} />
@@ -332,7 +387,7 @@ describe("StudentWorksheetAttemptPage", () => {
 
     await flushAsync();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     expect(screen.getByText("Exams Landing")).toBeInTheDocument();
@@ -388,7 +443,7 @@ describe("StudentWorksheetAttemptPage", () => {
     );
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1&examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
           <Route path="/student/exams" element={<div>Exams Landing</div>} />
@@ -398,7 +453,7 @@ describe("StudentWorksheetAttemptPage", () => {
 
     await flushAsync();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     expect(screen.getByText("Exams Landing")).toBeInTheDocument();
@@ -519,7 +574,7 @@ describe("StudentWorksheetAttemptPage", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
           <Route path="/student/exams" element={<div>Exams Landing</div>} />
@@ -529,12 +584,13 @@ describe("StudentWorksheetAttemptPage", () => {
 
     await flushAsync();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "22" } });
-    fireEvent.click(screen.getAllByText("End Test")[0]);
-    fireEvent.click(screen.getByText("End test"));
+    fireEvent.click(screen.getAllByText("Force Exit & Submit")[0]);
+    expect(screen.getByRole("heading", { name: "Force exit and submit?" })).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "Force Exit & Submit" }).at(-1));
 
     await flushAsync();
 
@@ -590,7 +646,7 @@ describe("StudentWorksheetAttemptPage", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
           <Route path="/student/exams" element={<div>Exams Landing</div>} />
@@ -600,12 +656,12 @@ describe("StudentWorksheetAttemptPage", () => {
 
     await flushAsync();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "22" } });
-    fireEvent.click(screen.getAllByText("End Test")[0]);
-    fireEvent.click(screen.getByText("End test"));
+    fireEvent.click(screen.getAllByText("Force Exit & Submit")[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Force Exit & Submit" }).at(-1));
 
     await flushAsync();
 
@@ -656,7 +712,7 @@ describe("StudentWorksheetAttemptPage", () => {
     });
 
     render(
-      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+      <MemoryRouter initialEntries={["/student/worksheets/w1?examMode=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
           <Route path="/student/exams" element={<div>Exams Landing</div>} />
@@ -666,12 +722,12 @@ describe("StudentWorksheetAttemptPage", () => {
 
     await flushAsync();
 
-    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    fireEvent.click(screen.getByText("Start Exam"));
     await flushAsync();
 
     fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "22" } });
-    fireEvent.click(screen.getAllByText("End Test")[0]);
-    fireEvent.click(screen.getByText("End test"));
+    fireEvent.click(screen.getAllByText("Force Exit & Submit")[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Force Exit & Submit" }).at(-1));
 
     await flushAsync();
 

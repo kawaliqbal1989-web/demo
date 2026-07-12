@@ -184,6 +184,7 @@ function StudentWorksheetAttemptPage() {
   const [showAbacus, setShowAbacus] = useState(false);
   const [startConfirmed, setStartConfirmed] = useState(false);
   const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+  const [examModeWarning, setExamModeWarning] = useState("");
   const [questionFontPx, setQuestionFontPx] = useState(() => {
     try {
       const raw = localStorage.getItem("student_ws_question_font_px");
@@ -195,12 +196,15 @@ function StudentWorksheetAttemptPage() {
     }
   });
 
-  const startSecondAttempt = new URLSearchParams(location.search).get("startSecondAttempt") === "1";
-  const viewSubmissionMode = new URLSearchParams(location.search).get("viewSubmission") === "1";
+  const searchParams = new URLSearchParams(location.search);
+  const startSecondAttempt = searchParams.get("startSecondAttempt") === "1";
+  const viewSubmissionMode = searchParams.get("viewSubmission") === "1";
+  const examModeRequested = searchParams.get("examMode") === "1";
   const isOfficialExamWorksheet = useMemo(
     () => String(worksheet?.generationMode || worksheetPreview?.generationMode || "").toUpperCase() === "EXAM",
     [worksheet?.generationMode, worksheetPreview?.generationMode]
   );
+  const isDedicatedExamMode = examModeRequested && isOfficialExamWorksheet && !viewSubmissionMode;
   const attemptId = attempt?.attemptId || null;
   const serverOffsetMsRef = useRef(0);
   const versionRef = useRef(0);
@@ -213,6 +217,7 @@ function StudentWorksheetAttemptPage() {
   const autoSubmitRetryTimerRef = useRef(null);
   const latestAnswersRef = useRef({});
   const tabIdRef = useRef(`${Date.now()}_${Math.floor(Math.random() * 100000)}`);
+  const examLostVisibilityRef = useRef(false);
 
   useEffect(() => {
     latestAnswersRef.current = answersByQuestionId;
@@ -698,6 +703,8 @@ function StudentWorksheetAttemptPage() {
 
   const attemptStatus = attempt?.status ? String(attempt.status) : "NOT_STARTED";
   const isLocked = viewSubmissionMode || Boolean(result) || multiTabLocked || attemptStatus === "SUBMITTED" || attemptStatus === "TIMED_OUT";
+  const hasActiveDedicatedExam =
+    isDedicatedExamMode && startConfirmed && attemptStatus === "IN_PROGRESS" && !result && !submitting;
   const timeLimitSeconds = Number.isFinite(Number(worksheet?.timeLimitSeconds)) && Number(worksheet.timeLimitSeconds) > 0
     ? Number(worksheet.timeLimitSeconds)
     : null;
@@ -902,24 +909,54 @@ function StudentWorksheetAttemptPage() {
 
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState !== "hidden") return;
-      if (pendingSaveRef.current) {
-        void flushSave();
+      if (document.visibilityState === "hidden") {
+        if (pendingSaveRef.current) void flushSave();
+        if (hasActiveDedicatedExam) examLostVisibilityRef.current = true;
+      } else if (hasActiveDedicatedExam && examLostVisibilityRef.current) {
+        examLostVisibilityRef.current = false;
+        setExamModeWarning("You left the Exam page. The timer continued while the page was hidden.");
       }
     };
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
-  }, [attemptId, isLocked]);
+  }, [attemptId, hasActiveDedicatedExam, isLocked]);
 
   useEffect(() => {
-    const onBeforeUnload = () => {
+    const onBeforeUnload = (event) => {
       if (pendingSaveRef.current) {
         void flushSave();
+      }
+      if (hasActiveDedicatedExam) {
+        event.preventDefault();
+        event.returnValue = "";
       }
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [attemptId, isLocked]);
+  }, [attemptId, hasActiveDedicatedExam, isLocked]);
+
+  useEffect(() => {
+    if (!hasActiveDedicatedExam) return;
+    const guardedState = { ...(window.history.state || {}), dedicatedExamGuard: true };
+    window.history.pushState(guardedState, "", window.location.href);
+    const onPopState = () => {
+      window.history.pushState(guardedState, "", window.location.href);
+      setExamModeWarning("The Exam cannot be left without final submission.");
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [hasActiveDedicatedExam]);
+
+  useEffect(() => {
+    if (!hasActiveDedicatedExam) return;
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        setExamModeWarning("Fullscreen mode was exited. Return to fullscreen or use Force Exit & Submit.");
+      }
+    };
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, [hasActiveDedicatedExam]);
 
   useEffect(() => {
     if (!attemptId || !isCountdownMode || result) {
@@ -1060,6 +1097,40 @@ function StudentWorksheetAttemptPage() {
     await runSubmit();
   };
 
+  const requestExamFullscreen = async () => {
+    try {
+      await document.documentElement.requestFullscreen?.();
+      setExamModeWarning("");
+    } catch {
+      // Fullscreen rejection must not block the attempt.
+    }
+  };
+
+  const handleInstructionPrimaryAction = async () => {
+    if (isOfficialExamWorksheet && !examModeRequested) {
+      const examUrl = new URL(window.location.href);
+      examUrl.searchParams.delete("viewSubmission");
+      examUrl.searchParams.set("examMode", "1");
+      const examWindow = window.open(examUrl.toString(), "_blank", "noopener,noreferrer");
+      if (examWindow) navigate("/student/exams");
+      else setError("The Exam page was blocked by your browser. Allow pop-ups and try again.");
+      return;
+    }
+    if (isDedicatedExamMode) await requestExamFullscreen();
+    setStartConfirmed(true);
+  };
+
+  const handleInstructionSecondaryAction = () => {
+    if (isDedicatedExamMode) {
+      window.close();
+      window.setTimeout(() => {
+        if (!window.closed) navigate("/student/exams");
+      }, 0);
+      return;
+    }
+    navigate("/student/worksheets");
+  };
+
   if (loading) {
     return (
       <div className="card">
@@ -1076,7 +1147,10 @@ function StudentWorksheetAttemptPage() {
     const isExamWorksheetAlreadySubmitted = alreadySubmitted && !startSecondAttempt && !viewSubmissionMode;
 
     return (
-      <div className="card" style={{ display: "grid", gap: 16, maxWidth: 760, margin: "0 auto" }}>
+      <div className="card" style={{
+        display: "grid", gap: 16, maxWidth: 760, margin: "0 auto",
+        ...(isDedicatedExamMode ? { position: "fixed", inset: 0, zIndex: 10000, width: "100vw", maxWidth: "none", height: "100dvh", minHeight: "100vh", overflowY: "auto", background: "var(--color-bg-primary)", padding: 24 } : {})
+      }}>
         <div>
           <h2 style={{ marginTop: 0, marginBottom: 8 }}>{worksheetPreview.title || "Worksheet"}</h2>
           <p style={{ margin: 0, color: "var(--color-text-muted)" }}>
@@ -1111,12 +1185,12 @@ function StudentWorksheetAttemptPage() {
         ) : null}
 
         <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <button className="button secondary" style={{ width: "auto" }} onClick={() => navigate("/student/worksheets")}>
-            Back
+          <button className="button secondary" style={{ width: "auto" }} onClick={handleInstructionSecondaryAction}>
+            {isDedicatedExamMode ? "Cancel" : "Back"}
           </button>
           {!isExamWorksheetAlreadySubmitted ? (
-            <button className="button" style={{ width: "auto" }} onClick={() => setStartConfirmed(true)} disabled={alreadySubmitted}>
-              I Understand, Start Worksheet
+            <button className="button" style={{ width: "auto" }} onClick={() => void handleInstructionPrimaryAction()} disabled={alreadySubmitted}>
+              {isDedicatedExamMode ? "Start Exam" : isOfficialExamWorksheet ? "Open Exam Page" : "I Understand, Start Worksheet"}
             </button>
           ) : null}
         </div>
@@ -1276,7 +1350,10 @@ function StudentWorksheetAttemptPage() {
   };
 
   return (
-    <div className={useExamPageStyling ? "ws-attempt-page ws-attempt-page--exam" : "ws-attempt-page"}>
+    <div
+      className={useExamPageStyling ? "ws-attempt-page ws-attempt-page--exam" : "ws-attempt-page"}
+      style={isDedicatedExamMode ? { position: "fixed", inset: 0, zIndex: 10000, width: "100vw", height: "100dvh", minHeight: "100vh", overflowY: "auto", background: "var(--color-bg-primary)" } : undefined}
+    >
       <div className={useExamPageStyling ? "ws-attempt-page__panel" : ""} style={{ display: "grid", gap: 12, paddingBottom: 110 }}>
         <div className={useExamPageStyling ? "ws-exam-shell" : ""}>
         <div
@@ -1294,7 +1371,7 @@ function StudentWorksheetAttemptPage() {
         >
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             {/* Back button: compact for exam styling, full for standard */}
-            <button
+            {!isDedicatedExamMode ? <button
               className={useExamPageStyling ? "button secondary" : "button secondary"}
               style={useExamPageStyling ? { width: "36px", height: "36px", padding: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" } : { width: "auto" }}
               onClick={() => navigate("/student/worksheets") }
@@ -1307,9 +1384,9 @@ function StudentWorksheetAttemptPage() {
               ) : (
                 "Back"
               )}
-            </button>
+            </button> : null}
 
-            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {!isDedicatedExamMode ? <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>Font</span>
               <button
                 className="button secondary"
@@ -1347,9 +1424,9 @@ function StudentWorksheetAttemptPage() {
                 A+
               </button>
               <span className="muted" style={{ fontSize: 12, width: 32, textAlign: "right" }}>{questionFontPx}px</span>
-            </div>
+            </div> : null}
 
-            {!useExamPageStyling ? (
+            {!useExamPageStyling && !isDedicatedExamMode ? (
               <button
                 className={showAbacus ? "button" : "button secondary"}
                 type="button"
@@ -1364,7 +1441,9 @@ function StudentWorksheetAttemptPage() {
             <div>
               <div className={useExamPageStyling ? "ws-exam-title" : ""} style={{ fontWeight: 700 }}>{worksheetTitle}</div>
               <div style={{ fontSize: 12, marginTop: 6 }} className="muted">
-                {useExamPageStyling
+                {isDedicatedExamMode
+                  ? `Answered: ${answeredCount}/${totalQuestions}`
+                  : useExamPageStyling
                   ? `Worksheet · ${totalQuestions} Questions`
                   : (
                     <>
@@ -1388,14 +1467,14 @@ function StudentWorksheetAttemptPage() {
             <div className="ws-countdown-pill">
               {timerLabel}: <strong className="attempt-header-strong" style={{ fontWeight: 700 }}>{timerText}</strong>
             </div>
-            {useExamPageStyling ? (
+            {useExamPageStyling || isDedicatedExamMode ? (
               <button
                 className="button ws-end-test"
                 style={{ width: "auto" }}
                 onClick={() => void onSubmit()}
                 disabled={isLocked || submitting || !questionRows.length}
               >
-                {isExamWorksheet ? "End Test" : submitting ? "Submitting…" : "Submit"}
+                {isDedicatedExamMode ? "Force Exit & Submit" : isExamWorksheet ? "End Test" : submitting ? "Submitting…" : "Submit"}
               </button>
             ) : null}
           </div>
@@ -1410,7 +1489,7 @@ function StudentWorksheetAttemptPage() {
         </div>
       ) : null}
 
-      {showAbacus ? (
+      {showAbacus && !isDedicatedExamMode ? (
         <div className="card" style={{ overflow: "auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <strong style={{ fontSize: 14 }}>🧮 Virtual Abacus</strong>
@@ -1425,6 +1504,17 @@ function StudentWorksheetAttemptPage() {
           <p className="error" style={{ margin: 0 }}>
             {error}
           </p>
+        </div>
+      ) : null}
+
+      {examModeWarning && isDedicatedExamMode ? (
+        <div className="card" role="alert" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span>{examModeWarning}</span>
+          {!document.fullscreenElement ? (
+            <button className="button secondary" type="button" style={{ width: "auto" }} onClick={() => void requestExamFullscreen()}>
+              Return to Fullscreen
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -1551,7 +1641,7 @@ function StudentWorksheetAttemptPage() {
         </div>
       ) : null}
 
-      {!useExamPageStyling ? (
+      {!useExamPageStyling && !isDedicatedExamMode ? (
         <div
           className="card"
           style={{
@@ -1581,7 +1671,7 @@ function StudentWorksheetAttemptPage() {
         </div>
       ) : null}
 
-      {useExamPageStyling ? (
+      {useExamPageStyling || isDedicatedExamMode ? (
         <div
           className="card ws-exam-footer"
           style={{
@@ -1603,7 +1693,7 @@ function StudentWorksheetAttemptPage() {
               onClick={() => void onSubmit()}
               disabled={isLocked || submitting || !questionRows.length}
             >
-              {isExamWorksheet ? "End Test" : submitting ? "Submitting…" : "Submit"}
+              {isDedicatedExamMode ? "Force Exit & Submit" : isExamWorksheet ? "End Test" : submitting ? "Submitting…" : "Submit"}
             </button>
           </div>
         </div>
@@ -1625,16 +1715,18 @@ function StudentWorksheetAttemptPage() {
           }}
         >
           <div className="card" style={{ maxWidth: 420, width: "100%" }}>
-            <h3 style={{ marginTop: 0 }}>{isExamWorksheet ? "End test?" : "Submit worksheet?"}</h3>
+            <h3 style={{ marginTop: 0 }}>{isDedicatedExamMode ? "Force exit and submit?" : isExamWorksheet ? "End test?" : "Submit worksheet?"}</h3>
             <p style={{ marginTop: 0, color: "var(--color-text-muted)" }}>
-              You won’t be able to edit answers after {isExamWorksheet ? "ending" : "submitting"}.
+              {isDedicatedExamMode
+                ? "This will permanently submit your current answers and end the Exam. You will not be able to resume this attempt."
+                : `You won’t be able to edit answers after ${isExamWorksheet ? "ending" : "submitting"}.`}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button className="button secondary" style={{ width: "auto" }} onClick={() => setConfirmOpen(false)}>
-                Cancel
+                {isDedicatedExamMode ? "Continue Exam" : "Cancel"}
               </button>
               <button className="button" style={{ width: "auto" }} onClick={() => void doSubmitConfirmed()}>
-                {isExamWorksheet ? "End test" : "Confirm submit"}
+                {isDedicatedExamMode ? "Force Exit & Submit" : isExamWorksheet ? "End test" : "Confirm submit"}
               </button>
             </div>
           </div>

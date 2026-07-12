@@ -227,7 +227,7 @@ function StudentWorksheetAttemptPage() {
     setWorksheetPreview(null);
     setAttempt(null);
     setAnswersByQuestionId({});
-    setStartConfirmed(viewSubmissionMode);
+    setStartConfirmed(false);
     setAlreadySubmitted(false);
     autoSubmitTriggeredRef.current = false;
     autoSubmitRetryCountRef.current = 0;
@@ -246,7 +246,11 @@ function StudentWorksheetAttemptPage() {
         }
 
         if (worksheetRes.status === "fulfilled") {
-          setWorksheetPreview(worksheetRes.value?.data?.data || null);
+          const worksheetData = worksheetRes.value?.data?.data || null;
+          setWorksheetPreview(worksheetData);
+          if (viewSubmissionMode) {
+            setWorksheet(worksheetData);
+          }
         } else {
           throw worksheetRes.reason;
         }
@@ -277,6 +281,21 @@ function StudentWorksheetAttemptPage() {
         const isCurrentAttemptTerminal = ["SUBMITTED", "TIMED_OUT"].includes(currentAttemptStatus);
         const shouldBlockForSubmittedAttempt = !startSecondAttempt && !viewSubmissionMode && isCurrentAttemptTerminal;
         setAlreadySubmitted(shouldBlockForSubmittedAttempt);
+
+        if (viewSubmissionMode && currentAttempt) {
+          setAttempt((prev) => ({
+            attemptId: currentAttempt.attemptId || prev?.attemptId || null,
+            worksheetId,
+            status: currentAttemptStatus || "NOT_STARTED",
+            attemptNo: Number(currentAttempt.attemptNo || 1),
+            startedAt: currentAttempt.submittedAt || prev?.startedAt || null,
+            endsAt: null,
+            serverNow: null,
+            timerMode: null,
+            worksheetKind: null
+          }));
+        }
+
         if (shouldBlockForSubmittedAttempt) {
           setError(
             currentAttemptStatus === "TIMED_OUT"
@@ -335,6 +354,10 @@ function StudentWorksheetAttemptPage() {
   }, [worksheetId]);
 
   useEffect(() => {
+    if (viewSubmissionMode) {
+      return;
+    }
+
     if (!startConfirmed) {
       return;
     }
@@ -626,7 +649,7 @@ function StudentWorksheetAttemptPage() {
   };
 
   const attemptStatus = attempt?.status ? String(attempt.status) : "NOT_STARTED";
-  const isLocked = Boolean(result) || multiTabLocked || attemptStatus === "SUBMITTED" || attemptStatus === "TIMED_OUT";
+  const isLocked = viewSubmissionMode || Boolean(result) || multiTabLocked || attemptStatus === "SUBMITTED" || attemptStatus === "TIMED_OUT";
   const timeLimitSeconds = Number.isFinite(Number(worksheet?.timeLimitSeconds)) && Number(worksheet.timeLimitSeconds) > 0
     ? Number(worksheet.timeLimitSeconds)
     : null;
@@ -954,7 +977,7 @@ function StudentWorksheetAttemptPage() {
     );
   }
 
-  if (!startConfirmed && worksheetPreview) {
+  if (!viewSubmissionMode && !startConfirmed && worksheetPreview) {
     const previewQuestionCount = Array.isArray(worksheetPreview.questions) ? worksheetPreview.questions.length : 0;
     const previewTimeLimit = Number.isFinite(Number(worksheetPreview.timeLimitSeconds))
       ? formatSeconds(worksheetPreview.timeLimitSeconds)

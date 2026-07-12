@@ -131,6 +131,161 @@ function toNullableNumber(value) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function toValidDateMs(value) {
+  if (!value) return NaN;
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : NaN;
+}
+
+function resolveAnswerPayloadValue(raw) {
+  if (raw === null || raw === undefined) return raw;
+  if (typeof raw !== "object" || Array.isArray(raw)) return raw;
+
+  if (Object.prototype.hasOwnProperty.call(raw, "answer")) return raw.answer;
+  if (Object.prototype.hasOwnProperty.call(raw, "value")) return raw.value;
+  if (Object.prototype.hasOwnProperty.call(raw, "enteredAnswer")) return raw.enteredAnswer;
+
+  return null;
+}
+
+function normalizeAnswerForComparison(raw) {
+  const value = resolveAnswerPayloadValue(raw);
+
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? String(value) : null;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  const commaStripped = text.replaceAll(",", "");
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(commaStripped)) {
+    const numeric = Number(commaStripped);
+    return Number.isFinite(numeric) ? String(numeric) : text;
+  }
+
+  return text;
+}
+
+function resolveQuestionNumberFromAnswerEntry(entry, { questionIdToNumber, questionNumberToCorrect }) {
+  const byQuestionId = entry?.questionId ?? entry?.worksheetQuestionId;
+  if (byQuestionId !== null && byQuestionId !== undefined && byQuestionId !== "") {
+    const mapped = questionIdToNumber.get(String(byQuestionId));
+    if (Number.isFinite(mapped) && questionNumberToCorrect.has(mapped)) {
+      return mapped;
+    }
+  }
+
+  const questionNumber = Number(entry?.questionNumber);
+  if (Number.isFinite(questionNumber) && questionNumberToCorrect.has(questionNumber)) {
+    return questionNumber;
+  }
+
+  return null;
+}
+
+function extractLastMeaningfulAnswerSaveMs(submission) {
+  const payload = submission?.submittedAnswers;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return NaN;
+  }
+
+  const byQuestionId = payload.answersByQuestionId;
+  let hasMeaningfulAnswer = false;
+  let latestMs = NaN;
+
+  if (byQuestionId && typeof byQuestionId === "object" && !Array.isArray(byQuestionId)) {
+    for (const valueObj of Object.values(byQuestionId)) {
+      const normalized = normalizeAnswerForComparison(valueObj);
+      if (normalized === null) {
+        continue;
+      }
+
+      hasMeaningfulAnswer = true;
+      for (const field of ["savedAt", "updatedAt", "lastSavedAt", "answeredAt"]) {
+        const fieldMs = toValidDateMs(valueObj?.[field]);
+        if (Number.isFinite(fieldMs)) {
+          latestMs = Number.isFinite(latestMs) ? Math.max(latestMs, fieldMs) : fieldMs;
+        }
+      }
+    }
+  }
+
+  if (hasMeaningfulAnswer) {
+    for (const field of ["savedAt", "updatedAt", "lastSavedAt"]) {
+      const fieldMs = toValidDateMs(payload[field]);
+      if (Number.isFinite(fieldMs)) {
+        latestMs = Number.isFinite(latestMs) ? Math.max(latestMs, fieldMs) : fieldMs;
+      }
+    }
+  }
+
+  return latestMs;
+}
+
+function resolveCompletionTimeSecondsFromSubmission({ submission, candidateStatus, answeredCount }) {
+  if (!submission) {
+    return null;
+  }
+
+  const timeLimitSeconds = toNullableNumber(submission?.worksheet?.timeLimitSeconds);
+  const startMs = toValidDateMs(submission.submittedAt || submission.createdAt);
+  const finalSubmittedMs = toValidDateMs(submission.finalSubmittedAt);
+
+  if (Number.isFinite(finalSubmittedMs)) {
+    if (!Number.isFinite(startMs)) {
+      return normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+    }
+    const elapsed = Math.max(0, Math.floor((finalSubmittedMs - startMs) / 1000));
+    return normalizeExamCompletionTime(elapsed, timeLimitSeconds);
+  }
+
+  if (candidateStatus === "TIMED_OUT") {
+    if (!Number.isFinite(Number(answeredCount)) || Number(answeredCount) <= 0) {
+      return 0;
+    }
+
+    if (Number.isFinite(startMs)) {
+      const lastMeaningfulSaveMs = extractLastMeaningfulAnswerSaveMs(submission);
+      const fallbackUpdatedMs = toValidDateMs(submission.updatedAt);
+      const endMs = Number.isFinite(lastMeaningfulSaveMs) ? lastMeaningfulSaveMs : fallbackUpdatedMs;
+
+      if (Number.isFinite(endMs)) {
+        const elapsed = Math.max(0, Math.floor((endMs - startMs) / 1000));
+        return normalizeExamCompletionTime(elapsed, timeLimitSeconds);
+      }
+    }
+
+    const storedTimedOut = normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+    if (storedTimedOut !== null) {
+      return storedTimedOut;
+    }
+
+    if (timeLimitSeconds !== null && timeLimitSeconds > 0) {
+      return Math.floor(timeLimitSeconds);
+    }
+
+    return null;
+  }
+
+  const stored = normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+  if (stored !== null) {
+    return stored;
+  }
+
+  if (!Number.isFinite(startMs)) {
+    return null;
+  }
+
+  return normalizeExamCompletionTime(submission.completionTimeSeconds, timeLimitSeconds);
+}
+
 function deriveResultOutcome({ candidateStatus, percentage }) {
   if (candidateStatus === "ABSENT") return "ABSENT";
   if (candidateStatus === "IN_PROGRESS") return "IN_PROGRESS";
@@ -152,7 +307,7 @@ function deriveSavedAnswerMetrics(submission) {
     if (!Number.isFinite(questionNumber)) {
       continue;
     }
-    questionNumberToCorrect.set(questionNumber, Number(question?.correctAnswer));
+    questionNumberToCorrect.set(questionNumber, normalizeAnswerForComparison(question?.correctAnswer));
     if (question?.id) {
       questionIdToNumber.set(String(question.id), questionNumber);
     }
@@ -163,12 +318,12 @@ function deriveSavedAnswerMetrics(submission) {
 
   if (Array.isArray(saved)) {
     for (const item of saved) {
-      const questionNumber = Number(item?.questionNumber);
-      const answer = Number(item?.answer);
-      if (!Number.isFinite(questionNumber) || !Number.isFinite(answer)) {
-        continue;
-      }
-      if (!questionNumberToCorrect.has(questionNumber)) {
+      const questionNumber = resolveQuestionNumberFromAnswerEntry(item, {
+        questionIdToNumber,
+        questionNumberToCorrect
+      });
+      const answer = normalizeAnswerForComparison(item?.answer ?? item?.value ?? item?.enteredAnswer);
+      if (!Number.isFinite(questionNumber) || answer === null) {
         continue;
       }
       answersByQuestionNumber.set(questionNumber, answer);
@@ -176,13 +331,28 @@ function deriveSavedAnswerMetrics(submission) {
   } else if (saved && typeof saved === "object") {
     const byId = saved.answersByQuestionId;
     if (byId && typeof byId === "object" && !Array.isArray(byId)) {
-      for (const [questionId, valueObj] of Object.entries(byId)) {
-        const questionNumber = questionIdToNumber.get(String(questionId));
-        if (!Number.isFinite(questionNumber)) {
+      for (const [questionKey, valueObj] of Object.entries(byId)) {
+        const fromId = questionIdToNumber.get(String(questionKey));
+        const fromNumber = Number(questionKey);
+        const questionNumber = Number.isFinite(fromId)
+          ? fromId
+          : Number.isFinite(fromNumber) && questionNumberToCorrect.has(fromNumber)
+            ? fromNumber
+            : null;
+        const answer = normalizeAnswerForComparison(valueObj);
+        if (!Number.isFinite(questionNumber) || answer === null) {
           continue;
         }
-        const answer = Number(valueObj?.value);
-        if (!Number.isFinite(answer)) {
+        answersByQuestionNumber.set(questionNumber, answer);
+      }
+    }
+
+    const byNumber = saved.answersByQuestionNumber;
+    if (byNumber && typeof byNumber === "object" && !Array.isArray(byNumber)) {
+      for (const [questionNumberKey, valueObj] of Object.entries(byNumber)) {
+        const questionNumber = Number(questionNumberKey);
+        const answer = normalizeAnswerForComparison(valueObj);
+        if (!Number.isFinite(questionNumber) || !questionNumberToCorrect.has(questionNumber) || answer === null) {
           continue;
         }
         answersByQuestionNumber.set(questionNumber, answer);
@@ -193,10 +363,10 @@ function deriveSavedAnswerMetrics(submission) {
   let correctCount = 0;
   for (const [questionNumber, answer] of answersByQuestionNumber.entries()) {
     const key = questionNumberToCorrect.get(questionNumber);
-    if (!Number.isFinite(key)) {
+    if (key === null || key === undefined) {
       continue;
     }
-    if (Math.trunc(answer) === Math.trunc(key)) {
+    if (answer === key) {
       correctCount += 1;
     }
   }
@@ -2840,6 +3010,7 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
           finalSubmittedAt: true,
           submittedAt: true,
           createdAt: true,
+          updatedAt: true,
           remarks: true,
           worksheet: {
             select: {
@@ -2966,19 +3137,15 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     const resolvedUnansweredCount = unansweredCount ?? fallbackMetrics?.unansweredCount ?? null;
     const resolvedPercentage = percentage ?? fallbackMetrics?.percentage ?? null;
     const resolvedScore = score ?? resolvedPercentage;
-    const resolvedCompletionTime = sub
-      ? (() => {
-          const normalized = normalizeExamCompletionTime(sub.completionTimeSeconds, sub.worksheet?.timeLimitSeconds);
-          if (normalized !== null) {
-            return normalized;
-          }
-          const limit = toNullableNumber(sub?.worksheet?.timeLimitSeconds);
-          if (candidateStatus === "TIMED_OUT" && limit !== null && limit > 0) {
-            return Math.floor(limit);
-          }
-          return null;
-        })()
-      : null;
+    const resolvedAnsweredCount =
+      resolvedTotalQuestions !== null && resolvedUnansweredCount !== null
+        ? Math.max(0, Number(resolvedTotalQuestions) - Number(resolvedUnansweredCount))
+        : fallbackMetrics?.answeredCount ?? submittedAnswerCount ?? 0;
+    const resolvedCompletionTime = resolveCompletionTimeSecondsFromSubmission({
+      submission: sub,
+      candidateStatus,
+      answeredCount: resolvedAnsweredCount
+    });
     const teacher =
       e.sourceTeacherUser ||
       e.student?.currentTeacher ||
@@ -5005,6 +5172,12 @@ const unpublishExamResults = asyncHandler(async (req, res) => {
   return res.apiSuccess("Results unpublished", updated);
 });
 
+const __examResultsInternals = Object.freeze({
+  normalizeAnswerForComparison,
+  deriveSavedAnswerMetrics,
+  resolveCompletionTimeSecondsFromSubmission
+});
+
 export {
   listExamCycles,
   listExamCourses,
@@ -5043,5 +5216,6 @@ export {
   publishExamResults,
   unpublishExamResults,
   grantSecondAttemptToStudent,
-  revokeSecondAttemptFromStudent
+  revokeSecondAttemptFromStudent,
+  __examResultsInternals
 };

@@ -240,7 +240,7 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.queryByText("I Understand, Start Worksheet")).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Time Up" })).toBeInTheDocument();
     expect(screen.getByText(/Attempt ended due to time limit\./i)).toBeInTheDocument();
-    expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
+    expect(startOrResumeStudentWorksheetAttempt).not.toHaveBeenCalled();
   });
 
   it("shows countdown timer when worksheet has a hard time limit", async () => {

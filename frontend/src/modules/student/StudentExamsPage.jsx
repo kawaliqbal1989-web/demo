@@ -402,6 +402,7 @@ function StudentExamsPage() {
                 header: "Action",
                 render: (r) => {
                   const worksheetId = r?.examWorksheet?.worksheetId;
+                  const isOfficialExam = String(r?.examWorksheet?.generationMode || "").toUpperCase() === "EXAM";
 
                   if (!worksheetId) {
                     return (
@@ -456,6 +457,14 @@ function StudentExamsPage() {
                       <Link className="button secondary" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
                         View Instructions
                       </Link>
+                    );
+                  }
+
+                  if (["SUBMITTED", "TIMED_OUT"].includes(r.attemptStatus) && isOfficialExam) {
+                    return (
+                      <button className="button secondary" style={{ width: "auto" }} type="button" disabled>
+                        {r.attemptStatus === "TIMED_OUT" ? "Timed Out" : "Submitted"}
+                      </button>
                     );
                   }
 

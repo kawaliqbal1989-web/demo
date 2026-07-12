@@ -140,6 +140,21 @@ describe("StudentWorksheetAttemptPage", () => {
   it("does not block when attempt 1 is timed out and attempt 2 is in progress", async () => {
     const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
 
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
     mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
       data: {
         data: [
@@ -163,6 +178,13 @@ describe("StudentWorksheetAttemptPage", () => {
         attemptId: "a2",
         attemptNo: 2,
         status: "IN_PROGRESS"
+      },
+      worksheetOverrides: {
+        title: "Exam Worksheet",
+        generationMode: "EXAM",
+        questions: [
+          { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+        ]
       }
     }));
 
@@ -182,11 +204,224 @@ describe("StudentWorksheetAttemptPage", () => {
     await flushAsync();
 
     expect(startOrResumeStudentWorksheetAttempt).toHaveBeenCalledWith("w1");
-    expect(screen.getByText("Addition")).toBeInTheDocument();
+    expect(screen.getByText("Exam Worksheet")).toBeInTheDocument();
   });
 
-  it("opens timed-out second attempt in read-only submission mode", async () => {
+  it("redirects manual startSecondAttempt URL to exams when start/resume returns attempt 1 for submitted official exam", async () => {
     const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
+    mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            attemptId: "a1",
+            attemptNo: 1,
+            status: "SUBMITTED",
+            submittedAt: "2026-02-21T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(
+      buildAttemptResponse({
+        attemptOverrides: {
+          attemptId: "a1",
+          attemptNo: 1,
+          status: "IN_PROGRESS"
+        },
+        worksheetOverrides: {
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          questions: [
+            { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      })
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Answer for question 1")).not.toBeInTheDocument();
+  });
+
+  it("redirects to exams when official startSecondAttempt request returns attempt 2 submitted", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
+    mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            attemptId: "a1",
+            attemptNo: 1,
+            status: "SUBMITTED",
+            submittedAt: "2026-02-21T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(
+      buildAttemptResponse({
+        attemptOverrides: {
+          attemptId: "a2",
+          attemptNo: 2,
+          status: "SUBMITTED"
+        },
+        worksheetOverrides: {
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          questions: [
+            { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      })
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Answer for question 1")).not.toBeInTheDocument();
+  });
+
+  it("redirects to exams when official startSecondAttempt request returns attempt 2 timed out", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
+    mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
+      data: {
+        data: [
+          {
+            attemptId: "a1",
+            attemptNo: 1,
+            status: "TIMED_OUT",
+            submittedAt: "2026-02-21T00:00:00.000Z"
+          }
+        ]
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(
+      buildAttemptResponse({
+        attemptOverrides: {
+          attemptId: "a2",
+          attemptNo: 2,
+          status: "TIMED_OUT"
+        },
+        worksheetOverrides: {
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          questions: [
+            { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      })
+    );
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1?startSecondAttempt=1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Answer for question 1")).not.toBeInTheDocument();
+  });
+
+  it("redirects official exam viewSubmission URLs to exams", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
 
     mocks.listStudentWorksheetAttempts.mockResolvedValueOnce({
       data: {
@@ -229,6 +464,7 @@ describe("StudentWorksheetAttemptPage", () => {
       <MemoryRouter initialEntries={["/student/worksheets/w1?viewSubmission=1"]}>
         <Routes>
           <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
         </Routes>
       </MemoryRouter>
     );
@@ -236,11 +472,244 @@ describe("StudentWorksheetAttemptPage", () => {
     await flushAsync();
     await flushAsync();
 
-    expect(screen.queryByText(/already submitted\. starting a new attempt is not available\./i)).not.toBeInTheDocument();
-    expect(screen.queryByText("I Understand, Start Worksheet")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Time Up" })).toBeInTheDocument();
-    expect(screen.getByText(/Attempt ended due to time limit\./i)).toBeInTheDocument();
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
     expect(startOrResumeStudentWorksheetAttempt).not.toHaveBeenCalled();
+  });
+
+  it("redirects to exams after successful official exam submission", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(
+      buildAttemptResponse({
+        worksheetOverrides: {
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          questions: [
+            { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      })
+    );
+
+    mocks.submitStudentAttempt.mockResolvedValueOnce({
+      data: {
+        data: {
+          status: "SUBMITTED",
+          score: 100,
+          total: 1,
+          submittedAt: "2026-02-21T00:00:10.000Z",
+          resultBreakdown: { correctCount: 1, completionTime: 10 }
+        }
+      }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "22" } });
+    fireEvent.click(screen.getAllByText("End Test")[0]);
+    fireEvent.click(screen.getByText("End test"));
+
+    await flushAsync();
+
+    expect(mocks.submitStudentAttempt).toHaveBeenCalledWith("a1", {
+      answersByQuestionId: {
+        q1: { value: "22" }
+      }
+    });
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
+  });
+
+  it("redirects to exams when official exam final submit returns ATTEMPT_ENDED", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(
+      buildAttemptResponse({
+        attemptOverrides: {
+          attemptId: "a2",
+          attemptNo: 2,
+          status: "IN_PROGRESS"
+        },
+        worksheetOverrides: {
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          questions: [
+            { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      })
+    );
+
+    mocks.submitStudentAttempt.mockRejectedValueOnce({
+      response: {
+        data: {
+          errorCode: "ATTEMPT_ENDED"
+        }
+      }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "22" } });
+    fireEvent.click(screen.getAllByText("End Test")[0]);
+    fireEvent.click(screen.getByText("End test"));
+
+    await flushAsync();
+
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
+  });
+
+  it("redirects to exams when official exam final submit returns SUBMISSION_ALREADY_FINALIZED", async () => {
+    const { startOrResumeStudentWorksheetAttempt } = await import("../../../services/studentPortalService");
+
+    mocks.getStudentWorksheet.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: "w1",
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          description: "Official exam",
+          timeLimitSeconds: 600,
+          questions: [
+            { id: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      }
+    });
+
+    startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(
+      buildAttemptResponse({
+        attemptOverrides: {
+          attemptId: "a2",
+          attemptNo: 2,
+          status: "IN_PROGRESS"
+        },
+        worksheetOverrides: {
+          title: "Exam Worksheet",
+          generationMode: "EXAM",
+          questions: [
+            { questionId: "q1", questionNumber: 1, operands: { nums: [11, 11] }, operation: "COLUMN_SUM" }
+          ]
+        }
+      })
+    );
+
+    mocks.submitStudentAttempt.mockRejectedValueOnce({
+      response: {
+        data: {
+          errorCode: "SUBMISSION_ALREADY_FINALIZED"
+        }
+      }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "22" } });
+    fireEvent.click(screen.getAllByText("End Test")[0]);
+    fireEvent.click(screen.getByText("End test"));
+
+    await flushAsync();
+
+    expect(screen.getByText("Exams Landing")).toBeInTheDocument();
+  });
+
+  it("keeps normal worksheet behavior on ATTEMPT_ENDED submit error", async () => {
+    mocks.submitStudentAttempt.mockRejectedValueOnce({
+      response: {
+        data: {
+          errorCode: "ATTEMPT_ENDED"
+        }
+      }
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/student/worksheets/w1"]}>
+        <Routes>
+          <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
+          <Route path="/student/exams" element={<div>Exams Landing</div>} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await flushAsync();
+
+    fireEvent.click(screen.getByText("I Understand, Start Worksheet"));
+    await flushAsync();
+
+    fireEvent.change(screen.getByLabelText("Answer for question 1"), { target: { value: "44" } });
+    fireEvent.click(screen.getAllByText("Submit")[0]);
+    fireEvent.click(screen.getByText("Confirm submit"));
+
+    await flushAsync();
+
+    expect(screen.queryByText("Exams Landing")).not.toBeInTheDocument();
+    expect(screen.getByText("Addition")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Time Up" })).toBeInTheDocument();
   });
 
   it("shows countdown timer when worksheet has a hard time limit", async () => {

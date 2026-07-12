@@ -197,6 +197,10 @@ function StudentWorksheetAttemptPage() {
 
   const startSecondAttempt = new URLSearchParams(location.search).get("startSecondAttempt") === "1";
   const viewSubmissionMode = new URLSearchParams(location.search).get("viewSubmission") === "1";
+  const isOfficialExamWorksheet = useMemo(
+    () => String(worksheet?.generationMode || worksheetPreview?.generationMode || "").toUpperCase() === "EXAM",
+    [worksheet?.generationMode, worksheetPreview?.generationMode]
+  );
   const attemptId = attempt?.attemptId || null;
   const serverOffsetMsRef = useRef(0);
   const versionRef = useRef(0);
@@ -247,7 +251,14 @@ function StudentWorksheetAttemptPage() {
 
         if (worksheetRes.status === "fulfilled") {
           const worksheetData = worksheetRes.value?.data?.data || null;
+          const isOfficialExam = String(worksheetData?.generationMode || "").toUpperCase() === "EXAM";
           setWorksheetPreview(worksheetData);
+
+          if (isOfficialExam && viewSubmissionMode) {
+            navigate("/student/exams", { replace: true });
+            return;
+          }
+
           if (viewSubmissionMode) {
             setWorksheet(worksheetData);
           }
@@ -278,7 +289,16 @@ function StudentWorksheetAttemptPage() {
         }, null);
 
         const currentAttemptStatus = String(currentAttempt?.status || "").toUpperCase();
+        const currentAttemptNo = Number(currentAttempt?.attemptNo || 1);
         const isCurrentAttemptTerminal = ["SUBMITTED", "TIMED_OUT"].includes(currentAttemptStatus);
+        const canRequestSecondAttemptStart = startSecondAttempt && currentAttemptNo <= 1;
+        const isOfficialExam = String(worksheetRes.value?.data?.data?.generationMode || "").toUpperCase() === "EXAM";
+
+        if (isOfficialExam && isCurrentAttemptTerminal && !canRequestSecondAttemptStart) {
+          navigate("/student/exams", { replace: true });
+          return;
+        }
+
         const shouldBlockForSubmittedAttempt = !startSecondAttempt && !viewSubmissionMode && isCurrentAttemptTerminal;
         setAlreadySubmitted(shouldBlockForSubmittedAttempt);
 
@@ -378,6 +398,26 @@ function StudentWorksheetAttemptPage() {
           return;
         }
         const payload = startRes.data?.data || null;
+        const payloadAttemptNo = Number(payload?.attemptNo);
+        const payloadStatus = String(payload?.status || "").toUpperCase();
+        const payloadIsTerminal = ["SUBMITTED", "TIMED_OUT"].includes(payloadStatus);
+        const isOfficialExamFromPayload =
+          String(payload?.worksheet?.generationMode || worksheetPreview?.generationMode || "").toUpperCase() === "EXAM";
+
+        // URL startSecondAttempt is only a request hint; actual attempt validity must come from start/resume payload.
+        if (isOfficialExamFromPayload && startSecondAttempt) {
+          const isValidSecondAttemptPayload = payloadAttemptNo === 2 && payloadStatus === "IN_PROGRESS";
+          if (!isValidSecondAttemptPayload) {
+            navigate("/student/exams", { replace: true });
+            return;
+          }
+        }
+
+        if (isOfficialExamFromPayload && payloadIsTerminal) {
+          navigate("/student/exams", { replace: true });
+          return;
+        }
+
         setWorksheet(payload?.worksheet || worksheetPreview || null);
         setAttempt(
           payload
@@ -420,11 +460,19 @@ function StudentWorksheetAttemptPage() {
         }
         const code = getApiErrorCode(e);
         if (code === "SUBMISSION_ALREADY_FINALIZED") {
+          if (isOfficialExamWorksheet) {
+            navigate("/student/exams", { replace: true });
+            return;
+          }
           setAlreadySubmitted(true);
           setError("This worksheet is already submitted.");
           return;
         }
         if (code === "ATTEMPT_ENDED") {
+          if (isOfficialExamWorksheet) {
+            navigate("/student/exams", { replace: true });
+            return;
+          }
           setAlreadySubmitted(true);
           setError("This worksheet attempt has already ended.");
           return;
@@ -442,7 +490,7 @@ function StudentWorksheetAttemptPage() {
     return () => {
       cancelled = true;
     };
-  }, [alreadySubmitted, startConfirmed, worksheetId, worksheetPreview, startSecondAttempt, viewSubmissionMode]);
+  }, [alreadySubmitted, isOfficialExamWorksheet, navigate, startConfirmed, worksheetId, worksheetPreview, startSecondAttempt, viewSubmissionMode]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -928,10 +976,8 @@ function StudentWorksheetAttemptPage() {
         answersByQuestionId: answersSnapshot
       });
       const payload = res.data?.data || null;
-      setResult(payload);
       setAttempt((prev) => (prev ? { ...prev, status: payload?.status || (dueToTimeout ? "TIMED_OUT" : "SUBMITTED") } : prev));
       autoSubmitRetryCountRef.current = 0;
-      setSaveMessage(dueToTimeout ? "Auto-submitted" : "Submitted");
       pendingSaveRef.current = false;
       if (saveTimerRef.current) {
         window.clearTimeout(saveTimerRef.current);
@@ -946,8 +992,20 @@ function StudentWorksheetAttemptPage() {
       } catch {
         // ignore
       }
+
+      if (isOfficialExamWorksheet) {
+        navigate("/student/exams", { replace: true });
+        return;
+      }
+
+      setResult(payload);
+      setSaveMessage(dueToTimeout ? "Auto-submitted" : "Submitted");
     } catch (e) {
       const code = e?.response?.data?.errorCode || e?.response?.data?.error_code;
+      if (isOfficialExamWorksheet && (code === "ATTEMPT_ENDED" || code === "SUBMISSION_ALREADY_FINALIZED")) {
+        navigate("/student/exams", { replace: true });
+        return;
+      }
       if (code === "ATTEMPT_ENDED") {
         setAttempt((prev) => (prev ? { ...prev, status: "TIMED_OUT" } : prev));
         setError(dueToTimeout ? "Time is up. Refresh the page to see the final result." : "Attempt ended.");
@@ -1135,7 +1193,7 @@ function StudentWorksheetAttemptPage() {
       setQuestionFontPx((prev) => Math.min(QUESTION_FONT_MAX_PX, prev + 1));
     };
 
-  const isExamWorksheet = String(worksheet?.generationMode || "").toUpperCase() === "EXAM";
+  const isExamWorksheet = isOfficialExamWorksheet;
   const useExamPageStyling = isColumnSumGrid;
   const worksheetTitle = String(worksheet?.title || "Worksheet");
   const currentEnrollment = studentCourseSummary?.currentEnrollment || null;

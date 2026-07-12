@@ -116,7 +116,7 @@ describe("StudentExamsPage", () => {
     expect(await screen.findByRole("link", { name: /start 2nd attempt/i })).toBeInTheDocument();
   });
 
-  it("keeps submitted exams on View Submission when no second attempt is granted", async () => {
+  it("shows disabled Submitted status when no second attempt is granted", async () => {
     vi.mocked(listStudentExamsOverview).mockResolvedValue({
       data: {
         data: [
@@ -145,12 +145,13 @@ describe("StudentExamsPage", () => {
       </MemoryRouter>
     );
 
-    const viewSubmissionLink = await screen.findByRole("link", { name: /view submission/i });
-    expect(viewSubmissionLink).toBeInTheDocument();
-    expect(viewSubmissionLink.getAttribute("href")).toBe("/student/worksheets/worksheet-2?viewSubmission=1");
+    const submittedButton = await screen.findByRole("button", { name: /submitted/i });
+    expect(submittedButton).toBeInTheDocument();
+    expect(submittedButton).toBeDisabled();
+    expect(screen.queryByRole("link", { name: /view submission/i })).not.toBeInTheDocument();
   });
 
-  it("shows View 2nd Submission when second attempt exists and is timed out", async () => {
+  it("shows disabled Timed Out status when second attempt exists and is timed out", async () => {
     vi.mocked(listStudentExamsOverview).mockResolvedValue({
       data: {
         data: [
@@ -179,8 +180,9 @@ describe("StudentExamsPage", () => {
       </MemoryRouter>
     );
 
-    const viewSecondSubmissionLink = await screen.findByRole("link", { name: /view 2nd submission/i });
-    expect(viewSecondSubmissionLink).toBeInTheDocument();
-    expect(viewSecondSubmissionLink.getAttribute("href")).toBe("/student/worksheets/worksheet-3?viewSubmission=1");
+    const timedOutButton = await screen.findByRole("button", { name: /timed out/i });
+    expect(timedOutButton).toBeInTheDocument();
+    expect(timedOutButton).toBeDisabled();
+    expect(screen.queryByRole("link", { name: /view 2nd submission/i })).not.toBeInTheDocument();
   });
 });

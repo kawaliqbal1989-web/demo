@@ -159,6 +159,9 @@ describe("StudentWorksheetAttemptPage", () => {
     startOrResumeStudentWorksheetAttempt.mockResolvedValueOnce(buildAttemptResponse({
       worksheetOverrides: { title: "Mixed Exam", generationMode: "EXAM", questions }
     }));
+    const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+      width: 1024, height: 84, top: 0, right: 1024, bottom: 84, left: 0, x: 0, y: 0, toJSON: () => ({})
+    });
 
     render(
       <MemoryRouter initialEntries={["/student/worksheets/w1?examMode=1"]}>
@@ -199,8 +202,17 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.queryByText(/Flagged: 0/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /back to worksheets/i })).not.toBeInTheDocument();
     expect(screen.queryByText("Font")).not.toBeInTheDocument();
-    expect(document.querySelector(".ws-exam-header")).toHaveStyle({ position: "fixed", top: "0px", left: "0px", right: "0px", width: "100vw" });
+    const dedicatedRoot = document.querySelector(".ws-attempt-page");
+    const dedicatedHeader = document.querySelector(".ws-exam-header");
+    const questionContent = document.querySelector('[data-exam-question-content="true"]');
+    expect(dedicatedRoot).toHaveStyle({ overflow: "hidden" });
+    expect(dedicatedHeader).toHaveStyle({ position: "fixed", top: "0px", left: "0px", right: "0px", width: "100vw" });
+    expect(questionContent).not.toContainElement(dedicatedHeader);
+    expect(questionContent).toHaveStyle({ position: "absolute", top: "84px", overflowY: "auto", overflowX: "hidden" });
+    expect(document.querySelectorAll(".ws-countdown-pill")).toHaveLength(1);
+    expect(document.querySelector(".ws-countdown-pill")).toHaveTextContent("Count Down");
     expect(screen.getAllByRole("button", { name: "Force Exit & Submit" })).toHaveLength(1);
+    rectSpy.mockRestore();
   });
 
   it("keeps non-EXAM mixed-operation worksheets on the standard layout", async () => {
@@ -227,6 +239,8 @@ describe("StudentWorksheetAttemptPage", () => {
     expect(screen.getByText("Optional")).toBeInTheDocument();
     expect(document.querySelector(".ws-colsum-grid")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /back to worksheets/i })).toBeInTheDocument();
+    expect(document.querySelector(".ws-exam-header")).not.toBeInTheDocument();
+    expect(document.querySelector(".card")).not.toHaveStyle({ position: "fixed" });
   });
 
   it("opens an official second attempt in a dedicated exam tab without starting it", async () => {

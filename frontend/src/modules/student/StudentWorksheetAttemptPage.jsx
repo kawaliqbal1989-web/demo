@@ -623,7 +623,16 @@ function StudentWorksheetAttemptPage() {
       observer?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [useUnifiedExamGrid]);
+  }, [loading, startConfirmed, useUnifiedExamGrid]);
+
+  useEffect(() => {
+    if (!isDedicatedExamMode) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [isDedicatedExamMode]);
 
   const isWrongAnswer = (q) => {
     if (!result) return false;
@@ -1422,11 +1431,11 @@ function StudentWorksheetAttemptPage() {
   return (
     <div
       className={useExamPageStyling ? "ws-attempt-page ws-attempt-page--exam" : "ws-attempt-page"}
-      style={isDedicatedExamMode ? { position: "fixed", inset: 0, zIndex: 10000, width: "100vw", height: "100dvh", minHeight: "100vh", overflowY: "auto", background: "var(--color-bg-primary)" } : undefined}
+      style={isDedicatedExamMode ? { position: "fixed", inset: 0, zIndex: 10000, width: "100vw", height: "100dvh", minHeight: "100vh", overflow: "hidden", background: "var(--color-bg-page)" } : undefined}
     >
       <div
         className={useExamPageStyling ? "ws-attempt-page__panel" : ""}
-        style={{ display: "grid", gap: 12, paddingBottom: 110, paddingTop: useUnifiedExamGrid ? dedicatedHeaderHeight || 96 : undefined }}
+        style={{ display: "grid", gap: 12, paddingBottom: useUnifiedExamGrid ? 0 : 110 }}
       >
         <div className={useExamPageStyling ? "ws-exam-shell" : ""} style={useUnifiedExamGrid ? { overflow: "visible" } : undefined}>
         <div
@@ -1439,6 +1448,7 @@ function StudentWorksheetAttemptPage() {
             right: useUnifiedExamGrid ? 0 : undefined,
             width: useUnifiedExamGrid ? "100vw" : undefined,
             zIndex: useUnifiedExamGrid ? 10001 : 5,
+            background: useUnifiedExamGrid ? "var(--color-bg-card)" : undefined,
             display: "flex",
             justifyContent: "space-between",
             gap: 12,
@@ -1556,6 +1566,21 @@ function StudentWorksheetAttemptPage() {
             ) : null}
           </div>
         </div>
+
+        <div
+          data-exam-question-content={useUnifiedExamGrid ? "true" : undefined}
+          style={useUnifiedExamGrid ? {
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: dedicatedHeaderHeight || 96,
+            bottom: 0,
+            overflowY: "auto",
+            overflowX: "hidden",
+            paddingTop: 12,
+            paddingBottom: 24
+          } : undefined}
+        >
 
       {!useExamPageStyling ? (
         <div className="card" style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -1809,6 +1834,7 @@ function StudentWorksheetAttemptPage() {
           </div>
         </div>
       ) : null}
+        </div>
         </div>
       </div>
     </div>

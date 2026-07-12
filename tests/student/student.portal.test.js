@@ -673,6 +673,91 @@ describe("STUDENT PORTAL (API)", () => {
     expect(submit.body?.data?.resultBreakdown).toBeUndefined();
   });
 
+  test("POST /api/student/attempts/:id/submit preserves exam device-lock errors", async () => {
+    const { examWorksheet } = await createExamAttemptFixture({ published: false });
+    const sessionId = `test-session-${randomId("cs")}`;
+
+    const start = await http
+      .post(`/api/student/worksheets/${examWorksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .set("x-client-session-id", sessionId)
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    expect(attemptId).toBeTruthy();
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .set("x-client-session-id", `${sessionId}-other`)
+      .send({});
+
+    expect(submit.status).toBe(409);
+    expect(submit.body?.error_code).toBe("EXAM_DEVICE_LOCKED");
+  });
+
+  test("POST /api/student/attempts/:id/submit hides another student's attempt", async () => {
+    const start = await http
+      .post(`/api/student/worksheets/${worksheet.id}/start`)
+      .set(authHeader(token))
+      .send({ attemptMode: "practice" });
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    expect(attemptId).toBeTruthy();
+
+    const other = await prisma.student.create({
+      data: {
+        tenantId: tenant.id,
+        admissionNo: `ST-${randomId("attempt-owner")}`,
+        firstName: "Other",
+        lastName: "Attempt Owner",
+        hierarchyNodeId: centerUser.hierarchyNodeId,
+        levelId: level1.id,
+        isActive: true
+      }
+    });
+
+    await prisma.worksheetSubmission.update({
+      where: { id: attemptId },
+      data: { studentId: other.id }
+    });
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .send({});
+
+    expect(submit.status).toBe(404);
+    expect(submit.body?.error_code).toBe("ATTEMPT_NOT_FOUND");
+  });
+
+  test("POST /api/student/attempts/:id/submit continues to submit non-exam attempts", async () => {
+    const start = await http
+      .post(`/api/student/worksheets/${worksheet.id}/attempts/start`)
+      .set(authHeader(token))
+      .send({});
+
+    expect([200, 201]).toContain(start.status);
+    const attemptId = start.body?.data?.attemptId;
+    const question = (start.body?.data?.worksheet?.questions || [])[0];
+    expect(attemptId).toBeTruthy();
+    expect(question?.questionId).toBeTruthy();
+
+    const submit = await http
+      .post(`/api/student/attempts/${attemptId}/submit`)
+      .set(authHeader(token))
+      .send({
+        answersByQuestionId: {
+          [question.questionId]: { value: 3 }
+        }
+      });
+
+    expect(submit.status).toBe(200);
+    expect(submit.body?.data?.status).toBe("SUBMITTED");
+  });
+
   test("POST /api/student/attempts/:id/submit persists submittedAnswers and evaluates from answersByQuestionId payload", async () => {
     const { examWorksheet } = await createExamAttemptFixture({ published: true });
     const sessionId = `test-session-${randomId("cs")}`;

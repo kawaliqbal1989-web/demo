@@ -403,6 +403,11 @@ function StudentExamsPage() {
                 render: (r) => {
                   const worksheetId = r?.examWorksheet?.worksheetId;
                   const isOfficialExam = String(r?.examWorksheet?.generationMode || "").toUpperCase() === "EXAM";
+                  const officialExamLinkProps = isOfficialExam
+                    ? { target: "_blank", rel: "noopener noreferrer" }
+                    : {};
+                  const firstAttemptUrl = `/student/worksheets/${worksheetId}${isOfficialExam ? "?examMode=1" : ""}`;
+                  const secondAttemptUrl = `/student/worksheets/${worksheetId}?startSecondAttempt=1${isOfficialExam ? "&examMode=1" : ""}`;
 
                   if (!worksheetId) {
                     return (
@@ -422,7 +427,7 @@ function StudentExamsPage() {
 
                   if (r.examWorksheet?.canResumeSecondAttempt || r.examWorksheet?.hasActiveSecondAttempt) {
                     return (
-                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}?startSecondAttempt=1`}>
+                      <Link className="button" style={{ width: "auto" }} to={secondAttemptUrl} {...officialExamLinkProps}>
                         {r.attemptStatus === "IN_PROGRESS" ? "Resume 2nd Attempt" : "Continue Attempt"}
                       </Link>
                     );
@@ -430,7 +435,7 @@ function StudentExamsPage() {
 
                   if (r.examWorksheet?.canStartSecondAttempt) {
                     return (
-                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}?startSecondAttempt=1`}>
+                      <Link className="button" style={{ width: "auto" }} to={secondAttemptUrl} {...officialExamLinkProps}>
                         Start 2nd Attempt
                       </Link>
                     );
@@ -438,7 +443,7 @@ function StudentExamsPage() {
 
                   if (r.attemptStatus === "IN_PROGRESS" && r.scheduleStatus === "OPEN") {
                     return (
-                      <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
+                      <Link className="button" style={{ width: "auto" }} to={firstAttemptUrl} {...officialExamLinkProps}>
                         Resume Exam
                       </Link>
                     );
@@ -447,7 +452,7 @@ function StudentExamsPage() {
                   if (r.attemptStatus === "NOT_STARTED") {
                     if (r.scheduleStatus === "OPEN") {
                       return (
-                        <Link className="button" style={{ width: "auto" }} to={`/student/worksheets/${worksheetId}`}>
+                        <Link className="button" style={{ width: "auto" }} to={firstAttemptUrl} {...officialExamLinkProps}>
                           Start Exam
                         </Link>
                       );

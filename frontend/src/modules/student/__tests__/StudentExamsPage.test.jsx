@@ -44,6 +44,15 @@ function buildExamRow(overrides = {}) {
   };
 }
 
+function expectDedicatedExamLink(link, { secondAttempt = false } = {}) {
+  const url = new URL(link.getAttribute("href"), "http://localhost");
+  expect(url.pathname).toBe("/student/worksheets/worksheet-1");
+  expect(url.searchParams.get("examMode")).toBe("1");
+  expect(url.searchParams.get("startSecondAttempt")).toBe(secondAttempt ? "1" : null);
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+}
+
 describe("StudentExamsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -80,7 +89,7 @@ describe("StudentExamsPage", () => {
 
     const resumeLink = await screen.findByRole("link", { name: /resume 2nd attempt/i });
     expect(resumeLink).toBeInTheDocument();
-    expect(resumeLink.getAttribute("href")).toBe("/student/worksheets/worksheet-1?startSecondAttempt=1");
+    expectDedicatedExamLink(resumeLink, { secondAttempt: true });
     expect(screen.queryByRole("link", { name: /view submission/i })).not.toBeInTheDocument();
   });
 
@@ -113,7 +122,92 @@ describe("StudentExamsPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByRole("link", { name: /start 2nd attempt/i })).toBeInTheDocument();
+    const startLink = await screen.findByRole("link", { name: /start 2nd attempt/i });
+    expectDedicatedExamLink(startLink, { secondAttempt: true });
+  });
+
+  it.each([
+    ["Start Exam", "NOT_STARTED"],
+    ["Resume Exam", "IN_PROGRESS"]
+  ])("opens %s directly in dedicated exam mode", async (label, status) => {
+    vi.mocked(listStudentExamsOverview).mockResolvedValue({
+      data: {
+        data: [
+          buildExamRow({
+            examCycle: {
+              id: "cycle-1",
+              code: "EX-001",
+              name: "Open Exam",
+              examStartsAt: "2020-01-01T00:00:00.000Z",
+              examEndsAt: "2099-01-01T00:00:00.000Z",
+              resultStatus: "NOT_PUBLISHED"
+            },
+            examWorksheet: {
+              ...buildExamRow().examWorksheet,
+              status
+            }
+          })
+        ]
+      }
+    });
+
+    render(
+      <MemoryRouter>
+        <StudentExamsPage />
+      </MemoryRouter>
+    );
+
+    expectDedicatedExamLink(await screen.findByRole("link", { name: label }));
+  });
+
+  it("keeps published result links unchanged", async () => {
+    vi.mocked(listStudentExamsOverview).mockResolvedValue({
+      data: {
+        data: [buildExamRow({ examCycle: { ...buildExamRow().examCycle, resultStatus: "PUBLISHED" } })]
+      }
+    });
+
+    render(
+      <MemoryRouter>
+        <StudentExamsPage />
+      </MemoryRouter>
+    );
+
+    const resultLink = await screen.findByRole("link", { name: /view result/i });
+    expect(resultLink).toHaveAttribute("href", "/student/exams/cycle-1/result");
+    expect(resultLink).not.toHaveAttribute("target");
+  });
+
+  it("keeps non-EXAM worksheet start behavior unchanged", async () => {
+    vi.mocked(listStudentExamsOverview).mockResolvedValue({
+      data: {
+        data: [
+          buildExamRow({
+            examCycle: {
+              ...buildExamRow().examCycle,
+              examStartsAt: "2020-01-01T00:00:00.000Z",
+              examEndsAt: "2099-01-01T00:00:00.000Z"
+            },
+            examWorksheet: {
+              ...buildExamRow().examWorksheet,
+              generationMode: "PRACTICE",
+              status: "NOT_STARTED"
+            }
+          })
+        ]
+      }
+    });
+
+    render(
+      <MemoryRouter>
+        <StudentExamsPage />
+      </MemoryRouter>
+    );
+
+    const startLink = await screen.findByRole("link", { name: /start exam/i });
+    expect(startLink).toHaveAttribute("href", "/student/worksheets/worksheet-1");
+    expect(startLink).not.toHaveAttribute("target");
+    expect(startLink).not.toHaveAttribute("rel");
   });
 
   it("shows disabled Submitted status when no second attempt is granted", async () => {

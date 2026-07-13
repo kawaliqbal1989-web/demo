@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  bulkDeleteQuestionBankEntries,
   createQuestionBankEntry,
   deleteQuestionBankEntry,
   exportQuestionBankCsv,
@@ -31,6 +32,13 @@ questionBankRouter.post(
   requireSuperadmin(),
   auditAction("IMPORT_QUESTION_BANK", "QUESTION_BANK"),
   importQuestionBank
+);
+
+questionBankRouter.post(
+  "/bulk-delete",
+  requireSuperadmin(),
+  auditAction("QUESTION_BULK_DELETE", "QUESTION_BANK"),
+  bulkDeleteQuestionBankEntries
 );
 
 questionBankRouter.post(

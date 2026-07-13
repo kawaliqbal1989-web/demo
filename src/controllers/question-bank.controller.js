@@ -561,6 +561,90 @@ const deleteQuestionBankEntry = asyncHandler(async (req, res) => {
   return res.apiSuccess("Question deleted", { id: existing.id });
 });
 
+const MAX_BULK_SELECTED_IDS = 10000;
+
+const bulkDeleteQuestionBankEntries = asyncHandler(async (req, res) => {
+  const levelId = normalizeString(req.body.levelId);
+  const courseId = normalizeString(req.body.courseId);
+  const levelNumberRaw = normalizeString(req.body.levelNumber);
+  const mode = normalizeString(req.body.mode)?.toUpperCase() || null;
+
+  if (!levelId || !courseId || !levelNumberRaw || !mode) {
+    return res.apiError(400, "levelId, courseId, levelNumber, and mode are required", "VALIDATION_ERROR");
+  }
+
+  if (mode !== "SELECTED" && mode !== "ALL") {
+    return res.apiError(400, "mode must be SELECTED or ALL", "VALIDATION_ERROR");
+  }
+
+  const context = await resolveCourseLevelContext({
+    tenantId: req.auth.tenantId,
+    courseId,
+    levelNumber: levelNumberRaw,
+    levelId
+  });
+
+  const scopedWhere = {
+    tenantId: req.auth.tenantId,
+    levelId,
+    courseId: context.courseId,
+    courseLevelId: context.courseLevelId,
+    isActive: true
+  };
+
+  let normalizedQuestionIds = [];
+  if (mode === "SELECTED") {
+    const incomingIds = Array.isArray(req.body.questionIds) ? req.body.questionIds : [];
+    normalizedQuestionIds = [...new Set(incomingIds.map((item) => normalizeString(item)).filter(Boolean))];
+
+    if (!normalizedQuestionIds.length) {
+      return res.apiError(400, "questionIds[] is required for SELECTED mode", "VALIDATION_ERROR");
+    }
+
+    if (normalizedQuestionIds.length > MAX_BULK_SELECTED_IDS) {
+      return res.apiError(400, `Maximum ${MAX_BULK_SELECTED_IDS} selected question IDs allowed`, "VALIDATION_ERROR");
+    }
+
+    const matchingIds = await prisma.questionBank.findMany({
+      where: {
+        ...scopedWhere,
+        id: { in: normalizedQuestionIds }
+      },
+      select: { id: true }
+    });
+
+    if (matchingIds.length !== normalizedQuestionIds.length) {
+      return res.apiError(404, "Question not found", "QUESTION_NOT_FOUND");
+    }
+  }
+
+  const deleteWhere =
+    mode === "SELECTED"
+      ? {
+          ...scopedWhere,
+          id: { in: normalizedQuestionIds }
+        }
+      : scopedWhere;
+
+  const deleted = await prisma.questionBank.deleteMany({ where: deleteWhere });
+  res.locals.entityId = context.courseLevelId;
+  res.locals.auditMetadata = {
+    mode,
+    deletedCount: deleted.count,
+    levelId,
+    courseId: context.courseId,
+    courseLevelId: context.courseLevelId,
+    ...(mode === "SELECTED" ? { questionIds: normalizedQuestionIds } : {})
+  };
+  return res.apiSuccess("Question bank entries deleted", {
+    deletedCount: deleted.count,
+    mode,
+    courseId: context.courseId,
+    courseLevelId: context.courseLevelId,
+    levelId
+  });
+});
+
 const exportQuestionBankCsv = asyncHandler(async (req, res) => {
   const levelId = req.query.levelId ? String(req.query.levelId) : null;
   const courseId = req.query.courseId ? String(req.query.courseId) : null;
@@ -749,6 +833,7 @@ export {
   createQuestionBankEntry,
   updateQuestionBankEntry,
   deleteQuestionBankEntry,
+  bulkDeleteQuestionBankEntries,
   exportQuestionBankCsv,
   importQuestionBank
 };

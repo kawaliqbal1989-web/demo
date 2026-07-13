@@ -12,6 +12,7 @@ import { listLevels } from "../../services/levelsService";
 import { resolveAcademicLevelForCourseLevel } from "../../utils/courseLevelMapping";
 import { formatWorksheetQuestionPreview } from "../../utils/worksheetQuestionPreview";
 import {
+  bulkDeleteQuestionBankEntries,
   createQuestionBankEntry,
   updateQuestionBankEntry,
   deleteQuestionBankEntry,
@@ -126,12 +127,16 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
   const [bankLoading, setBankLoading] = useState(false);
   const [bankError, setBankError] = useState("");
   const [bankQ, setBankQ] = useState("");
+  const [loadedBankQuery, setLoadedBankQuery] = useState("");
   const [pageLimit, setPageLimit] = useState(10);
   const [pageOffset, setPageOffset] = useState(0);
   const [bankCreateForm, setBankCreateForm] = useState({ ...EMPTY_BANK_FORM });
   const [bankCreating, setBankCreating] = useState(false);
   const [editingQuestionId, setEditingQuestionId] = useState(null);
   const [deleteQuestionTarget, setDeleteQuestionTarget] = useState(null);
+  const [bulkDeleteTarget, setBulkDeleteTarget] = useState(null);
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState([]);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [previewQuestionId, setPreviewQuestionId] = useState(null);
   const activeBankContextRef = useRef("");
   const bankRequestIdRef = useRef(0);
@@ -158,6 +163,13 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
   const visibleBankItems = useMemo(() => {
     return bankItems.slice(pageOffset, pageOffset + pageLimit);
   }, [bankItems, pageOffset, pageLimit]);
+
+  const selectedVisibleCount = useMemo(() => {
+    const selectedSet = new Set(selectedQuestionIds);
+    return visibleBankItems.filter((item) => selectedSet.has(String(item.id))).length;
+  }, [selectedQuestionIds, visibleBankItems]);
+
+  const searchActive = Boolean(String(bankQ || "").trim()) || Boolean(String(loadedBankQuery || "").trim());
 
   const previewQuestion = useMemo(() => {
     return visibleBankItems.find((item) => item.id === previewQuestionId) || visibleBankItems[0] || null;
@@ -205,19 +217,22 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
 
   const loadBank = async (levelId, contextKey = activeBankContextRef.current) => {
     const requestId = ++bankRequestIdRef.current;
+    const requestQuery = String(bankQ || "").trim();
     setBankLoading(true);
     setBankError("");
+    setSelectedQuestionIds([]);
     try {
       const resp = await listQuestionBank({
         levelId,
         courseId,
         levelNumber: levelNumberInt,
-        q: bankQ || undefined
+        q: requestQuery || undefined
       });
       if (requestId !== bankRequestIdRef.current || activeBankContextRef.current !== contextKey) {
         return;
       }
       setBankItems(resp?.data?.items || []);
+      setLoadedBankQuery(requestQuery);
       setPageOffset(0);
       setPreviewQuestionId(null);
     } catch (err) {
@@ -244,9 +259,12 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
     activeBankContextRef.current = scopedBankContextKey;
     setBankItems([]);
     setBankError("");
+    setLoadedBankQuery("");
     setPageOffset(0);
     setPreviewQuestionId(null);
     setDeleteQuestionTarget(null);
+    setBulkDeleteTarget(null);
+    setSelectedQuestionIds([]);
     setEditingQuestionId(null);
     setBankCreateForm({ ...EMPTY_BANK_FORM });
 
@@ -377,6 +395,37 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
       downloadBlob(blob, `question-bank-level-${levelNumberInt}.csv`);
     } catch (err) {
       setBankError(getFriendlyErrorMessage(err) || "Failed to export CSV.");
+    }
+  };
+
+  const onBulkDelete = async ({ mode, questionIds }) => {
+    setBulkDeleting(true);
+    setBankError("");
+    try {
+      const selectedSet = new Set((questionIds || []).map((item) => String(item)));
+      await bulkDeleteQuestionBankEntries({
+        levelId: academicLevel.id,
+        courseId,
+        levelNumber: levelNumberInt,
+        mode,
+        ...(mode === "SELECTED" ? { questionIds } : {})
+      });
+
+      if (mode === "ALL" || selectedSet.has(String(previewQuestionId || ""))) {
+        setPreviewQuestionId(null);
+      }
+      if (mode === "ALL" || selectedSet.has(String(editingQuestionId || ""))) {
+        setEditingQuestionId(null);
+        setBankCreateForm({ ...EMPTY_BANK_FORM });
+      }
+
+      setBulkDeleteTarget(null);
+      setSelectedQuestionIds([]);
+      await loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey);
+    } catch (err) {
+      setBankError(getFriendlyErrorMessage(err) || "Failed to delete question bank entries.");
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -583,7 +632,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
             <h3 style={{ margin: 0 }}>Question Bank</h3>
             <p style={{ margin: "6px 0 0", opacity: 0.75, fontSize: 13 }}>Bulk import/export and CRUD.</p>
           </div>
-          <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <button className="button secondary" type="button" style={{ width: "auto" }} onClick={onExportBank}>
               Export CSV
             </button>
@@ -602,8 +651,23 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
                 }}
               />
             </label>
+            <button
+              className="button"
+              type="button"
+              style={{ width: "auto", background: "var(--color-text-danger)", borderColor: "var(--color-text-danger)" }}
+              disabled={bankLoading || bankItems.length === 0 || searchActive || bulkDeleting}
+              onClick={() => setBulkDeleteTarget({ mode: "ALL" })}
+            >
+              Delete Entire Question Bank
+            </button>
           </div>
         </div>
+
+        {searchActive ? (
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Clear search before deleting the entire question bank so the action runs on the full scoped dataset.
+          </div>
+        ) : null}
 
         {bankError ? <div className="error">{bankError}</div> : null}
 
@@ -633,6 +697,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
                 const next = Number(event.target.value);
                 setPageLimit(next);
                 setPageOffset(0);
+                setSelectedQuestionIds([]);
               }}
               style={{ width: 120 }}
             >
@@ -818,6 +883,23 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
           ]}
           rows={visibleBankItems}
           keyField="id"
+          selectable
+          selectedKeys={selectedQuestionIds}
+          onSelectionChange={(next) => setSelectedQuestionIds((next || []).map((item) => String(item)))}
+          bulkActions={[
+            {
+              label: `Delete Selected (${selectedVisibleCount})`,
+              variant: "secondary",
+              disabled: bankLoading || bulkDeleting || selectedVisibleCount <= 0,
+              onClick: (keys) => {
+                const normalizedKeys = (keys || []).map((item) => String(item));
+                if (!normalizedKeys.length) {
+                  return;
+                }
+                setBulkDeleteTarget({ mode: "SELECTED", questionIds: normalizedKeys });
+              }
+            }
+          ]}
         />
 
         <div className="card" style={{ display: "grid", gap: 8 }}>
@@ -856,6 +938,7 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
           onChange={(next) => {
             setPageLimit(next.limit);
             setPageOffset(next.offset);
+            setSelectedQuestionIds([]);
           }}
         />
       </div>
@@ -865,19 +948,61 @@ function SuperadminCourseLevelQuestionBankPage({ forcedCourseId, forcedLevelNumb
         title="Delete Question"
         message="Are you sure you want to delete this question?"
         confirmLabel="Delete"
+        danger
         onConfirm={async () => {
           const target = deleteQuestionTarget;
           setDeleteQuestionTarget(null);
           if (!target) {
             return;
           }
-          await deleteQuestionBankEntry(target.id, {
-            courseId,
-            levelNumber: levelNumberInt
-          });
-          await loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey);
+          try {
+            await deleteQuestionBankEntry(target.id, {
+              courseId,
+              levelNumber: levelNumberInt
+            });
+            if (String(previewQuestionId || "") === String(target.id)) {
+              setPreviewQuestionId(null);
+            }
+            if (String(editingQuestionId || "") === String(target.id)) {
+              setEditingQuestionId(null);
+              setBankCreateForm({ ...EMPTY_BANK_FORM });
+            }
+            await loadBank(academicLevel.id, activeBankContextRef.current || scopedBankContextKey);
+          } catch (err) {
+            setBankError(getFriendlyErrorMessage(err) || "Failed to delete question.");
+          }
         }}
         onCancel={() => setDeleteQuestionTarget(null)}
+      />
+
+      <ConfirmDialog
+        open={Boolean(bulkDeleteTarget)}
+        title={bulkDeleteTarget?.mode === "ALL" ? "Delete Entire Question Bank" : "Delete Selected Questions"}
+        message={
+          bulkDeleteTarget?.mode === "ALL"
+            ? `Delete all ${bankItems.length} question bank entries for ${course.name} Level ${levelNumberInt}? This cannot be undone.`
+            : `Delete ${bulkDeleteTarget?.questionIds?.length || 0} selected question(s) from ${course.name} Level ${levelNumberInt}? This cannot be undone.`
+        }
+        confirmLabel={bulkDeleting ? "Deleting..." : "Delete"}
+        confirmDisabled={bulkDeleting}
+        danger
+        onConfirm={async () => {
+          const target = bulkDeleteTarget;
+          if (!target) {
+            return;
+          }
+          if (target.mode === "ALL") {
+            await onBulkDelete({ mode: "ALL" });
+            return;
+          }
+          await onBulkDelete({ mode: "SELECTED", questionIds: target.questionIds || [] });
+        }}
+        onCancel={() => {
+          if (bulkDeleting) {
+            return;
+          }
+          setBulkDeleteTarget(null);
+        }}
       />
     </section>
   );

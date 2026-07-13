@@ -52,6 +52,21 @@ async function deleteQuestionBankEntry(id, { courseId, levelNumber } = {}) {
   return response.data;
 }
 
+async function bulkDeleteQuestionBankEntries({ levelId, courseId, levelNumber, mode, questionIds } = {}) {
+  const response = await apiClient.post(
+    "/question-bank/bulk-delete",
+    {
+      levelId,
+      courseId,
+      levelNumber,
+      mode,
+      ...(Array.isArray(questionIds) ? { questionIds } : {})
+    },
+    { _skipGlobalLoading: true }
+  );
+  return response.data;
+}
+
 async function importQuestionBank({ levelId, items, courseId, levelNumber, workspaceScope }) {
   const response = await apiClient.post(
     "/question-bank/import",
@@ -97,6 +112,7 @@ export {
   createQuestionBankEntry,
   updateQuestionBankEntry,
   deleteQuestionBankEntry,
+  bulkDeleteQuestionBankEntries,
   importQuestionBank,
   exportQuestionBankCsv
 };

@@ -439,7 +439,19 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         sourceCourseId = baseWorksheet.courseId || levelScope?.courseId || provenanceContext?.courseId || null;
         sourceCourseLevelId = baseWorksheet.courseLevelId || levelScope?.courseLevelId || provenanceContext?.courseLevelId || null;
         seed = `EXAM_SELECTED:${examCycleId}:${baseWorksheetId}:${entry.studentId}`;
-        selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed);
+        const worksheetQuestionCount = Number(baseWorksheet.questions.length || 0);
+        const configuredQuestionCountRaw = Number(levelConfig.questionCount);
+        const configuredQuestionCount = Number.isInteger(configuredQuestionCountRaw) && configuredQuestionCountRaw > 0
+          ? Math.min(configuredQuestionCountRaw, worksheetQuestionCount)
+          : worksheetQuestionCount;
+        selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed).slice(0, configuredQuestionCount);
+
+        const configuredTimeLimitMinutesRaw = Number(levelConfig.timeLimitMinutes);
+        const fallbackTimeLimitMinutes = Number(examCycle.examDurationMinutes || 0);
+        const effectiveTimeLimitMinutes = Number.isInteger(configuredTimeLimitMinutesRaw) && configuredTimeLimitMinutesRaw > 0
+          ? configuredTimeLimitMinutesRaw
+          : fallbackTimeLimitMinutes;
+        timeLimitSeconds = Math.max(60, Math.floor(Number(effectiveTimeLimitMinutes) * 60));
       } else if (levelConfig.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK) {
         const templateIdForBank = extractTemplateIdFromQuestionBankKey(levelConfig.questionBankId);
         const bankKey = `${entry.enrolledLevelId}:${templateIdForBank || "DEFAULT"}`;

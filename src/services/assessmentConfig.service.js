@@ -529,13 +529,28 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
         throw createHttpError(409, "Selected worksheet has no questions", "EXAM_WORKSHEET_QUESTIONS_MISSING");
       }
 
+      const questionCount = toPositiveInt(config.questionCount);
+      if (!questionCount) {
+        throw createHttpError(400, "questionCount must be a positive integer", "EXAM_QUESTION_COUNT_INVALID");
+      }
+
+      const worksheetQuestionCount = Number(worksheet._count?.questions || 0);
+      if (questionCount > worksheetQuestionCount) {
+        throw createHttpError(409, "questionCount exceeds worksheet questions", "EXAM_QUESTION_COUNT_EXCEEDS_WORKSHEET");
+      }
+
+      const timeLimitMinutes = toPositiveInt(config.timeLimitMinutes);
+      if (!timeLimitMinutes) {
+        throw createHttpError(400, "timeLimitMinutes must be a positive integer", "EXAM_TIME_LIMIT_INVALID");
+      }
+
       writes.push({
         levelId: config.levelId,
         assessmentType: ASSESSMENT_TYPE.WORKSHEET,
         worksheetId: worksheet.id,
         questionBankId: null,
-        questionCount: null,
-        timeLimitMinutes: null
+        questionCount,
+        timeLimitMinutes
       });
       continue;
     }

@@ -1605,6 +1605,21 @@ function getPaperBuilderValidation(assessmentPayload = {}, draftConfig = []) {
       if (!wsOptions.length) {
         errors.push("No worksheet options available for this level");
       }
+      const selectedWorksheet = wsOptions.find((worksheet) => worksheet.id === current.worksheetId);
+      const worksheetQuestionCount = Number(selectedWorksheet?.questionCount || 0);
+
+      const count = Number(current.questionCount);
+      if (!Number.isInteger(count) || count <= 0) {
+        errors.push("Question count must be a positive integer");
+      }
+      if (selectedWorksheet && Number.isInteger(count) && count > worksheetQuestionCount) {
+        errors.push(`Question count cannot exceed ${worksheetQuestionCount}`);
+      }
+
+      const limit = Number(current.timeLimitMinutes);
+      if (!Number.isInteger(limit) || limit <= 0) {
+        errors.push("Time limit must be a positive integer");
+      }
     } else if (current.assessmentType === "QUESTION_BANK") {
       if (!current.questionBankId) {
         errors.push("Select a question bank");
@@ -1854,8 +1869,8 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
             assessmentType: item.assessmentType,
             worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
             questionBankId: item.assessmentType === "QUESTION_BANK" ? item.questionBankId : null,
-            questionCount: item.assessmentType === "QUESTION_BANK" ? Number(item.questionCount) : null,
-            timeLimitMinutes: item.assessmentType === "QUESTION_BANK" ? Number(item.timeLimitMinutes) : null
+            questionCount: Number(item.questionCount),
+            timeLimitMinutes: Number(item.timeLimitMinutes)
           }))
         },
         {
@@ -2044,9 +2059,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
               const levelErrors = validation.errorsByLevelId[levelId] || [];
               const selectedWorksheet = wsOptions.find((item) => item.id === current.worksheetId) || null;
               const selectedBank = bankOptions.find((item) => item.id === current.questionBankId) || null;
-              const configuredTotalQuestions = current.assessmentType === "WORKSHEET"
-                ? Number(selectedWorksheet?.questionCount || 0)
-                : Number(current.questionCount || 0);
+              const configuredTotalQuestions = Number(current.questionCount || 0);
 
               return (
                 <div key={levelId} style={{ display: "grid", gap: 8, border: "1px solid var(--color-border)", borderRadius: 10, padding: 12 }}>
@@ -2087,7 +2100,20 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                           className="input"
                           value={current.worksheetId || ""}
                           disabled={isCycleLocked}
-                          onChange={(event) => setDraftLevelConfig(levelId, { worksheetId: event.target.value })}
+                          onChange={(event) => {
+                            const nextWorksheetId = event.target.value;
+                            const nextWorksheet = wsOptions.find((item) => item.id === nextWorksheetId) || null;
+                            const worksheetQuestionCount = Number(nextWorksheet?.questionCount || 0);
+                            const defaultCycleTimeLimit = Number(selectedCycle?.examDurationMinutes || 0);
+
+                            setDraftLevelConfig(levelId, {
+                              worksheetId: nextWorksheetId,
+                              questionCount: worksheetQuestionCount > 0 ? worksheetQuestionCount : "",
+                              timeLimitMinutes: Number.isInteger(defaultCycleTimeLimit) && defaultCycleTimeLimit > 0
+                                ? defaultCycleTimeLimit
+                                : ""
+                            });
+                          }}
                         >
                           <option value="">Select worksheet</option>
                           {wsOptions.map((worksheet) => (
@@ -2097,6 +2123,35 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                           ))}
                         </select>
                       </label>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+                        <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                          Question Count
+                          <input
+                            className="input"
+                            type="number"
+                            min={1}
+                            value={current.questionCount}
+                            disabled={isCycleLocked}
+                            onChange={(event) => setDraftLevelConfig(levelId, { questionCount: event.target.value })}
+                          />
+                        </label>
+                        <label style={{ display: "grid", gap: 4, fontSize: 13 }}>
+                          Time Limit (Minutes)
+                          <input
+                            className="input"
+                            type="number"
+                            min={1}
+                            value={current.timeLimitMinutes}
+                            disabled={isCycleLocked}
+                            onChange={(event) => setDraftLevelConfig(levelId, { timeLimitMinutes: event.target.value })}
+                          />
+                        </label>
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                        {selectedWorksheet
+                          ? `Available in selected worksheet: ${selectedWorksheet.questionCount}`
+                          : "Select a worksheet to view available count."}
+                      </div>
                       {!wsOptions.length ? (
                         <div style={{ display: "grid", gap: 2 }}>
                           <span className="error" style={{ margin: 0 }}>No exam worksheets available for this level.</span>

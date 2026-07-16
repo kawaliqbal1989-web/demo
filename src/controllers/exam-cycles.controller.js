@@ -1536,8 +1536,8 @@ const listExamCycles = asyncHandler(async (req, res) => {
     if ((hierarchy.businessPartnerSubmittedToSuperadmin || 0) > 0) return "SUPERADMIN";
     if ((hierarchy.franchiseSubmittedToBusinessPartner || 0) > 0) return "BP";
     if ((hierarchy.centerSubmittedToFranchise || 0) > 0) return "FRANCHISE";
-    if ((hierarchy.teacherDraft || 0) > 0 || (hierarchy.teacherRejected || 0) > 0) return "TEACHER";
     if ((hierarchy.teacherSubmittedToCenter || 0) > 0 || (hierarchy.centerReview || 0) > 0) return "CENTER";
+    if ((hierarchy.teacherDraft || 0) > 0 || (hierarchy.teacherRejected || 0) > 0) return "TEACHER";
     if ((hierarchy.approved || 0) > 0) return "APPROVED";
     return null;
   };

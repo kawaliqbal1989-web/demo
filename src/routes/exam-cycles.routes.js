@@ -8,6 +8,8 @@ import {
   createExamCourseLevel,
   listExamResultsControlCenter,
   createExamCycle,
+  getExamCycleSchedule,
+  extendExamCycleSchedule,
   getTeacherList,
   teacherEnrollStudents,
   submitTeacherListToCenter,
@@ -58,6 +60,20 @@ examCyclesRouter.post(
   requireSuperadmin(),
   auditAction("EXAM_CYCLE_CREATE", "EXAM_CYCLE"),
   createExamCycle
+);
+
+examCyclesRouter.get(
+  "/:id/schedule",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_SCHEDULE_VIEW", "EXAM_CYCLE", (req) => req.params.id),
+  getExamCycleSchedule
+);
+
+examCyclesRouter.patch(
+  "/:id/schedule",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_SCHEDULE_EXTEND", "EXAM_CYCLE", (req) => req.params.id),
+  extendExamCycleSchedule
 );
 
 examCyclesRouter.get(

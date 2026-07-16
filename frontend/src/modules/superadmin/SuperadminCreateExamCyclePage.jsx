@@ -43,7 +43,6 @@ function SuperadminCreateExamCyclePage() {
   const [practiceStartAt, setPracticeStartAt] = useState("");
   const [examStartsAt, setExamStartsAt] = useState("");
   const [examEndsAt, setExamEndsAt] = useState("");
-  const [examDurationMinutes, setExamDurationMinutes] = useState(45);
   const [resultPublishAt, setResultPublishAt] = useState("");
 
   const canSubmit = useMemo(() => {
@@ -54,10 +53,9 @@ function SuperadminCreateExamCyclePage() {
         enrollmentEndAt &&
         practiceStartAt &&
         examStartsAt &&
-        examEndsAt &&
-        Number(examDurationMinutes) > 0
+        examEndsAt
     );
-  }, [businessPartnerId, name, enrollmentStartAt, enrollmentEndAt, practiceStartAt, examStartsAt, examEndsAt, examDurationMinutes]);
+  }, [businessPartnerId, name, enrollmentStartAt, enrollmentEndAt, practiceStartAt, examStartsAt, examEndsAt]);
 
   useEffect(() => {
     let cancelled = false;
@@ -137,7 +135,6 @@ function SuperadminCreateExamCyclePage() {
         practiceStartAt: practiceStartD.toISOString(),
         examStartsAt: examStartD.toISOString(),
         examEndsAt: examEndD.toISOString(),
-        examDurationMinutes: Number(examDurationMinutes),
         attemptLimit: 1,
         ...(toIsoOrNull(resultPublishAt) ? { resultPublishAt: toIsoOrNull(resultPublishAt) } : {})
       };
@@ -218,22 +215,9 @@ function SuperadminCreateExamCyclePage() {
           </div>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <div style={{ display: "grid", gap: 6 }}>
-            <label>Exam Duration (minutes)</label>
-            <input
-              className="input"
-              type="number"
-              min={1}
-              max={600}
-              value={examDurationMinutes}
-              onChange={(e) => setExamDurationMinutes(e.target.value)}
-            />
-          </div>
-          <div style={{ display: "grid", gap: 6 }}>
-            <label>Attempt Limit</label>
-            <input className="input" value="1 (fixed)" disabled />
-          </div>
+        <div style={{ display: "grid", gap: 6, maxWidth: 420 }}>
+          <label>Attempt Limit</label>
+          <input className="input" value="1 (fixed)" disabled />
         </div>
 
         <div style={{ display: "flex", gap: 10 }}>

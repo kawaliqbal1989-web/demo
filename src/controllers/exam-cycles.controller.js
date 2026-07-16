@@ -703,6 +703,29 @@ function buildScopedLateEnrollmentWhere({ tenantId, examCycleId, actor, scope })
   };
 }
 
+function redactExamMetricsForLowerRole(row = {}, { isPublished }) {
+  const { resultOutcome: _ignoredResultOutcome, ...rowWithoutOutcome } = row;
+  const baseRow = {
+    ...rowWithoutOutcome,
+    rank: null
+  };
+
+  if (isPublished) {
+    return baseRow;
+  }
+
+  return {
+    ...baseRow,
+    score: null,
+    percentage: null,
+    correctCount: null,
+    wrongCount: null,
+    unansweredCount: null,
+    totalQuestions: null,
+    completionTimeSeconds: null
+  };
+}
+
 function parseDateTime(value, field) {
   if (!value) return null;
   const d = new Date(value);
@@ -752,6 +775,114 @@ function parseCourseStatus(value) {
 
 function isUniqueConstraintError(error) {
   return String(error?.code || "") === "P2002";
+}
+
+const DEFAULT_EXAM_DURATION_MINUTES = 45;
+
+function formatScheduleNotificationDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Intl.DateTimeFormat("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function toExamScheduleResponse(cycle) {
+  return {
+    id: cycle.id,
+    code: cycle.code,
+    name: cycle.name,
+    businessPartnerId: cycle.businessPartnerId,
+    enrollmentStartAt: cycle.enrollmentStartAt,
+    enrollmentEndAt: cycle.enrollmentEndAt,
+    practiceStartAt: cycle.practiceStartAt,
+    examStartsAt: cycle.examStartsAt,
+    examEndsAt: cycle.examEndsAt,
+    resultPublishAt: cycle.resultPublishAt,
+    resultStatus: cycle.resultStatus,
+    isArchived: cycle.isArchived
+  };
+}
+
+async function notifyExamCycleScheduleExtension({ tenantId, examCycle, changes }) {
+  const nodeIds = examCycle.businessPartnerId
+    ? await resolveBusinessPartnerHierarchyNodeIds({
+        tenantId,
+        businessPartnerId: examCycle.businessPartnerId
+      })
+    : [];
+
+  const [hierarchyUsers, enrollmentRows, lateEnrollmentRows] = await Promise.all([
+    nodeIds.length
+      ? prisma.authUser.findMany({
+          where: {
+            tenantId,
+            isActive: true,
+            role: { in: ["BP", "FRANCHISE", "CENTER", "TEACHER"] },
+            hierarchyNodeId: { in: nodeIds }
+          },
+          select: { id: true }
+        })
+      : [],
+    prisma.examEnrollmentEntry.findMany({
+      where: { tenantId, examCycleId: examCycle.id },
+      select: { studentId: true }
+    }),
+    prisma.examLateEnrollmentStudent.findMany({
+      where: {
+        tenantId,
+        status: "APPROVED",
+        request: { is: { examCycleId: examCycle.id } }
+      },
+      select: { studentId: true }
+    })
+  ]);
+
+  const studentIds = Array.from(new Set([
+    ...enrollmentRows.map((row) => row.studentId),
+    ...lateEnrollmentRows.map((row) => row.studentId)
+  ].filter(Boolean)));
+
+  const studentUsers = studentIds.length
+    ? await prisma.authUser.findMany({
+        where: {
+          tenantId,
+          isActive: true,
+          role: "STUDENT",
+          studentId: { in: studentIds }
+        },
+        select: { id: true }
+      })
+    : [];
+
+  const recipientUserIds = Array.from(new Set([
+    ...hierarchyUsers.map((user) => user.id),
+    ...studentUsers.map((user) => user.id)
+  ].filter(Boolean)));
+
+  if (!recipientUserIds.length) {
+    return 0;
+  }
+
+  const details = changes.map((change) => {
+    const label = change.field === "enrollmentEndAt" ? "Enrollment end" : "Exam end";
+    return `${label} extended from ${formatScheduleNotificationDate(change.oldValue)} to ${formatScheduleNotificationDate(change.newValue)}`;
+  }).join(". ");
+
+  const result = await createBulkNotification(
+    recipientUserIds.map((recipientUserId) => ({
+      tenantId,
+      recipientUserId,
+      type: "EXAM_SCHEDULE_EXTENDED",
+      title: "Exam Schedule Extended",
+      message: `${examCycle.name} (${examCycle.code}): ${details}.`,
+      entityType: "EXAM_CYCLE",
+      entityId: examCycle.id
+    }))
+  );
+
+  return Number(result?.count || 0);
 }
 
 const listExamCourses = asyncHandler(async (req, res) => {
@@ -1716,7 +1847,8 @@ const createExamCycle = asyncHandler(async (req, res) => {
   assertDateOrder(practiceStart, examStart, "Practice start must be before exam start");
   assertDateOrder(examStart, examEnd, "Exam start must be before exam end");
 
-  const duration = Number(examDurationMinutes);
+  const durationInputMissing = examDurationMinutes === undefined || examDurationMinutes === null || examDurationMinutes === "";
+  const duration = durationInputMissing ? DEFAULT_EXAM_DURATION_MINUTES : Number(examDurationMinutes);
   if (!Number.isInteger(duration) || duration <= 0 || duration > 600) {
     return res.apiError(400, "examDurationMinutes must be a positive integer (<=600)", "VALIDATION_ERROR");
   }
@@ -1833,6 +1965,181 @@ const createExamCycle = asyncHandler(async (req, res) => {
   })();
 
   return res.apiSuccess("Exam cycle created", created, 201);
+});
+
+const getExamCycleSchedule = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const cycle = await prisma.examCycle.findFirst({
+    where: {
+      id: examCycleId,
+      tenantId: req.auth.tenantId
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      businessPartnerId: true,
+      enrollmentStartAt: true,
+      enrollmentEndAt: true,
+      practiceStartAt: true,
+      examStartsAt: true,
+      examEndsAt: true,
+      resultPublishAt: true,
+      resultStatus: true,
+      isArchived: true
+    }
+  });
+
+  if (!cycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  return res.apiSuccess("Exam cycle schedule fetched", toExamScheduleResponse(cycle));
+});
+
+const extendExamCycleSchedule = asyncHandler(async (req, res) => {
+  const examCycleId = String(req.params.id);
+  const body = req.body || {};
+  const hasEnrollmentEnd = Object.prototype.hasOwnProperty.call(body, "enrollmentEndAt");
+  const hasExamEnd = Object.prototype.hasOwnProperty.call(body, "examEndsAt");
+
+  if (!hasEnrollmentEnd && !hasExamEnd) {
+    return res.apiError(400, "enrollmentEndAt or examEndsAt is required", "VALIDATION_ERROR");
+  }
+
+  const cycle = await prisma.examCycle.findFirst({
+    where: {
+      id: examCycleId,
+      tenantId: req.auth.tenantId
+    },
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      businessPartnerId: true,
+      enrollmentStartAt: true,
+      enrollmentEndAt: true,
+      practiceStartAt: true,
+      examStartsAt: true,
+      examEndsAt: true,
+      resultPublishAt: true,
+      resultStatus: true,
+      isArchived: true
+    }
+  });
+
+  if (!cycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  if (cycle.isArchived) {
+    return res.apiError(409, "Archived exam cycle schedule cannot be extended", "EXAM_CYCLE_ARCHIVED");
+  }
+
+  if (cycle.resultStatus === "PUBLISHED") {
+    return res.apiError(409, "Published exam cycle schedule cannot be extended", "EXAM_RESULTS_PUBLISHED");
+  }
+
+  const data = {};
+  const changes = [];
+
+  if (hasEnrollmentEnd) {
+    const nextEnrollmentEnd = parseDateTime(body.enrollmentEndAt, "enrollmentEndAt");
+    if (!nextEnrollmentEnd) {
+      return res.apiError(400, "enrollmentEndAt is required", "VALIDATION_ERROR");
+    }
+
+    const currentEnrollmentEnd = new Date(cycle.enrollmentEndAt);
+    if (nextEnrollmentEnd.getTime() <= currentEnrollmentEnd.getTime()) {
+      return res.apiError(409, "Enrollment end must be later than the current enrollment end", "EXAM_ENROLLMENT_END_NOT_EXTENDED");
+    }
+
+    const examStartsAt = new Date(cycle.examStartsAt);
+    if (currentEnrollmentEnd.getTime() <= examStartsAt.getTime() && nextEnrollmentEnd.getTime() > examStartsAt.getTime()) {
+      return res.apiError(409, "Enrollment end cannot be extended beyond exam start", "EXAM_ENROLLMENT_END_AFTER_EXAM_START");
+    }
+
+    data.enrollmentEndAt = nextEnrollmentEnd;
+    changes.push({
+      field: "enrollmentEndAt",
+      oldValue: currentEnrollmentEnd,
+      newValue: nextEnrollmentEnd
+    });
+  }
+
+  if (hasExamEnd) {
+    const nextExamEnd = parseDateTime(body.examEndsAt, "examEndsAt");
+    if (!nextExamEnd) {
+      return res.apiError(400, "examEndsAt is required", "VALIDATION_ERROR");
+    }
+
+    const currentExamEnd = new Date(cycle.examEndsAt);
+    if (nextExamEnd.getTime() <= currentExamEnd.getTime()) {
+      return res.apiError(409, "Exam end must be later than the current exam end", "EXAM_END_NOT_EXTENDED");
+    }
+
+    if (cycle.resultPublishAt && nextExamEnd.getTime() > new Date(cycle.resultPublishAt).getTime()) {
+      return res.apiError(409, "Exam end cannot be extended beyond the configured result publish date", "EXAM_END_AFTER_RESULT_PUBLISH");
+    }
+
+    data.examEndsAt = nextExamEnd;
+    changes.push({
+      field: "examEndsAt",
+      oldValue: currentExamEnd,
+      newValue: nextExamEnd
+    });
+  }
+
+  const updated = await prisma.examCycle.update({
+    where: { id: cycle.id },
+    data,
+    select: {
+      id: true,
+      code: true,
+      name: true,
+      businessPartnerId: true,
+      enrollmentStartAt: true,
+      enrollmentEndAt: true,
+      practiceStartAt: true,
+      examStartsAt: true,
+      examEndsAt: true,
+      resultPublishAt: true,
+      resultStatus: true,
+      isArchived: true
+    }
+  });
+
+  await recordAudit({
+    tenantId: req.auth.tenantId,
+    userId: req.auth.userId,
+    role: req.auth.role,
+    action: "EXAM_CYCLE_SCHEDULE_EXTEND",
+    entityType: "EXAM_CYCLE",
+    entityId: cycle.id,
+    metadata: {
+      changes: changes.map((change) => ({
+        field: change.field,
+        oldValue: change.oldValue.toISOString(),
+        newValue: change.newValue.toISOString()
+      }))
+    }
+  });
+
+  let notificationCount = 0;
+  try {
+    notificationCount = await notifyExamCycleScheduleExtension({
+      tenantId: req.auth.tenantId,
+      examCycle: updated,
+      changes
+    });
+  } catch {
+    notificationCount = 0;
+  }
+
+  return res.apiSuccess("Exam cycle schedule extended", {
+    ...toExamScheduleResponse(updated),
+    notificationCount
+  });
 });
 
 function withinEnrollmentWindow(examCycle, now = new Date()) {
@@ -2888,7 +3195,7 @@ const exportEnrollmentListCsv = asyncHandler(async (req, res) => {
 async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {} }) {
   const examCycle = await prisma.examCycle.findFirst({
     where: { id: examCycleId, tenantId },
-  select: { id: true, resultStatus: true, isArchived: true, businessPartnerId: true }
+    select: { id: true, resultStatus: true, isArchived: true, businessPartnerId: true }
   });
 
   if (!examCycle) {
@@ -2907,12 +3214,8 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     throw error;
   }
 
-  if (actor.role !== "SUPERADMIN" && examCycle.resultStatus !== "PUBLISHED") {
-    const error = new Error("Results are not published");
-    error.statusCode = 403;
-    error.errorCode = "RESULTS_NOT_PUBLISHED";
-    throw error;
-  }
+  const isResultPublished = examCycle.resultStatus === "PUBLISHED";
+  const resultPublicationState = isResultPublished ? "DONE" : "PENDING";
 
   const approvedCombinedLists = await prisma.examEnrollmentList.findMany({
     where: {
@@ -2936,9 +3239,15 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
     itemWhere.entry = { is: { student: { is: { hierarchyNodeId: actor.hierarchyNodeId } } } };
   } else if (actor.role === "FRANCHISE" || actor.role === "BP") {
     const nodeIds = scope.hierarchyNodeIds;
-    if (nodeIds.length) {
-      itemWhere.entry = { is: { student: { is: { hierarchyNodeId: { in: nodeIds } } } } };
-    }
+    itemWhere.entry = {
+      is: {
+        student: {
+          is: {
+            hierarchyNodeId: nodeIds.length ? { in: nodeIds } : "__NO_HIERARCHY_SCOPE__"
+          }
+        }
+      }
+    };
   }
 
   if (actor.role === "TEACHER") {
@@ -3287,11 +3596,29 @@ async function buildExamResultsPayload({ tenantId, actor, examCycleId, query = {
   });
 
   const rankedResults = assignExamResultRanks(results);
+  const roleScopedRows = rankedResults.map((row) => {
+    const enriched = {
+      ...row,
+      resultState: row.candidateStatus,
+      isResultPublished,
+      resultPublicationState,
+      attemptStatus: row.candidateStatus,
+      attemptNo: row.activeAttemptNo
+    };
+
+    if (actor.role === "SUPERADMIN") {
+      return enriched;
+    }
+
+    return redactExamMetricsForLowerRole(enriched, { isPublished: isResultPublished });
+  });
 
   return {
     status: examCycle.resultStatus,
+    isResultPublished,
+    resultPublicationState,
     resultRules: EXAM_RESULT_RULES,
-    results: applyExamResultFiltersAndSort(rankedResults, query)
+    results: applyExamResultFiltersAndSort(roleScopedRows, query)
   };
 }
 
@@ -4960,7 +5287,7 @@ const exportExamResultsCsv = asyncHandler(async (req, res) => {
     unansweredCount: r.unansweredCount,
     totalQuestions: r.totalQuestions,
     accuracy: r.percentage,
-    resultState: r.resultOutcome,
+    resultState: r.resultState ?? r.candidateStatus ?? null,
     completionTime: formatCsvDuration(r.completionTimeSeconds),
     completionTimeSeconds: r.completionTimeSeconds,
     submittedAt: r.submittedAt ? new Date(r.submittedAt).toISOString() : "",
@@ -5269,6 +5596,8 @@ export {
   createExamCourseLevel,
   listExamResultsControlCenter,
   createExamCycle,
+  getExamCycleSchedule,
+  extendExamCycleSchedule,
   getTeacherList,
   teacherEnrollStudents,
   submitTeacherListToCenter,

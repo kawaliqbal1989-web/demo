@@ -16,6 +16,16 @@ async function createExamCycle(payload) {
   return response.data;
 }
 
+async function getExamCycleSchedule(examCycleId) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/schedule`);
+  return response.data;
+}
+
+async function extendExamCycleSchedule(examCycleId, payload = {}) {
+  const response = await apiClient.patch(`/exam-cycles/${examCycleId}/schedule`, payload);
+  return response.data;
+}
+
 async function listExamCourses() {
   const response = await apiClient.get("/exam-cycles/exam-courses");
   return response.data;
@@ -298,6 +308,8 @@ async function getLateEnrollmentAudit(examCycleId) {
 export {
   listExamCycles,
   createExamCycle,
+  getExamCycleSchedule,
+  extendExamCycleSchedule,
   listExamCourses,
   createExamCourse,
   createExamCourseLevel,

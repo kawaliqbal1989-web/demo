@@ -12,6 +12,8 @@ import {
   exportEnrollmentListCsv,
   getEnrollmentListLevelBreakdown,
   getExamCycleAssessmentConfig,
+  getExamCycleSchedule,
+  extendExamCycleSchedule,
   listExamCourses,
   listPendingEnrollmentLists,
   rejectPendingEnrollmentList,
@@ -23,6 +25,14 @@ function formatDateTime(value) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleString();
+}
+
+function toLocalDateTimeInput(value) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60 * 1000);
+  return local.toISOString().slice(0, 16);
 }
 
 function SuperadminExamPendingListsPage() {
@@ -60,6 +70,10 @@ function SuperadminExamPendingListsPage() {
 
   const [approveListId, setApproveListId] = useState(null);
   const [rejectListId, setRejectListId] = useState(null);
+  const [schedule, setSchedule] = useState(null);
+  const [enrollmentEndDraft, setEnrollmentEndDraft] = useState("");
+  const [examEndDraft, setExamEndDraft] = useState("");
+  const [scheduleSavingField, setScheduleSavingField] = useState(null);
 
   const syncScopeToUrl = useCallback((courseId, levelNumber) => {
     if (!courseId) return;
@@ -75,9 +89,16 @@ function SuperadminExamPendingListsPage() {
     setLoading(true);
     setError("");
     try {
-      const data = await listPendingEnrollmentLists(examCycleId);
-      const nextRows = Array.isArray(data?.data) ? data.data : [];
+      const [pendingResponse, scheduleResponse] = await Promise.all([
+        listPendingEnrollmentLists(examCycleId),
+        getExamCycleSchedule(examCycleId)
+      ]);
+      const nextRows = Array.isArray(pendingResponse?.data) ? pendingResponse.data : [];
+      const nextSchedule = scheduleResponse?.data || null;
       setRows(nextRows);
+      setSchedule(nextSchedule);
+      setEnrollmentEndDraft(toLocalDateTimeInput(nextSchedule?.enrollmentEndAt));
+      setExamEndDraft(toLocalDateTimeInput(nextSchedule?.examEndsAt));
 
       if (!examCourseContext.courseId || !examCourseContext.levelNumber) {
         const firstResolvedScope = nextRows.find((row) => row?.assessmentScope?.canConfigureAssessment);
@@ -585,6 +606,41 @@ function SuperadminExamPendingListsPage() {
     }
   };
 
+  const extendSchedule = async (field) => {
+    if (!schedule || scheduleSavingField) return;
+
+    const draftValue = field === "enrollmentEndAt" ? enrollmentEndDraft : examEndDraft;
+    const nextDate = draftValue ? new Date(draftValue) : null;
+    const currentDate = schedule?.[field] ? new Date(schedule[field]) : null;
+
+    if (!nextDate || Number.isNaN(nextDate.getTime())) {
+      setError("Select a valid date and time.");
+      return;
+    }
+
+    if (!currentDate || Number.isNaN(currentDate.getTime()) || nextDate.getTime() <= currentDate.getTime()) {
+      setError("The new date must be later than the current date.");
+      return;
+    }
+
+    setScheduleSavingField(field);
+    setError("");
+    try {
+      const response = await extendExamCycleSchedule(examCycleId, {
+        [field]: nextDate.toISOString()
+      });
+      const nextSchedule = response?.data || null;
+      setSchedule(nextSchedule);
+      setEnrollmentEndDraft(toLocalDateTimeInput(nextSchedule?.enrollmentEndAt));
+      setExamEndDraft(toLocalDateTimeInput(nextSchedule?.examEndsAt));
+      toast.success(field === "enrollmentEndAt" ? "Enrollment end extended." : "Exam end extended.");
+    } catch (err) {
+      setError(getFriendlyErrorMessage(err) || "Failed to extend exam schedule.");
+    } finally {
+      setScheduleSavingField(null);
+    }
+  };
+
   if (loading && !rows.length) {
     return <LoadingState label="Loading pending lists..." />;
   }
@@ -599,6 +655,75 @@ function SuperadminExamPendingListsPage() {
         <button className="button secondary" type="button" onClick={() => navigate(-1)} style={{ width: "auto" }}>
           Back
         </button>
+      </div>
+
+      <div className="card" style={{ display: "grid", gap: 12 }}>
+        <div>
+          <strong>Exam Schedule</strong>
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)", marginTop: 4 }}>
+            {schedule ? `${schedule.name} (${schedule.code})` : "Schedule unavailable"}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gap: 6, border: "1px solid var(--color-border)", borderRadius: 10, padding: 12 }}>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              Current Enrollment End: {formatDateTime(schedule?.enrollmentEndAt) || "—"}
+            </div>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>New Enrollment End</span>
+              <input
+                className="input"
+                type="datetime-local"
+                value={enrollmentEndDraft}
+                min={toLocalDateTimeInput(schedule?.enrollmentEndAt)}
+                onChange={(event) => setEnrollmentEndDraft(event.target.value)}
+                disabled={!schedule || scheduleSavingField !== null || schedule?.isArchived || schedule?.resultStatus === "PUBLISHED"}
+              />
+            </label>
+            <button
+              className="button secondary"
+              type="button"
+              style={{ width: "auto", justifySelf: "start" }}
+              disabled={!schedule || !enrollmentEndDraft || scheduleSavingField !== null || schedule?.isArchived || schedule?.resultStatus === "PUBLISHED"}
+              onClick={() => void extendSchedule("enrollmentEndAt")}
+            >
+              {scheduleSavingField === "enrollmentEndAt" ? "Extending..." : "Extend Enrollment End"}
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gap: 6, border: "1px solid var(--color-border)", borderRadius: 10, padding: 12 }}>
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>
+              Current Exam Ends: {formatDateTime(schedule?.examEndsAt) || "—"}
+            </div>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>New Exam Ends</span>
+              <input
+                className="input"
+                type="datetime-local"
+                value={examEndDraft}
+                min={toLocalDateTimeInput(schedule?.examEndsAt)}
+                onChange={(event) => setExamEndDraft(event.target.value)}
+                disabled={!schedule || scheduleSavingField !== null || schedule?.isArchived || schedule?.resultStatus === "PUBLISHED"}
+              />
+            </label>
+            <button
+              className="button secondary"
+              type="button"
+              style={{ width: "auto", justifySelf: "start" }}
+              disabled={!schedule || !examEndDraft || scheduleSavingField !== null || schedule?.isArchived || schedule?.resultStatus === "PUBLISHED"}
+              onClick={() => void extendSchedule("examEndsAt")}
+            >
+              {scheduleSavingField === "examEndsAt" ? "Extending..." : "Extend Exam Ends"}
+            </button>
+          </div>
+        </div>
+
+        {schedule?.isArchived || schedule?.resultStatus === "PUBLISHED" ? (
+          <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+            Schedule extension is disabled for archived or published exam cycles.
+          </div>
+        ) : null}
       </div>
 
       <div className="card" style={{ display: "flex", gap: 12, alignItems: "center" }}>

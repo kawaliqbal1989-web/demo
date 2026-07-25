@@ -567,7 +567,13 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
       }
 
       const worksheetQuestionCount = Number(worksheet._count?.questions || 0);
-      const questionCount = worksheetQuestionCount;
+      const questionCount = toPositiveInt(config.questionCount);
+      if (!questionCount) {
+        throw createHttpError(400, "questionCount must be a positive integer", "EXAM_QUESTION_COUNT_INVALID");
+      }
+      if (questionCount > worksheetQuestionCount) {
+        throw createHttpError(409, "questionCount exceeds worksheet questions", "EXAM_QUESTION_COUNT_EXCEEDS_WORKSHEET");
+      }
 
       const worksheetTimeLimitMinutes = timeLimitMinutesFromSeconds(worksheet.timeLimitSeconds);
       const timeLimitMinutes = worksheetTimeLimitMinutes || toPositiveInt(config.timeLimitMinutes) || fallbackTimeLimitMinutes;

@@ -61,6 +61,11 @@ function toPositiveInt(value) {
   return parsed;
 }
 
+function timeLimitMinutesFromSeconds(value) {
+  const seconds = toPositiveInt(value);
+  return seconds ? Math.ceil(seconds / 60) : null;
+}
+
 function normalizeAssessmentType(value) {
   const type = String(value || "").trim().toUpperCase();
   if (type === ASSESSMENT_TYPE.WORKSHEET || type === ASSESSMENT_TYPE.QUESTION_BANK) {
@@ -203,7 +208,7 @@ async function getExamCycleLevels({ tenantId, examCycleId, listId = null }) {
   });
 }
 
-async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null }) {
+async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, provenanceContext = null }) {
   if (!Array.isArray(levelIds) || !levelIds.length) {
     return {};
   }
@@ -213,10 +218,19 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
       tenantId,
       levelId: { in: levelIds },
       ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
-      examCycleId: null,
-      OR: [
-        { generationMode: null },
-        { generationMode: { not: "EXAM" } }
+      AND: [
+        {
+          OR: [
+            { examCycleId: null },
+            ...(examCycleId ? [{ examCycleId }] : [])
+          ]
+        },
+        {
+          OR: [
+            { generationMode: null },
+            { generationMode: { not: "EXAM" } }
+          ]
+        }
       ]
     },
     select: {
@@ -226,6 +240,8 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
       courseId: true,
       courseLevelId: true,
       isPublished: true,
+      examCycleId: true,
+      timeLimitSeconds: true,
       _count: { select: { questions: true } }
     },
     orderBy: [{ levelId: "asc" }, { createdAt: "desc" }]
@@ -255,6 +271,9 @@ async function getLevelWorksheets({ tenantId, levelIds, provenanceContext = null
       id: worksheet.id,
       title: worksheet.title,
       questionCount,
+      examCycleId: worksheet.examCycleId,
+      timeLimitSeconds: worksheet.timeLimitSeconds,
+      timeLimitMinutes: timeLimitMinutesFromSeconds(worksheet.timeLimitSeconds),
       isPublished,
       status: isPublished ? "PUBLISHED" : "DRAFT",
       isSelectable,
@@ -485,7 +504,19 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
         where: {
           tenantId,
           id: { in: worksheetIds },
-          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {})
+          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
+          OR: [
+            { examCycleId: null },
+            { examCycleId }
+          ],
+          AND: [
+            {
+              OR: [
+                { generationMode: null },
+                { generationMode: { not: "EXAM" } }
+              ]
+            }
+          ]
         },
         select: {
           id: true,
@@ -494,11 +525,17 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
           courseLevelId: true,
           isPublished: true,
           examCycleId: true,
+          timeLimitSeconds: true,
           _count: { select: { questions: true } }
         }
       })
     : [];
   const worksheetById = new Map(worksheets.map((worksheet) => [worksheet.id, worksheet]));
+  const examCycle = await prisma.examCycle.findFirst({
+    where: { id: examCycleId, tenantId },
+    select: { examDurationMinutes: true }
+  });
+  const fallbackTimeLimitMinutes = toPositiveInt(examCycle?.examDurationMinutes);
 
   const writes = [];
 
@@ -519,8 +556,8 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
       if (!matchesScope(worksheet, levelScope)) {
         throw createHttpError(409, "Selected worksheet is outside exam course scope", "EXAM_WORKSHEET_SCOPE_MISMATCH");
       }
-      if (worksheet.examCycleId) {
-        throw createHttpError(409, "Selected worksheet must be a base worksheet", "EXAM_WORKSHEET_SOURCE_INVALID");
+      if (worksheet.examCycleId && worksheet.examCycleId !== examCycleId) {
+        throw createHttpError(409, "Selected worksheet belongs to a different exam cycle", "EXAM_WORKSHEET_SOURCE_INVALID");
       }
       if (!worksheet.isPublished) {
         throw createHttpError(409, "Selected worksheet must be published", "EXAM_WORKSHEET_NOT_PUBLISHED");
@@ -532,7 +569,8 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
       const worksheetQuestionCount = Number(worksheet._count?.questions || 0);
       const questionCount = worksheetQuestionCount;
 
-      const timeLimitMinutes = toPositiveInt(config.timeLimitMinutes);
+      const worksheetTimeLimitMinutes = timeLimitMinutesFromSeconds(worksheet.timeLimitSeconds);
+      const timeLimitMinutes = worksheetTimeLimitMinutes || toPositiveInt(config.timeLimitMinutes) || fallbackTimeLimitMinutes;
       if (!timeLimitMinutes) {
         throw createHttpError(400, "timeLimitMinutes must be a positive integer", "EXAM_TIME_LIMIT_INVALID");
       }
@@ -659,7 +697,18 @@ async function validateConfig({ tenantId, examCycleId, requiredLevelIds, provena
           id: config.worksheetId,
           levelId,
           isPublished: true,
-          examCycleId: null
+          OR: [
+            { examCycleId: null },
+            { examCycleId }
+          ],
+          AND: [
+            {
+              OR: [
+                { generationMode: null },
+                { generationMode: { not: "EXAM" } }
+              ]
+            }
+          ]
         }, getLevelScopeForLevelId({ provenanceContext, levelId })),
         select: { id: true }
       });

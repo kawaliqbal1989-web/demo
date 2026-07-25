@@ -4321,6 +4321,7 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
     getConfig({ tenantId: req.auth.tenantId, examCycleId, levelIds }),
     getLevelWorksheets({
       tenantId: req.auth.tenantId,
+      examCycleId,
       levelIds,
       provenanceContext: {
         courseId: scope.examCourseContext.courseId,
@@ -4358,7 +4359,18 @@ const getExamCycleAssessmentConfig = asyncHandler(async (req, res) => {
           levelId,
           courseId: levelScope.courseId,
           courseLevelId: levelScope.courseLevelId,
-          examCycleId: null,
+          OR: [
+            { examCycleId: null },
+            { examCycleId }
+          ],
+          AND: [
+            {
+              OR: [
+                { generationMode: null },
+                { generationMode: { not: "EXAM" } }
+              ]
+            }
+          ],
           isPublished: false
         }
       });

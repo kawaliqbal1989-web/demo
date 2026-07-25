@@ -318,7 +318,19 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         where: {
           tenantId,
           id: { in: worksheetIds },
-          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {})
+          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
+          OR: [
+            { examCycleId: null },
+            { examCycleId }
+          ],
+          AND: [
+            {
+              OR: [
+                { generationMode: null },
+                { generationMode: { not: "EXAM" } }
+              ]
+            }
+          ]
         },
         select: {
           id: true,
@@ -326,6 +338,8 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
           courseId: true,
           courseLevelId: true,
           templateId: true,
+          examCycleId: true,
+          timeLimitSeconds: true,
           questions: {
             orderBy: { questionNumber: "asc" },
             select: {
@@ -427,6 +441,9 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         if (!baseWorksheet || baseWorksheet.levelId !== entry.enrolledLevelId) {
           throw createHttpError(409, "Configured worksheet is invalid", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
         }
+        if (baseWorksheet.examCycleId && baseWorksheet.examCycleId !== examCycleId) {
+          throw createHttpError(409, "Configured worksheet belongs to a different exam cycle", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
+        }
         const levelScope = getLevelScopeForLevelId(entry.enrolledLevelId);
         if (!matchesScope(baseWorksheet, levelScope)) {
           throw createHttpError(409, "Configured worksheet is outside exam course scope", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
@@ -446,12 +463,17 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
           : worksheetQuestionCount;
         selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed).slice(0, configuredQuestionCount);
 
+        const worksheetTimeLimitSecondsRaw = Number(baseWorksheet.timeLimitSeconds);
         const configuredTimeLimitMinutesRaw = Number(levelConfig.timeLimitMinutes);
         const fallbackTimeLimitMinutes = Number(examCycle.examDurationMinutes || 0);
-        const effectiveTimeLimitMinutes = Number.isInteger(configuredTimeLimitMinutesRaw) && configuredTimeLimitMinutesRaw > 0
-          ? configuredTimeLimitMinutesRaw
-          : fallbackTimeLimitMinutes;
-        timeLimitSeconds = Math.max(60, Math.floor(Number(effectiveTimeLimitMinutes) * 60));
+        if (Number.isInteger(worksheetTimeLimitSecondsRaw) && worksheetTimeLimitSecondsRaw > 0) {
+          timeLimitSeconds = Math.max(60, worksheetTimeLimitSecondsRaw);
+        } else {
+          const effectiveTimeLimitMinutes = Number.isInteger(configuredTimeLimitMinutesRaw) && configuredTimeLimitMinutesRaw > 0
+            ? configuredTimeLimitMinutesRaw
+            : fallbackTimeLimitMinutes;
+          timeLimitSeconds = Math.max(60, Math.floor(Number(effectiveTimeLimitMinutes) * 60));
+        }
       } else if (levelConfig.assessmentType === ASSESSMENT_TYPE.QUESTION_BANK) {
         const templateIdForBank = extractTemplateIdFromQuestionBankKey(levelConfig.questionBankId);
         const bankKey = `${entry.enrolledLevelId}:${templateIdForBank || "DEFAULT"}`;

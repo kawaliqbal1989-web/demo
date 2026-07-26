@@ -275,6 +275,9 @@ function SuperadminExamPendingListsPage() {
       if (!current) {
         errors.push("Missing configuration");
       } else if (current.assessmentType === "WORKSHEET") {
+        const count = Number(current.questionCount);
+        const limit = Number(current.timeLimitMinutes);
+
         if (!current.worksheetId) {
           errors.push("Select a worksheet");
         } else {
@@ -283,7 +286,17 @@ function SuperadminExamPendingListsPage() {
             errors.push("Selected worksheet is not available for this level");
           } else if (selectedWorksheet.isSelectable === false || selectedWorksheet.disabled) {
             errors.push(selectedWorksheet.unavailableReason || "Selected worksheet is not ready for approval");
+          } else if (Number.isInteger(count) && count > Number(selectedWorksheet.questionCount || 0)) {
+            errors.push(`Question count cannot exceed ${selectedWorksheet.questionCount}`);
           }
+        }
+
+        if (!Number.isInteger(count) || count <= 0) {
+          errors.push("Question count must be a positive integer");
+        }
+
+        if (!Number.isInteger(limit) || limit <= 0) {
+          errors.push("Time limit must be a positive integer");
         }
       } else if (current.assessmentType === "QUESTION_BANK") {
         if (!current.questionBankId) {
@@ -508,8 +521,8 @@ function SuperadminExamPendingListsPage() {
             assessmentType: item.assessmentType,
             worksheetId: item.assessmentType === "WORKSHEET" ? item.worksheetId : null,
             questionBankId: item.assessmentType === "QUESTION_BANK" ? item.questionBankId : null,
-            questionCount: item.assessmentType === "QUESTION_BANK" ? Number(item.questionCount) : null,
-            timeLimitMinutes: item.assessmentType === "QUESTION_BANK" ? Number(item.timeLimitMinutes) : null
+            questionCount: Number(item.questionCount),
+            timeLimitMinutes: Number(item.timeLimitMinutes)
           }))
         },
         {
@@ -921,6 +934,7 @@ function SuperadminExamPendingListsPage() {
                           questionCount: "",
                           timeLimitMinutes: ""
                         };
+                        const selectedWorksheet = wsOptions.find((worksheet) => worksheet.id === current.worksheetId) || null;
                         const levelErrors = validation.errorsByLevelId[levelId] || [];
 
                         return (
@@ -969,29 +983,62 @@ function SuperadminExamPendingListsPage() {
                             </label>
 
                             {current.assessmentType === "WORKSHEET" ? (
-                              <label style={{ display: "grid", gap: 4 }}>
-                                <span style={{ fontSize: 12, color: "var(--muted)" }}>Select Worksheet</span>
-                                <select
-                                  value={current.worksheetId || ""}
-                                  onChange={(e) => setDraftLevelConfig(r.id, levelId, { worksheetId: e.target.value })}
-                                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
-                                >
-                                  <option value="">-- Select worksheet --</option>
-                                  {wsOptions.map((w) => {
-                                    const isWorksheetDisabled = w.isSelectable === false || w.disabled;
-                                    const statusLabel = w.status || (w.isPublished === false ? "DRAFT" : "PUBLISHED");
-                                    const detailLabel = isWorksheetDisabled && w.unavailableReason ? ` - ${w.unavailableReason}` : "";
-                                    return (
-                                      <option key={w.id} value={w.id} disabled={isWorksheetDisabled}>
-                                        {w.title} (Q: {w.questionCount}, {statusLabel}){detailLabel}
-                                      </option>
-                                    );
-                                  })}
-                                </select>
-                                {worksheetScopeWarning ? (
-                                  <span className="error" style={{ margin: 0 }}>{worksheetScopeWarning}</span>
+                              <div style={{ display: "grid", gap: 8 }}>
+                                <label style={{ display: "grid", gap: 4 }}>
+                                  <span style={{ fontSize: 12, color: "var(--muted)" }}>Select Worksheet</span>
+                                  <select
+                                    value={current.worksheetId || ""}
+                                    onChange={(e) => setDraftLevelConfig(r.id, levelId, { worksheetId: e.target.value })}
+                                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                  >
+                                    <option value="">-- Select worksheet --</option>
+                                    {wsOptions.map((w) => {
+                                      const isWorksheetDisabled = w.isSelectable === false || w.disabled;
+                                      const statusLabel = w.status || (w.isPublished === false ? "DRAFT" : "PUBLISHED");
+                                      const detailLabel = isWorksheetDisabled && w.unavailableReason ? ` - ${w.unavailableReason}` : "";
+                                      return (
+                                        <option key={w.id} value={w.id} disabled={isWorksheetDisabled}>
+                                          {w.title} (Q: {w.questionCount}, {statusLabel}){detailLabel}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                  {selectedWorksheet ? (
+                                    <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                                      Assign {current.questionCount || "—"} of {selectedWorksheet.questionCount} available questions
+                                    </span>
+                                  ) : null}
+                                  {worksheetScopeWarning ? (
+                                    <span className="error" style={{ margin: 0 }}>{worksheetScopeWarning}</span>
+                                  ) : null}
+                                </label>
+
+                                {current.worksheetId ? (
+                                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                                    <label style={{ display: "grid", gap: 4 }}>
+                                      <span style={{ fontSize: 12, color: "var(--muted)" }}>Number of Questions</span>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={selectedWorksheet?.questionCount || undefined}
+                                        value={current.questionCount}
+                                        onChange={(e) => setDraftLevelConfig(r.id, levelId, { questionCount: e.target.value })}
+                                        style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                      />
+                                    </label>
+                                    <label style={{ display: "grid", gap: 4 }}>
+                                      <span style={{ fontSize: 12, color: "var(--muted)" }}>Time Limit (Minutes)</span>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        value={current.timeLimitMinutes}
+                                        onChange={(e) => setDraftLevelConfig(r.id, levelId, { timeLimitMinutes: e.target.value })}
+                                        style={{ padding: 8, borderRadius: 8, border: "1px solid var(--color-border)" }}
+                                      />
+                                    </label>
+                                  </div>
                                 ) : null}
-                              </label>
+                              </div>
                             ) : null}
 
                             {current.assessmentType === "QUESTION_BANK" ? (

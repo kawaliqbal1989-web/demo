@@ -886,7 +886,9 @@ const deleteWorksheet = asyncHandler(async (req, res) => {
       id: true,
       levelId: true,
       courseId: true,
-      courseLevelId: true
+      courseLevelId: true,
+      generationMode: true,
+      examCycleId: true
     }
   });
 
@@ -907,19 +909,105 @@ const deleteWorksheet = asyncHandler(async (req, res) => {
     }
   }
 
-  const usedInExamSelections = await prisma.examEnrollmentLevelWorksheetSelection.count({
-    where: {
-      tenantId: req.auth.tenantId,
-      baseWorksheetId: existing.id
-    }
-  });
-
-  if (usedInExamSelections > 0) {
+  if (
+    String(existing.generationMode || "").toUpperCase() === "EXAM" ||
+    existing.examCycleId
+  ) {
     return res.apiError(
       409,
-      "Cannot delete worksheet because it is referenced in exam enrollment selections",
+      "Generated exam worksheets cannot be deleted manually",
       "WORKSHEET_IN_USE"
     );
+  }
+
+  const tenantId = req.auth.tenantId;
+  const worksheetId = existing.id;
+  const [
+    assessmentConfigCount,
+    enrollmentSelectionCount,
+    assignmentCount,
+    submissionCount,
+    assessmentPaperCount,
+    competitionCount,
+    mockTestCount,
+    reassignmentCount
+  ] = await Promise.all([
+    prisma.examLevelAssessmentConfig.count({
+      where: { tenantId, worksheetId }
+    }),
+    prisma.examEnrollmentLevelWorksheetSelection.count({
+      where: { tenantId, baseWorksheetId: worksheetId }
+    }),
+    prisma.worksheetAssignment.count({
+      where: { tenantId, worksheetId }
+    }),
+    prisma.worksheetSubmission.count({
+      where: { tenantId, worksheetId }
+    }),
+    prisma.assessmentPaper.count({
+      where: {
+        tenantId,
+        OR: [
+          { worksheetId },
+          { sourceWorksheetId: worksheetId }
+        ]
+      }
+    }),
+    prisma.competitionWorksheet.count({
+      where: { tenantId, worksheetId }
+    }),
+    prisma.mockTest.count({
+      where: { tenantId, worksheetId }
+    }),
+    prisma.worksheetReassignmentRequest.count({
+      where: {
+        tenantId,
+        OR: [
+          { currentWorksheetId: worksheetId },
+          { newWorksheetId: worksheetId }
+        ]
+      }
+    })
+  ]);
+
+  const deletionBlockers = [
+    {
+      count: assessmentConfigCount,
+      message: "Cannot delete worksheet because it is selected in a Paper Builder configuration"
+    },
+    {
+      count: enrollmentSelectionCount,
+      message: "Cannot delete worksheet because it is referenced in an exam enrollment approval"
+    },
+    {
+      count: assignmentCount,
+      message: "Cannot delete worksheet because it has been assigned to students"
+    },
+    {
+      count: submissionCount,
+      message: "Cannot delete worksheet because it has student attempts or submissions"
+    },
+    {
+      count: assessmentPaperCount,
+      message: "Cannot delete worksheet because it is used by an assessment paper"
+    },
+    {
+      count: competitionCount,
+      message: "Cannot delete worksheet because it is used by a competition"
+    },
+    {
+      count: mockTestCount,
+      message: "Cannot delete worksheet because it is used by a mock test"
+    },
+    {
+      count: reassignmentCount,
+      message: "Cannot delete worksheet because it is referenced by a reassignment request"
+    }
+  ];
+  const blocker = deletionBlockers.find((item) => item.count > 0);
+
+  if (blocker) {
+    return res.apiError(409, blocker.message, "WORKSHEET_IN_USE");
   }
 
   try {

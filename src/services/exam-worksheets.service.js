@@ -3,6 +3,7 @@ import { generateWorksheet } from "./abacus-question-generator.service.js";
 import { ASSESSMENT_TYPE, extractTemplateIdFromQuestionBankKey } from "./assessmentConfig.service.js";
 import crypto from "crypto";
 
+// Complete replacement file with strict configured-question-count validation.
 function createHttpError(statusCode, message, errorCode) {
   const error = new Error(message);
   error.statusCode = statusCode;
@@ -457,10 +458,17 @@ async function assignSelectedExamWorksheets({ tenantId, examCycleId, combinedLis
         sourceCourseLevelId = baseWorksheet.courseLevelId || levelScope?.courseLevelId || provenanceContext?.courseLevelId || null;
         seed = `EXAM_SELECTED:${examCycleId}:${baseWorksheetId}:${entry.studentId}`;
         const worksheetQuestionCount = Number(baseWorksheet.questions.length || 0);
-        const configuredQuestionCountRaw = Number(levelConfig.questionCount);
-        const configuredQuestionCount = Number.isInteger(configuredQuestionCountRaw) && configuredQuestionCountRaw > 0
-          ? Math.min(configuredQuestionCountRaw, worksheetQuestionCount)
-          : worksheetQuestionCount;
+        const configuredQuestionCount = Number(levelConfig.questionCount);
+        if (!Number.isInteger(configuredQuestionCount) || configuredQuestionCount <= 0) {
+          throw createHttpError(409, "Configured question count is invalid", "EXAM_QUESTION_COUNT_INVALID");
+        }
+        if (configuredQuestionCount > worksheetQuestionCount) {
+          throw createHttpError(
+            409,
+            "Configured question count exceeds available worksheet questions",
+            "EXAM_QUESTION_COUNT_EXCEEDS_WORKSHEET"
+          );
+        }
         selectedQuestions = shuffleDeterministic(baseWorksheet.questions, seed).slice(0, configuredQuestionCount);
 
         const worksheetTimeLimitSecondsRaw = Number(baseWorksheet.timeLimitSeconds);

@@ -23,6 +23,7 @@ import {
   deleteExamCycle
 } from "../../services/examCyclesService";
 import { archiveCourse, deleteCourse, updateCourse } from "../../services/coursesService";
+import { deleteWorksheet } from "../../services/worksheetsService";
 
 function formatDateTime(value) {
   if (!value) return "—";
@@ -1670,6 +1671,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
   const [assessmentPayload, setAssessmentPayload] = useState(null);
   const [draftConfig, setDraftConfig] = useState([]);
   const [savingConfig, setSavingConfig] = useState(false);
+  const [deletingWorksheetId, setDeletingWorksheetId] = useState("");
 
   const [studentId, setStudentId] = useState("");
   const [generateBusy, setGenerateBusy] = useState(false);
@@ -1793,6 +1795,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     setAssessmentError("");
     setGeneratedQuestionSet(null);
     setStudentId("");
+    setDeletingWorksheetId("");
     setLoadedAssessmentContextKey("");
 
     if (!selectedExamCycleId || !examContext.courseId || !examContext.levelNumber) {
@@ -1825,13 +1828,71 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
       const wsOptions = Array.isArray(worksheetsByLevelId[level.levelId]) ? worksheetsByLevelId[level.levelId] : [];
       const bankOptions = Array.isArray(questionBanksByLevelId[level.levelId]) ? questionBanksByLevelId[level.levelId] : [];
       const totalBankQuestions = bankOptions.reduce((sum, bank) => sum + Number(bank?.availableQuestionCount || 0), 0);
+      const availableWorksheetOptions = wsOptions.filter((worksheet) => worksheet?.disabled !== true).length;
       return {
         levelId: level.levelId,
-        worksheetOptions: wsOptions.length,
+        worksheetOptions: availableWorksheetOptions,
+        worksheetTotal: wsOptions.length,
         questionBankOptions: bankOptions.length,
         totalBankQuestions
       };
     });
+  }, [assessmentPayload]);
+
+  const savedConfigByWorksheetId = useMemo(() => {
+    const configs = Array.isArray(assessmentPayload?.configs) ? assessmentPayload.configs : [];
+    return new Map(
+      configs
+        .filter((config) => config?.assessmentType === "WORKSHEET" && config?.worksheetId)
+        .map((config) => [String(config.worksheetId), config])
+    );
+  }, [assessmentPayload]);
+
+  const selectedWorksheetIds = useMemo(() => {
+    const ids = new Set(savedConfigByWorksheetId.keys());
+    for (const config of draftConfig || []) {
+      if (config?.assessmentType === "WORKSHEET" && config?.worksheetId) {
+        ids.add(String(config.worksheetId));
+      }
+    }
+    return ids;
+  }, [draftConfig, savedConfigByWorksheetId]);
+
+  const createdWorksheets = useMemo(() => {
+    const levels = Array.isArray(assessmentPayload?.levels) ? assessmentPayload.levels : [];
+    const worksheetsByLevelId = assessmentPayload?.worksheetsByLevelId || {};
+    const rows = [];
+    const seen = new Set();
+
+    for (const level of levels) {
+      const worksheetOptions = Array.isArray(worksheetsByLevelId[level.levelId])
+        ? worksheetsByLevelId[level.levelId]
+        : [];
+
+      for (const worksheet of worksheetOptions) {
+        const worksheetId = String(worksheet?.id || "");
+        const generationMode = String(worksheet?.generationMode || "").trim().toUpperCase();
+        const isGeneratedStudentWorksheet = Boolean(
+          worksheet?.isGeneratedStudentWorksheet
+          || worksheet?.generatedForStudentId
+          || generationMode === "EXAM"
+        );
+
+        if (!worksheetId || seen.has(worksheetId) || isGeneratedStudentWorksheet) {
+          continue;
+        }
+
+        seen.add(worksheetId);
+        rows.push({
+          ...worksheet,
+          id: worksheetId,
+          levelId: level.levelId,
+          levelName: level.levelName || `Level ${level.levelRank || ""}`.trim()
+        });
+      }
+    }
+
+    return rows;
   }, [assessmentPayload]);
 
   const setDraftLevelConfig = useCallback((levelId, patch) => {
@@ -1894,6 +1955,57 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
     draftConfig,
     loadAssessmentConfig,
     isAssessmentContextReady,
+    paperBuilderContextKey
+  ]);
+
+  const handleDeleteCreatedWorksheet = useCallback(async (worksheet) => {
+    if (!worksheet?.id || !examContext.courseId || !examContext.levelNumber || !isAssessmentContextReady) {
+      return;
+    }
+
+    if (isCycleLocked) {
+      toast.error("Worksheets cannot be deleted from a locked exam cycle.");
+      return;
+    }
+
+    if (selectedWorksheetIds.has(String(worksheet.id))) {
+      toast.error("Replace this worksheet in Paper Builder and save the new configuration before deleting it.");
+      return;
+    }
+
+    if (worksheet.canDelete === false) {
+      toast.error(worksheet.deleteBlockReason || worksheet.unavailableReason || "This worksheet is already in use and cannot be deleted.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete worksheet "${worksheet.title || "Untitled worksheet"}"? Only an unused worksheet can be deleted.`
+    );
+    if (!confirmed) return;
+
+    setDeletingWorksheetId(String(worksheet.id));
+    setAssessmentError("");
+    try {
+      await deleteWorksheet(worksheet.id, {
+        courseId: examContext.courseId,
+        levelNumber: examContext.levelNumber
+      });
+      toast.success("Worksheet deleted.");
+      await loadAssessmentConfig(activeAssessmentContextRef.current || paperBuilderContextKey);
+    } catch (err) {
+      const message = getFriendlyErrorMessage(err) || "Failed to delete worksheet.";
+      setAssessmentError(message);
+      toast.error(message);
+    } finally {
+      setDeletingWorksheetId("");
+    }
+  }, [
+    examContext.courseId,
+    examContext.levelNumber,
+    isAssessmentContextReady,
+    isCycleLocked,
+    selectedWorksheetIds,
+    loadAssessmentConfig,
     paperBuilderContextKey
   ]);
 
@@ -2023,11 +2135,122 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                 {availableSummary.map((entry) => (
                   <div key={entry.levelId} style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 10, display: "grid", gap: 4 }}>
                     <div style={{ fontWeight: 700 }}>Level Pool</div>
-                    <div style={{ fontSize: 13 }}>Worksheets: {entry.worksheetOptions}</div>
+                    <div style={{ fontSize: 13 }}>
+                      Worksheets: {entry.worksheetOptions} available
+                      {entry.worksheetTotal !== entry.worksheetOptions ? ` / ${entry.worksheetTotal} total` : ""}
+                    </div>
                     <div style={{ fontSize: 13 }}>Question banks: {entry.questionBankOptions}</div>
                     <div style={{ fontSize: 13 }}>Available exam questions: {entry.totalBankQuestions}</div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "grid", gap: 4 }}>
+                <strong>Created Worksheets</strong>
+                <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+                  Source worksheets available in this exam course and level. Generated student worksheets are not shown.
+                </span>
+              </div>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ width: "auto" }}
+                onClick={() => void loadAssessmentConfig(activeAssessmentContextRef.current || paperBuilderContextKey)}
+                disabled={assessmentLoading || savingConfig || Boolean(deletingWorksheetId) || !isAssessmentContextReady}
+              >
+                Refresh Worksheets
+              </button>
+            </div>
+
+            {!createdWorksheets.length ? (
+              <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
+                No source worksheets are available for this exam context. Create one from the Worksheets tab.
+              </div>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                {createdWorksheets.map((worksheet) => {
+                  const savedConfig = savedConfigByWorksheetId.get(String(worksheet.id)) || null;
+                  const isSelected = selectedWorksheetIds.has(String(worksheet.id));
+                  const backendBlocked = worksheet.canDelete === false;
+                  const deleteBlocked = isCycleLocked || isSelected || backendBlocked;
+                  const deleteBlockReason = isCycleLocked
+                    ? "Exam cycle is read-only."
+                    : isSelected
+                      ? "Currently selected in Paper Builder. Replace it and save first."
+                      : backendBlocked
+                        ? worksheet.deleteBlockReason || "Worksheet is already in use."
+                        : "";
+                  const configuredQuestionCount = Number(savedConfig?.questionCount || 0);
+                  const availableQuestionCount = Number(worksheet.questionCount || 0);
+                  const timeLimitMinutes = Number(
+                    savedConfig?.timeLimitMinutes
+                    || worksheet.timeLimitMinutes
+                    || (Number(worksheet.timeLimitSeconds || 0) > 0
+                      ? Math.ceil(Number(worksheet.timeLimitSeconds) / 60)
+                      : 0)
+                  );
+
+                  return (
+                    <div
+                      key={worksheet.id}
+                      style={{
+                        display: "grid",
+                        gap: 8,
+                        padding: 12,
+                        border: "1px solid var(--color-border)",
+                        borderRadius: 10
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                            <strong>{worksheet.title || "Untitled worksheet"}</strong>
+                            <span style={{ fontSize: 12, fontWeight: 700 }}>
+                              {worksheet.status || (worksheet.isPublished ? "PUBLISHED" : "DRAFT")}
+                            </span>
+                            {worksheet.sourceType ? (
+                              <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                                {worksheet.sourceType === "PAPER_BUILDER" ? "Exam-cycle worksheet" : "Source worksheet"}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", color: "var(--color-text-muted)", fontSize: 12 }}>
+                            <span>Questions: {availableQuestionCount}</span>
+                            {configuredQuestionCount > 0 ? (
+                              <span style={{ color: "var(--color-text)", fontWeight: 700 }}>
+                                Configured: {configuredQuestionCount} of {availableQuestionCount}
+                              </span>
+                            ) : (
+                              <span>Not configured</span>
+                            )}
+                            {timeLimitMinutes > 0 ? <span>Time: {timeLimitMinutes} minutes</span> : null}
+                            {worksheet.createdAt ? <span>Created: {formatDateTime(worksheet.createdAt)}</span> : null}
+                          </div>
+                          {worksheet.unavailableReason ? (
+                            <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>{worksheet.unavailableReason}</span>
+                          ) : null}
+                          {deleteBlockReason ? (
+                            <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>{deleteBlockReason}</span>
+                          ) : null}
+                        </div>
+                        <button
+                          type="button"
+                          className="button secondary"
+                          style={{ width: "auto", color: "#dc2626" }}
+                          disabled={deleteBlocked || Boolean(deletingWorksheetId)}
+                          title={deleteBlockReason || "Delete this unused worksheet"}
+                          onClick={() => void handleDeleteCreatedWorksheet(worksheet)}
+                        >
+                          {deletingWorksheetId === String(worksheet.id) ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2117,8 +2340,9 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                         >
                           <option value="">Select worksheet</option>
                           {wsOptions.map((worksheet) => (
-                            <option key={worksheet.id} value={worksheet.id}>
-                              {worksheet.title} (Q: {worksheet.questionCount})
+                            <option key={worksheet.id} value={worksheet.id} disabled={worksheet.disabled === true}>
+                              {worksheet.title} (Q: {worksheet.questionCount}, {worksheet.status || (worksheet.isPublished ? "PUBLISHED" : "DRAFT")})
+                              {worksheet.disabled === true ? " — unavailable" : ""}
                             </option>
                           ))}
                         </select>
@@ -2149,7 +2373,7 @@ function SuperadminPaperBuilderWorkspacePanel({ examCourse, examCourseLevel, sel
                       </div>
                       <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
                         {selectedWorksheet
-                          ? `Available in selected worksheet: ${selectedWorksheet.questionCount}`
+                          ? selectedWorksheet.unavailableReason || `Available in selected worksheet: ${selectedWorksheet.questionCount}`
                           : "Select a worksheet to view available count."}
                       </div>
                       {!wsOptions.length ? (

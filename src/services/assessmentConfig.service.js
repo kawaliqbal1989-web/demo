@@ -35,18 +35,27 @@ function mapAssessmentStorageError(error) {
 }
 
 function isMissingColumnError(error, columnName) {
-  return String(error?.code || "") === "P2022" && String(error?.message || "").toLowerCase().includes(String(columnName || "").toLowerCase());
+  return (
+    String(error?.code || "") === "P2022" &&
+    String(error?.message || "")
+      .toLowerCase()
+      .includes(String(columnName || "").toLowerCase())
+  );
 }
 
 function isTemplateGroupingUnavailable(error) {
   const name = String(error?.name || "");
   const message = String(error?.message || "").toLowerCase();
+
   if (isMissingColumnError(error, "templateId")) {
     return true;
   }
 
   // Handles stale Prisma Client cases where templateId is not known in the model metadata.
-  if (name.includes("PrismaClientValidationError") && message.includes("templateid")) {
+  if (
+    name.includes("PrismaClientValidationError") &&
+    message.includes("templateid")
+  ) {
     return true;
   }
 
@@ -55,41 +64,58 @@ function isTemplateGroupingUnavailable(error) {
 
 function toPositiveInt(value) {
   const parsed = Number(value);
+
   if (!Number.isInteger(parsed) || parsed <= 0) {
     return null;
   }
+
   return parsed;
 }
 
 function timeLimitMinutesFromSeconds(value) {
-  const seconds = toPositiveInt(value);
-  return seconds ? Math.ceil(seconds / 60) : null;
+  const seconds = Number(value);
+
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+
+  return Math.max(1, Math.ceil(seconds / 60));
 }
 
 function normalizeAssessmentType(value) {
   const type = String(value || "").trim().toUpperCase();
-  if (type === ASSESSMENT_TYPE.WORKSHEET || type === ASSESSMENT_TYPE.QUESTION_BANK) {
+
+  if (
+    type === ASSESSMENT_TYPE.WORKSHEET ||
+    type === ASSESSMENT_TYPE.QUESTION_BANK
+  ) {
     return type;
   }
+
   return null;
 }
 
 function normalizeQuestionBankKey(value) {
   const key = String(value || "").trim();
+
   if (!key) return null;
   if (key.startsWith("TEMPLATE:")) return key;
+
   return `TEMPLATE:${key}`;
 }
 
 function extractTemplateIdFromQuestionBankKey(questionBankKey) {
   const key = normalizeQuestionBankKey(questionBankKey);
+
   if (!key) return null;
 
   const [, rawTemplateId] = key.split(":");
   const templateId = String(rawTemplateId || "").trim();
+
   if (!templateId || templateId === "DEFAULT") {
     return null;
   }
+
   return templateId;
 }
 
@@ -97,9 +123,13 @@ function bankKeyFromTemplateId(templateId) {
   return `TEMPLATE:${templateId || "DEFAULT"}`;
 }
 
-function getLevelScopeForLevelId({ provenanceContext = null, levelId = null }) {
+function getLevelScopeForLevelId({
+  provenanceContext = null,
+  levelId = null
+}) {
   const normalizedLevelId = String(levelId || "").trim();
   const map = provenanceContext?.levelScopeByLevelId || null;
+
   if (map && normalizedLevelId && map[normalizedLevelId]) {
     return map[normalizedLevelId];
   }
@@ -122,19 +152,38 @@ function applyScopeToWhere(where, scope) {
   return {
     ...where,
     ...(scope?.courseId ? { courseId: scope.courseId } : {}),
-    ...(scope?.courseLevelId ? { courseLevelId: scope.courseLevelId } : {})
+    ...(scope?.courseLevelId
+      ? { courseLevelId: scope.courseLevelId }
+      : {})
   };
 }
 
 function matchesScope(record, scope) {
   if (!scope) return true;
-  if (scope?.courseId && String(record?.courseId || "") !== String(scope.courseId)) return false;
-  if (scope?.courseLevelId && String(record?.courseLevelId || "") !== String(scope.courseLevelId)) return false;
+
+  if (
+    scope?.courseId &&
+    String(record?.courseId || "") !== String(scope.courseId)
+  ) {
+    return false;
+  }
+
+  if (
+    scope?.courseLevelId &&
+    String(record?.courseLevelId || "") !== String(scope.courseLevelId)
+  ) {
+    return false;
+  }
+
   return true;
 }
 
 function createSeededRandom(seedValue) {
-  const hashed = crypto.createHash("sha256").update(String(seedValue)).digest("hex");
+  const hashed = crypto
+    .createHash("sha256")
+    .update(String(seedValue))
+    .digest("hex");
+
   let state = parseInt(hashed.slice(0, 8), 16) || 1;
 
   return function random() {
@@ -148,13 +197,18 @@ function createSeededRandom(seedValue) {
 
 function shuffleDeterministic(items, seed) {
   const rnd = createSeededRandom(seed);
+
   return items
     .map((item) => ({ item, sortKey: rnd() }))
     .sort((a, b) => a.sortKey - b.sortKey)
     .map((entry) => entry.item);
 }
 
-async function getExamCycleLevels({ tenantId, examCycleId, listId = null }) {
+async function getExamCycleLevels({
+  tenantId,
+  examCycleId,
+  listId = null
+}) {
   const where = {
     tenantId,
     included: true,
@@ -174,7 +228,11 @@ async function getExamCycleLevels({ tenantId, examCycleId, listId = null }) {
       entry: {
         select: {
           enrolledLevel: {
-            select: { id: true, name: true, rank: true }
+            select: {
+              id: true,
+              name: true,
+              rank: true
+            }
           }
         }
       }
@@ -182,11 +240,14 @@ async function getExamCycleLevels({ tenantId, examCycleId, listId = null }) {
   });
 
   const byLevelId = new Map();
+
   for (const item of items) {
     const level = item?.entry?.enrolledLevel;
+
     if (!level?.id) continue;
 
     const existing = byLevelId.get(level.id);
+
     if (existing) {
       existing.studentCount += 1;
       continue;
@@ -203,12 +264,21 @@ async function getExamCycleLevels({ tenantId, examCycleId, listId = null }) {
   return Array.from(byLevelId.values()).sort((a, b) => {
     const ar = typeof a.levelRank === "number" ? a.levelRank : 0;
     const br = typeof b.levelRank === "number" ? b.levelRank : 0;
+
     if (ar !== br) return ar - br;
-    return String(a.levelName || "").localeCompare(String(b.levelName || ""));
+
+    return String(a.levelName || "").localeCompare(
+      String(b.levelName || "")
+    );
   });
 }
 
-async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, provenanceContext = null }) {
+async function getLevelWorksheets({
+  tenantId,
+  examCycleId = null,
+  levelIds,
+  provenanceContext = null
+}) {
   if (!Array.isArray(levelIds) || !levelIds.length) {
     return {};
   }
@@ -217,20 +287,12 @@ async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, prov
     where: {
       tenantId,
       levelId: { in: levelIds },
-      ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
-      AND: [
-        {
-          OR: [
-            { examCycleId: null },
-            ...(examCycleId ? [{ examCycleId }] : [])
-          ]
-        },
-        {
-          OR: [
-            { generationMode: null },
-            { generationMode: { not: "EXAM" } }
-          ]
-        }
+      ...(provenanceContext?.courseId
+        ? { courseId: provenanceContext.courseId }
+        : {}),
+      OR: [
+        { examCycleId: null },
+        ...(examCycleId ? [{ examCycleId }] : [])
       ]
     },
     select: {
@@ -239,17 +301,29 @@ async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, prov
       levelId: true,
       courseId: true,
       courseLevelId: true,
-      isPublished: true,
       examCycleId: true,
+      isPublished: true,
       timeLimitSeconds: true,
-      _count: { select: { questions: true } }
+      _count: {
+        select: {
+          questions: true
+        }
+      }
     },
-    orderBy: [{ levelId: "asc" }, { createdAt: "desc" }]
+    orderBy: [
+      { levelId: "asc" },
+      { createdAt: "desc" }
+    ]
   });
 
   const byLevelId = {};
+
   for (const worksheet of worksheets) {
-    const scope = getLevelScopeForLevelId({ provenanceContext, levelId: worksheet.levelId });
+    const scope = getLevelScopeForLevelId({
+      provenanceContext,
+      levelId: worksheet.levelId
+    });
+
     if (!matchesScope(worksheet, scope)) {
       continue;
     }
@@ -257,6 +331,7 @@ async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, prov
     const questionCount = worksheet?._count?.questions ?? 0;
     const isPublished = Boolean(worksheet.isPublished);
     const isSelectable = isPublished && questionCount > 0;
+
     const unavailableReason = !isPublished
       ? "Worksheet exists but is draft/unpublished. Publish it before approval."
       : questionCount <= 0
@@ -271,9 +346,12 @@ async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, prov
       id: worksheet.id,
       title: worksheet.title,
       questionCount,
-      examCycleId: worksheet.examCycleId,
-      timeLimitSeconds: worksheet.timeLimitSeconds,
-      timeLimitMinutes: timeLimitMinutesFromSeconds(worksheet.timeLimitSeconds),
+timeLimitSeconds: worksheet.timeLimitSeconds,
+timeLimitMinutes: timeLimitMinutesFromSeconds(
+  worksheet.timeLimitSeconds
+),
+examCycleId: worksheet.examCycleId,
+      sourceType: worksheet.examCycleId ? "PAPER_BUILDER" : "BASE",
       isPublished,
       status: isPublished ? "PUBLISHED" : "DRAFT",
       isSelectable,
@@ -285,7 +363,11 @@ async function getLevelWorksheets({ tenantId, examCycleId = null, levelIds, prov
   return byLevelId;
 }
 
-async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = null }) {
+async function getLevelQuestionBanks({
+  tenantId,
+  levelIds,
+  provenanceContext = null
+}) {
   if (!Array.isArray(levelIds) || !levelIds.length) {
     return {};
   }
@@ -293,7 +375,9 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
   const where = {
     tenantId,
     levelId: { in: levelIds },
-    ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
+    ...(provenanceContext?.courseId
+      ? { courseId: provenanceContext.courseId }
+      : {}),
     isActive: true
   };
 
@@ -310,50 +394,85 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
     });
 
     const grouped = new Map();
+
     for (const row of rows) {
-      const scope = getLevelScopeForLevelId({ provenanceContext, levelId: row.levelId });
+      const scope = getLevelScopeForLevelId({
+        provenanceContext,
+        levelId: row.levelId
+      });
+
       if (!matchesScope(row, scope)) {
         continue;
       }
 
       const key = `${row.levelId}::${String(row.templateId || "")}`;
+
       const existing = grouped.get(key) || {
         levelId: row.levelId,
         templateId: row.templateId || null,
         count: 0
       };
+
       existing.count += 1;
       grouped.set(key, existing);
     }
 
     const groupedRows = Array.from(grouped.values());
 
-    const templateIds = Array.from(new Set(groupedRows.map((row) => row.templateId).filter(Boolean)));
+    const templateIds = Array.from(
+      new Set(
+        groupedRows
+          .map((row) => row.templateId)
+          .filter(Boolean)
+      )
+    );
+
     const templates = templateIds.length
       ? await prisma.worksheetTemplate.findMany({
-          where: { tenantId, id: { in: templateIds } },
-          select: { id: true, name: true }
+          where: {
+            tenantId,
+            id: { in: templateIds }
+          },
+          select: {
+            id: true,
+            name: true
+          }
         })
       : [];
 
-    const templateNameById = new Map(templates.map((template) => [template.id, template.name]));
+    const templateNameById = new Map(
+      templates.map((template) => [
+        template.id,
+        template.name
+      ])
+    );
 
     const byLevelId = {};
+
     for (const row of groupedRows) {
       if (!byLevelId[row.levelId]) {
         byLevelId[row.levelId] = [];
       }
 
       const key = bankKeyFromTemplateId(row.templateId);
+
       byLevelId[row.levelId].push({
         id: key,
-        name: templateNameById.get(row.templateId) || (row.templateId ? "Question Bank" : "Default Level Bank"),
+        name:
+          templateNameById.get(row.templateId) ||
+          (row.templateId
+            ? "Question Bank"
+            : "Default Level Bank"),
         availableQuestionCount: row.count || 0
       });
     }
 
     for (const levelId of Object.keys(byLevelId)) {
-      byLevelId[levelId].sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+      byLevelId[levelId].sort((a, b) =>
+        String(a.name || "").localeCompare(
+          String(b.name || "")
+        )
+      );
     }
 
     return byLevelId;
@@ -374,28 +493,44 @@ async function getLevelQuestionBanks({ tenantId, levelIds, provenanceContext = n
     });
 
     const countByLevelId = new Map();
+
     for (const row of legacyRows) {
-      const scope = getLevelScopeForLevelId({ provenanceContext, levelId: row.levelId });
+      const scope = getLevelScopeForLevelId({
+        provenanceContext,
+        levelId: row.levelId
+      });
+
       if (!matchesScope(row, scope)) {
         continue;
       }
-      countByLevelId.set(row.levelId, Number(countByLevelId.get(row.levelId) || 0) + 1);
+
+      countByLevelId.set(
+        row.levelId,
+        Number(countByLevelId.get(row.levelId) || 0) + 1
+      );
     }
 
     const byLevelId = {};
+
     for (const [levelId, count] of countByLevelId.entries()) {
-      byLevelId[levelId] = [{
-        id: bankKeyFromTemplateId(null),
-        name: "Default Level Bank",
-        availableQuestionCount: count || 0
-      }];
+      byLevelId[levelId] = [
+        {
+          id: bankKeyFromTemplateId(null),
+          name: "Default Level Bank",
+          availableQuestionCount: count || 0
+        }
+      ];
     }
 
     return byLevelId;
   }
 }
 
-async function getConfig({ tenantId, examCycleId, levelIds }) {
+async function getConfig({
+  tenantId,
+  examCycleId,
+  levelIds
+}) {
   if (!Array.isArray(levelIds) || !levelIds.length) {
     return [];
   }
@@ -426,34 +561,70 @@ async function getConfig({ tenantId, examCycleId, levelIds }) {
   }
 }
 
-async function validateQuestionBankSelection({ tenantId, levelId, questionBankId, questionCount, provenanceContext = null }) {
-  const normalizedBankKey = normalizeQuestionBankKey(questionBankId);
+async function validateQuestionBankSelection({
+  tenantId,
+  levelId,
+  questionBankId,
+  questionCount,
+  provenanceContext = null
+}) {
+  const normalizedBankKey =
+    normalizeQuestionBankKey(questionBankId);
+
   if (!normalizedBankKey) {
-    throw createHttpError(400, "questionBankId is required for question bank mode", "EXAM_QUESTION_BANK_REQUIRED");
+    throw createHttpError(
+      400,
+      "questionBankId is required for question bank mode",
+      "EXAM_QUESTION_BANK_REQUIRED"
+    );
   }
 
   const parsedQuestionCount = toPositiveInt(questionCount);
+
   if (!parsedQuestionCount) {
-    throw createHttpError(400, "questionCount must be a positive integer", "EXAM_QUESTION_COUNT_INVALID");
+    throw createHttpError(
+      400,
+      "questionCount must be a positive integer",
+      "EXAM_QUESTION_COUNT_INVALID"
+    );
   }
 
-  const templateId = extractTemplateIdFromQuestionBankKey(normalizedBankKey);
-  const levelScope = getLevelScopeForLevelId({ provenanceContext, levelId });
+  const templateId =
+    extractTemplateIdFromQuestionBankKey(normalizedBankKey);
+
+  const levelScope = getLevelScopeForLevelId({
+    provenanceContext,
+    levelId
+  });
+
   const availableCount = await prisma.questionBank.count({
-    where: applyScopeToWhere({
-      tenantId,
-      levelId,
-      isActive: true,
-      ...(templateId ? { templateId } : { templateId: null })
-    }, levelScope)
+    where: applyScopeToWhere(
+      {
+        tenantId,
+        levelId,
+        isActive: true,
+        ...(templateId
+          ? { templateId }
+          : { templateId: null })
+      },
+      levelScope
+    )
   });
 
   if (availableCount <= 0) {
-    throw createHttpError(409, "Selected question bank has no active questions", "EXAM_QUESTION_BANK_EMPTY");
+    throw createHttpError(
+      409,
+      "Selected question bank has no active questions",
+      "EXAM_QUESTION_BANK_EMPTY"
+    );
   }
 
   if (parsedQuestionCount > availableCount) {
-    throw createHttpError(409, "questionCount exceeds available questions", "EXAM_QUESTION_COUNT_EXCEEDS_BANK");
+    throw createHttpError(
+      409,
+      "questionCount exceeds available questions",
+      "EXAM_QUESTION_COUNT_EXCEEDS_BANK"
+    );
   }
 
   return {
@@ -463,59 +634,100 @@ async function validateQuestionBankSelection({ tenantId, levelId, questionBankId
   };
 }
 
-async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowedLevelIds, provenanceContext = null }) {
-  if (!Array.isArray(configs) || configs.length === 0) {
-    throw createHttpError(400, "configs[] is required", "VALIDATION_ERROR");
+async function saveConfig({
+  tenantId,
+  examCycleId,
+  actorUserId,
+  configs,
+  allowedLevelIds,
+  provenanceContext = null
+}) {
+     if (!Array.isArray(configs) || configs.length === 0) {
+    throw createHttpError(
+      400,
+      "configs[] is required",
+      "VALIDATION_ERROR"
+    );
   }
 
   ensureAssessmentStorageReady();
 
-  const allowedSet = new Set((allowedLevelIds || []).map((levelId) => String(levelId)));
+  const allowedSet = new Set(
+    (allowedLevelIds || []).map((levelId) =>
+      String(levelId)
+    )
+  );
 
   const cleaned = configs.map((config) => ({
     levelId: String(config?.levelId || "").trim(),
-    assessmentType: normalizeAssessmentType(config?.assessmentType),
+    assessmentType: normalizeAssessmentType(
+      config?.assessmentType
+    ),
     worksheetId: String(config?.worksheetId || "").trim(),
-    questionBankId: String(config?.questionBankId || "").trim(),
+    questionBankId: String(
+      config?.questionBankId || ""
+    ).trim(),
     questionCount: config?.questionCount,
     timeLimitMinutes: config?.timeLimitMinutes
   }));
 
   const seenLevels = new Set();
+
   for (const config of cleaned) {
     if (!config.levelId || !config.assessmentType) {
-      throw createHttpError(400, "levelId and assessmentType are required", "VALIDATION_ERROR");
+      throw createHttpError(
+        400,
+        "levelId and assessmentType are required",
+        "VALIDATION_ERROR"
+      );
     }
 
     if (seenLevels.has(config.levelId)) {
-      throw createHttpError(400, "Duplicate levelId in config payload", "EXAM_ASSESSMENT_CONFIG_DUPLICATE_LEVEL");
+      throw createHttpError(
+        400,
+        "Duplicate levelId in config payload",
+        "EXAM_ASSESSMENT_CONFIG_DUPLICATE_LEVEL"
+      );
     }
+
     seenLevels.add(config.levelId);
 
-    if (allowedSet.size && !allowedSet.has(config.levelId)) {
-      throw createHttpError(409, "Config contains a level not participating in this request", "EXAM_ASSESSMENT_LEVEL_INVALID");
+    if (
+      allowedSet.size &&
+      !allowedSet.has(config.levelId)
+    ) {
+      throw createHttpError(
+        409,
+        "Config contains a level not participating in this request",
+        "EXAM_ASSESSMENT_LEVEL_INVALID"
+      );
     }
   }
 
-  const worksheetIds = Array.from(new Set(cleaned.filter((config) => config.assessmentType === ASSESSMENT_TYPE.WORKSHEET).map((config) => config.worksheetId).filter(Boolean)));
+  const worksheetIds = Array.from(
+    new Set(
+      cleaned
+        .filter(
+          (config) =>
+            config.assessmentType ===
+            ASSESSMENT_TYPE.WORKSHEET
+        )
+        .map((config) => config.worksheetId)
+        .filter(Boolean)
+    )
+  );
 
   const worksheets = worksheetIds.length
     ? await prisma.worksheet.findMany({
         where: {
           tenantId,
           id: { in: worksheetIds },
-          ...(provenanceContext?.courseId ? { courseId: provenanceContext.courseId } : {}),
+          ...(provenanceContext?.courseId
+            ? { courseId: provenanceContext.courseId }
+            : {}),
           OR: [
             { examCycleId: null },
             { examCycleId }
-          ],
-          AND: [
-            {
-              OR: [
-                { generationMode: null },
-                { generationMode: { not: "EXAM" } }
-              ]
-            }
           ]
         },
         select: {
@@ -524,61 +736,152 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
           courseId: true,
           courseLevelId: true,
           isPublished: true,
-          examCycleId: true,
           timeLimitSeconds: true,
-          _count: { select: { questions: true } }
+          examCycleId: true,
+          _count: {
+            select: {
+              questions: true
+            }
+                    }
         }
       })
     : [];
-  const worksheetById = new Map(worksheets.map((worksheet) => [worksheet.id, worksheet]));
+
+  const worksheetById = new Map(
+    worksheets.map((worksheet) => [
+      worksheet.id,
+      worksheet
+    ])
+  );
+
   const examCycle = await prisma.examCycle.findFirst({
-    where: { id: examCycleId, tenantId },
-    select: { examDurationMinutes: true }
+    where: {
+      tenantId,
+      id: examCycleId
+    },
+    select: {
+      examDurationMinutes: true
+    }
   });
-  const fallbackTimeLimitMinutes = toPositiveInt(examCycle?.examDurationMinutes);
+
+  const fallbackTimeLimitMinutes = toPositiveInt(
+    examCycle?.examDurationMinutes
+  );
 
   const writes = [];
 
   for (const config of cleaned) {
-    if (config.assessmentType === ASSESSMENT_TYPE.WORKSHEET) {
+    if (
+      config.assessmentType === ASSESSMENT_TYPE.WORKSHEET
+    ) {
       if (!config.worksheetId) {
-        throw createHttpError(400, "worksheetId is required for worksheet mode", "EXAM_WORKSHEET_SELECTION_REQUIRED");
+        throw createHttpError(
+          400,
+          "worksheetId is required for worksheet mode",
+          "EXAM_WORKSHEET_SELECTION_REQUIRED"
+        );
       }
 
-      const worksheet = worksheetById.get(config.worksheetId);
+      const worksheet = worksheetById.get(
+        config.worksheetId
+      );
+
       if (!worksheet) {
-        throw createHttpError(409, "Selected worksheet not found", "EXAM_WORKSHEET_NOT_FOUND");
+        throw createHttpError(
+          409,
+          "Selected worksheet not found",
+          "EXAM_WORKSHEET_NOT_FOUND"
+        );
       }
+
       if (worksheet.levelId !== config.levelId) {
-        throw createHttpError(409, "Selected worksheet level mismatch", "EXAM_WORKSHEET_LEVEL_MISMATCH");
+        throw createHttpError(
+          409,
+          "Selected worksheet level mismatch",
+          "EXAM_WORKSHEET_LEVEL_MISMATCH"
+        );
       }
-      const levelScope = getLevelScopeForLevelId({ provenanceContext, levelId: config.levelId });
+
+      const levelScope = getLevelScopeForLevelId({
+        provenanceContext,
+        levelId: config.levelId
+      });
+
       if (!matchesScope(worksheet, levelScope)) {
-        throw createHttpError(409, "Selected worksheet is outside exam course scope", "EXAM_WORKSHEET_SCOPE_MISMATCH");
+        throw createHttpError(
+          409,
+          "Selected worksheet is outside exam course scope",
+          "EXAM_WORKSHEET_SCOPE_MISMATCH"
+        );
       }
-      if (worksheet.examCycleId && worksheet.examCycleId !== examCycleId) {
-        throw createHttpError(409, "Selected worksheet belongs to a different exam cycle", "EXAM_WORKSHEET_SOURCE_INVALID");
+
+      if (
+        worksheet.examCycleId &&
+        worksheet.examCycleId !== examCycleId
+      ) {
+        throw createHttpError(
+          409,
+          "Selected worksheet is outside this exam cycle",
+          "EXAM_WORKSHEET_SOURCE_INVALID"
+        );
       }
+
       if (!worksheet.isPublished) {
-        throw createHttpError(409, "Selected worksheet must be published", "EXAM_WORKSHEET_NOT_PUBLISHED");
+        throw createHttpError(
+          409,
+          "Selected worksheet must be published",
+          "EXAM_WORKSHEET_NOT_PUBLISHED"
+        );
       }
+
       if ((worksheet._count?.questions ?? 0) <= 0) {
-        throw createHttpError(409, "Selected worksheet has no questions", "EXAM_WORKSHEET_QUESTIONS_MISSING");
+        throw createHttpError(
+          409,
+          "Selected worksheet has no questions",
+          "EXAM_WORKSHEET_QUESTIONS_MISSING"
+        );
       }
 
-      const worksheetQuestionCount = Number(worksheet._count?.questions || 0);
-      const questionCount = toPositiveInt(config.questionCount);
+      const worksheetQuestionCount = Number(
+        worksheet._count?.questions || 0
+      );
+
+      const questionCount = toPositiveInt(
+        config.questionCount
+      );
+
       if (!questionCount) {
-        throw createHttpError(400, "questionCount must be a positive integer", "EXAM_QUESTION_COUNT_INVALID");
-      }
-      if (questionCount > worksheetQuestionCount) {
-        throw createHttpError(409, "questionCount exceeds worksheet questions", "EXAM_QUESTION_COUNT_EXCEEDS_WORKSHEET");
+        throw createHttpError(
+          400,
+          "questionCount must be a positive integer",
+          "EXAM_QUESTION_COUNT_INVALID"
+        );
       }
 
-      const worksheetTimeLimitMinutes = timeLimitMinutesFromSeconds(worksheet.timeLimitSeconds);
-      const timeLimitMinutes = worksheetTimeLimitMinutes || toPositiveInt(config.timeLimitMinutes) || fallbackTimeLimitMinutes;
+      if (questionCount > worksheetQuestionCount) {
+        throw createHttpError(
+          409,
+          "questionCount exceeds worksheet questions",
+          "EXAM_QUESTION_COUNT_EXCEEDS_WORKSHEET"
+        );
+      }
+
+      const worksheetTimeLimitMinutes =
+        timeLimitMinutesFromSeconds(
+          worksheet.timeLimitSeconds
+        );
+
+      const timeLimitMinutes =
+        worksheetTimeLimitMinutes ||
+        toPositiveInt(config.timeLimitMinutes) ||
+        fallbackTimeLimitMinutes;
+
       if (!timeLimitMinutes) {
-        throw createHttpError(400, "timeLimitMinutes must be a positive integer", "EXAM_TIME_LIMIT_INVALID");
+        throw createHttpError(
+          400,
+          "timeLimitMinutes must be a positive integer",
+          "EXAM_TIME_LIMIT_INVALID"
+        );
       }
 
       writes.push({
@@ -589,25 +892,35 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
         questionCount,
         timeLimitMinutes
       });
+
       continue;
     }
 
-    const questionBank = await validateQuestionBankSelection({
-      tenantId,
-      levelId: config.levelId,
-      questionBankId: config.questionBankId,
-      questionCount: config.questionCount,
-      provenanceContext
-    });
+    const questionBank =
+      await validateQuestionBankSelection({
+        tenantId,
+        levelId: config.levelId,
+        questionBankId: config.questionBankId,
+        questionCount: config.questionCount,
+        provenanceContext
+      });
 
-    const timeLimitMinutes = toPositiveInt(config.timeLimitMinutes);
+    const timeLimitMinutes =
+      toPositiveInt(config.timeLimitMinutes) ||
+      fallbackTimeLimitMinutes;
+
     if (!timeLimitMinutes) {
-      throw createHttpError(400, "timeLimitMinutes must be a positive integer", "EXAM_TIME_LIMIT_INVALID");
+      throw createHttpError(
+        400,
+        "timeLimitMinutes must be a positive integer",
+        "EXAM_TIME_LIMIT_INVALID"
+      );
     }
 
     writes.push({
       levelId: config.levelId,
-      assessmentType: ASSESSMENT_TYPE.QUESTION_BANK,
+      assessmentType:
+        ASSESSMENT_TYPE.QUESTION_BANK,
       worksheetId: null,
       questionBankId: questionBank.questionBankId,
       questionCount: questionBank.questionCount,
@@ -652,81 +965,133 @@ async function saveConfig({ tenantId, examCycleId, actorUserId, configs, allowed
     mapAssessmentStorageError(error);
   }
 
-  return getConfig({ tenantId, examCycleId, levelIds: writes.map((item) => item.levelId) });
+  return getConfig({
+    tenantId,
+    examCycleId,
+    levelIds: writes.map((item) => item.levelId)
+  });
 }
 
-async function validateConfig({ tenantId, examCycleId, requiredLevelIds, provenanceContext = null }) {
-  const required = Array.from(new Set((requiredLevelIds || []).filter(Boolean).map((levelId) => String(levelId))));
+async function validateConfig({
+  tenantId,
+  examCycleId,
+  requiredLevelIds,
+  provenanceContext = null
+}) {
+  const required = Array.from(
+    new Set(
+      (requiredLevelIds || [])
+        .filter(Boolean)
+        .map((levelId) => String(levelId))
+    )
+  );
+
   if (!required.length) {
-    throw createHttpError(409, "No levels found for configuration validation", "EXAM_LIST_EMPTY");
+    throw createHttpError(
+      409,
+      "No levels found for configuration validation",
+      "EXAM_LIST_EMPTY"
+    );
   }
 
   ensureAssessmentStorageReady();
 
   let configs = [];
+
   try {
-    configs = await prisma.examLevelAssessmentConfig.findMany({
-      where: {
-        tenantId,
-        examCycleId,
-        levelId: { in: required }
-      },
-      select: {
-        levelId: true,
-        assessmentType: true,
-        worksheetId: true,
-        questionBankId: true,
-        questionCount: true,
-        timeLimitMinutes: true
-      }
-    });
-  } catch (error) {
+    configs =
+      await prisma.examLevelAssessmentConfig.findMany({
+        where: {
+          tenantId,
+          examCycleId,
+          levelId: { in: required }
+        },
+        select: {
+          levelId: true,
+          assessmentType: true,
+          worksheetId: true,
+          questionBankId: true,
+          questionCount: true,
+          timeLimitMinutes: true
+        }
+      });
+  } catch  (error) {
     mapAssessmentStorageError(error);
   }
 
-  const configByLevel = new Map(configs.map((config) => [config.levelId, config]));
+  const configByLevel = new Map(
+    configs.map((config) => [
+      config.levelId,
+      config
+    ])
+  );
 
   for (const levelId of required) {
     const config = configByLevel.get(levelId);
+
     if (!config) {
-      throw createHttpError(409, "Missing assessment configuration for one or more levels", "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
+      throw createHttpError(
+        409,
+        "Missing assessment configuration for one or more levels",
+        "EXAM_ASSESSMENT_CONFIG_INCOMPLETE"
+      );
     }
 
-    if (config.assessmentType === ASSESSMENT_TYPE.WORKSHEET) {
+    if (
+      config.assessmentType ===
+      ASSESSMENT_TYPE.WORKSHEET
+    ) {
       if (!config.worksheetId) {
-        throw createHttpError(409, "Worksheet mapping missing for one or more levels", "EXAM_ASSESSMENT_WORKSHEET_MISSING");
+        throw createHttpError(
+          409,
+          "Worksheet mapping missing for one or more levels",
+          "EXAM_ASSESSMENT_WORKSHEET_MISSING"
+        );
       }
 
-      const worksheet = await prisma.worksheet.findFirst({
-        where: applyScopeToWhere({
-          tenantId,
-          id: config.worksheetId,
-          levelId,
-          isPublished: true,
-          OR: [
-            { examCycleId: null },
-            { examCycleId }
-          ],
-          AND: [
+      const worksheet =
+        await prisma.worksheet.findFirst({
+          where: applyScopeToWhere(
             {
+              tenantId,
+              id: config.worksheetId,
+              levelId,
+              isPublished: true,
               OR: [
-                { generationMode: null },
-                { generationMode: { not: "EXAM" } }
+                { examCycleId: null },
+                { examCycleId }
               ]
-            }
-          ]
-        }, getLevelScopeForLevelId({ provenanceContext, levelId })),
-        select: { id: true }
-      });
+            },
+            getLevelScopeForLevelId({
+              provenanceContext,
+              levelId
+            })
+          ),
+          select: {
+            id: true
+          }
+        });
 
       if (!worksheet) {
-        throw createHttpError(409, "Configured worksheet is invalid", "EXAM_ASSESSMENT_WORKSHEET_INVALID");
+        throw createHttpError(
+          409,
+          "Configured worksheet is invalid",
+          "EXAM_ASSESSMENT_WORKSHEET_INVALID"
+        );
       }
+
       continue;
     }
 
-    if (config.assessmentType !== ASSESSMENT_TYPE.QUESTION_BANK) {
-      throw createHttpError(409, "Invalid assessment type configuration", "EXAM_ASSESSMENT_TYPE_INVALID");
+    if (
+      config.assessmentType !==
+      ASSESSMENT_TYPE.QUESTION_BANK
+    ) {
+      throw createHttpError(
+        409,
+        "Invalid assessment type configuration",
+        "EXAM_ASSESSMENT_TYPE_INVALID"
+      );
     }
 
     await validateQuestionBankSelection({
@@ -738,65 +1103,97 @@ async function validateConfig({ tenantId, examCycleId, requiredLevelIds, provena
     });
 
     if (!toPositiveInt(config.timeLimitMinutes)) {
-      throw createHttpError(409, "Question-bank configuration requires time limit", "EXAM_TIME_LIMIT_INVALID");
+      throw createHttpError(
+        409,
+        "Question-bank configuration requires time limit",
+        "EXAM_TIME_LIMIT_INVALID"
+      );
     }
   }
 
   return configs;
 }
 
-async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId, provenanceContext = null }) {
+async function generateQuestionSet({
+  tenantId,
+  examCycleId,
+  studentId,
+  levelId,
+  provenanceContext = null
+}) {
   const normalizedLevelId = String(levelId || "").trim();
-  const normalizedStudentId = String(studentId || "").trim();
+  const normalizedStudentId = String(
+    studentId || ""
+  ).trim();
+
   if (!normalizedLevelId || !normalizedStudentId) {
-    throw createHttpError(400, "studentId and levelId are required", "VALIDATION_ERROR");
+    throw createHttpError(
+      400,
+      "studentId and levelId are required",
+      "VALIDATION_ERROR"
+    );
   }
 
   ensureAssessmentStorageReady();
 
   let config = null;
+
   try {
-    config = await prisma.examLevelAssessmentConfig.findFirst({
-      where: {
-        tenantId,
-        examCycleId,
-        levelId: normalizedLevelId
-      },
-      select: {
-        assessmentType: true,
-        questionBankId: true,
-        questionCount: true,
-        timeLimitMinutes: true
-      }
-    });
+    config =
+      await prisma.examLevelAssessmentConfig.findFirst({
+        where: {
+          tenantId,
+          examCycleId,
+          levelId: normalizedLevelId
+        },
+        select: {
+          assessmentType: true,
+          questionBankId: true,
+          questionCount: true,
+          timeLimitMinutes: true
+        }
+      });
   } catch (error) {
     mapAssessmentStorageError(error);
   }
 
   if (!config) {
-    throw createHttpError(409, "No assessment configuration found for this level", "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
+    throw createHttpError(
+      409,
+      "No assessment configuration found for this level",
+      "EXAM_ASSESSMENT_CONFIG_INCOMPLETE"
+    );
   }
 
-  if (config.assessmentType !== ASSESSMENT_TYPE.QUESTION_BANK) {
-    throw createHttpError(409, "This level is configured in worksheet mode", "EXAM_ASSESSMENT_NOT_QUESTION_BANK");
+  if (
+    config.assessmentType !==
+    ASSESSMENT_TYPE.QUESTION_BANK
+  ) {
+    throw createHttpError(
+      409,
+      "This level is configured in worksheet mode",
+      "EXAM_ASSESSMENT_NOT_QUESTION_BANK"
+    );
   }
 
   let existing = null;
+
   try {
-    existing = await prisma.examGeneratedQuestionSet.findFirst({
-      where: {
-        tenantId,
-        examCycleId,
-        studentId: normalizedStudentId,
-        levelId: normalizedLevelId
-      },
-      select: {
-        id: true,
-        questionBankId: true,
-        generatedQuestionIds: true,
-        generatedAt: true
-      }
-    });
+    existing =
+      await prisma.examGeneratedQuestionSet.findFirst({
+        where: {
+          tenantId,
+          examCycleId,
+          studentId: normalizedStudentId,
+          levelId: normalizedLevelId
+        },
+        select: {
+          id: true,
+          questionBankId: true,
+          generatedQuestionIds: true,
+          generatedAt: true
+        }
+      });
   } catch (error) {
     mapAssessmentStorageError(error);
   }
@@ -806,55 +1203,94 @@ async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId, 
       id: existing.id,
       levelId: normalizedLevelId,
       questionBankId: existing.questionBankId,
-      generatedQuestionIds: existing.generatedQuestionIds,
+      generatedQuestionIds:
+        existing.generatedQuestionIds,
       generatedAt: existing.generatedAt,
       timeLimitMinutes: config.timeLimitMinutes
     };
   }
 
-  const questionBankId = normalizeQuestionBankKey(config.questionBankId);
-  const questionCount = toPositiveInt(config.questionCount);
+  const questionBankId = normalizeQuestionBankKey(
+    config.questionBankId
+  );
+
+  const questionCount = toPositiveInt(
+    config.questionCount
+  );
+
   if (!questionBankId || !questionCount) {
-    throw createHttpError(409, "Invalid question-bank configuration", "EXAM_QUESTION_BANK_CONFIG_INVALID");
+    throw createHttpError(
+      409,
+      "Invalid question-bank configuration",
+      "EXAM_QUESTION_BANK_CONFIG_INVALID"
+    );
   }
 
-  const templateId = extractTemplateIdFromQuestionBankKey(questionBankId);
-  const levelScope = getLevelScopeForLevelId({ provenanceContext, levelId: normalizedLevelId });
+  const templateId =
+    extractTemplateIdFromQuestionBankKey(
+      questionBankId
+    );
+
+  const levelScope = getLevelScopeForLevelId({
+    provenanceContext,
+    levelId: normalizedLevelId
+  });
+
   const pool = await prisma.questionBank.findMany({
-    where: applyScopeToWhere({
-      tenantId,
-      levelId: normalizedLevelId,
-      isActive: true,
-      ...(templateId ? { templateId } : { templateId: null })
-    }, levelScope),
-    select: { id: true }
+    where: applyScopeToWhere(
+      {
+        tenantId,
+        levelId: normalizedLevelId,
+        isActive: true,
+        ...(templateId
+          ? { templateId }
+          : { templateId: null })
+      },
+      levelScope
+    ),
+    select: {
+      id: true
+    }
   });
 
   if (pool.length < questionCount) {
-    throw createHttpError(409, "questionCount exceeds available questions", "EXAM_QUESTION_COUNT_EXCEEDS_BANK");
+    throw createHttpError(
+      409,
+      "questionCount exceeds available questions",
+      "EXAM_QUESTION_COUNT_EXCEEDS_BANK"
+    );
   }
 
-  const shuffled = shuffleDeterministic(pool.map((item) => item.id), `${examCycleId}:${normalizedStudentId}:${normalizedLevelId}:${questionBankId}`);
-  const generatedQuestionIds = shuffled.slice(0, questionCount);
+  const shuffled = shuffleDeterministic(
+    pool.map((item) => item.id),
+    `${examCycleId}:${normalizedStudentId}:${normalizedLevelId}:${questionBankId}`
+  );
+
+  const generatedQuestionIds = shuffled.slice(
+    0,
+    questionCount
+  );
 
   let created;
+
   try {
-    created = await prisma.examGeneratedQuestionSet.create({
-      data: {
-        tenantId,
-        examCycleId,
-        studentId: normalizedStudentId,
-        levelId: normalizedLevelId,
-        questionBankId,
-        generatedQuestionIds
-      },
-      select: {
-        id: true,
-        questionBankId: true,
-        generatedQuestionIds: true,
-        generatedAt: true
-      }
-    });
+    created =
+      await prisma.examGeneratedQuestionSet.create({
+        data: {
+          tenantId,
+          examCycleId,
+          studentId: normalizedStudentId,
+          levelId: normalizedLevelId,
+          questionBankId,
+          generatedQuestionIds
+        },
+        select: {
+          id: true,
+          questionBankId: true,
+          generatedQuestionIds: true,
+          generatedAt: true
+        }
+      });
   } catch (error) {
     mapAssessmentStorageError(error);
   }
@@ -863,7 +1299,8 @@ async function generateQuestionSet({ tenantId, examCycleId, studentId, levelId, 
     id: created.id,
     levelId: normalizedLevelId,
     questionBankId: created.questionBankId,
-    generatedQuestionIds: created.generatedQuestionIds,
+    generatedQuestionIds:
+      created.generatedQuestionIds,
     generatedAt: created.generatedAt,
     timeLimitMinutes: config.timeLimitMinutes
   };

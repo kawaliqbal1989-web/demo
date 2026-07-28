@@ -86,6 +86,83 @@ function formatStatusLabel(value) {
     .join(" ");
 }
 
+const AUDIT_HEALTH_LABELS = Object.freeze({
+  publishedWithoutApprovedList: "Results published without an approved enrollment list",
+  examWindowEndedButDraft: "Exam window ended while results remain in draft",
+  practiceStartsAfterExam: "Practice starts after the exam begins",
+  enrollmentEndsAfterExamStart: "Enrollment ends after the exam starts",
+  publishedMissingPublishedAt: "Published results are missing the published date"
+});
+
+const QUESTION_OPERATION_LABELS = Object.freeze({
+  ADD: "Addition",
+  SUBTRACT: "Subtraction",
+  MULTIPLY: "Multiplication",
+  DIVIDE: "Division",
+  MIXED: "Mixed operation"
+});
+
+function formatAuditHealthLabel(key) {
+  if (AUDIT_HEALTH_LABELS[key]) return AUDIT_HEALTH_LABELS[key];
+
+  return String(key || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replaceAll("_", " ")
+    .replace(/^./, (character) => character.toUpperCase());
+}
+
+function formatQuestionOperation(operation) {
+  const normalized = String(operation || "").trim().toUpperCase();
+  return QUESTION_OPERATION_LABELS[normalized] || formatStatusLabel(normalized) || "Question";
+}
+
+function formatSignedTerms(terms) {
+  if (!Array.isArray(terms) || !terms.length) return null;
+
+  return terms.map((rawTerm, index) => {
+    const numeric = Number(rawTerm);
+    if (!Number.isFinite(numeric)) {
+      return `${index > 0 ? "+ " : ""}${String(rawTerm)}`;
+    }
+
+    if (index === 0) return String(numeric);
+    return numeric < 0 ? `− ${Math.abs(numeric)}` : `+ ${numeric}`;
+  }).join(" ");
+}
+
+function formatQuestionExpression(question = {}) {
+  const operands = question?.operands;
+  const operation = String(question?.operation || "").trim().toUpperCase();
+
+  if (operands && typeof operands === "object" && !Array.isArray(operands)) {
+    const termExpression = formatSignedTerms(operands.terms);
+    if (termExpression) return `${termExpression} = ?`;
+
+    const orderedValues = [operands.a, operands.b, operands.c]
+      .filter((value) => value !== null && value !== undefined && value !== "");
+    if (orderedValues.length >= 2) {
+      const symbol = operation === "SUBTRACT" ? "−" : operation === "MULTIPLY" ? "×" : operation === "DIVIDE" ? "÷" : "+";
+      return `${orderedValues.join(` ${symbol} `)} = ?`;
+    }
+  }
+
+  if (Array.isArray(operands) && operands.length) {
+    if (operation === "ADD" || operation === "MIXED") {
+      const signedExpression = formatSignedTerms(operands);
+      if (signedExpression) return `${signedExpression} = ?`;
+    }
+
+    const symbol = operation === "SUBTRACT" ? "−" : operation === "MULTIPLY" ? "×" : operation === "DIVIDE" ? "÷" : "+";
+    return `${operands.join(` ${symbol} `)} = ?`;
+  }
+
+  if (operands !== null && operands !== undefined && operands !== "") {
+    return `${String(operands)} = ?`;
+  }
+
+  return "Question content unavailable";
+}
+
 function getEnrollmentTotal(cycle) {
   return Number(cycle?.enrollmentCounts?.totalEnrollmentCount || 0);
 }
@@ -906,8 +983,9 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
           <div style={{ display: "grid", gap: 4 }}>
             <div style={{ fontWeight: 600 }}>Health Checks</div>
             {Object.entries(auditData?.healthChecks || {}).map(([key, value]) => (
-              <div key={key} style={{ color: value ? "#dc2626" : "#16a34a" }}>
-                {key}: {value ? "Issue" : "OK"}
+              <div key={key} style={{ color: value ? "#dc2626" : "#16a34a", display: "flex", gap: 6, alignItems: "baseline" }}>
+                <span>{formatAuditHealthLabel(key)}</span>
+                <strong>{value ? "Issue" : "OK"}</strong>
               </div>
             ))}
           </div>
@@ -1068,15 +1146,11 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                     <strong>Q{question.questionNumber}</strong>
                     <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
-                      {question.operation || "Question"}
+                      {formatQuestionOperation(question.operation)}
                     </span>
                   </div>
-                  <div style={{ fontSize: 15 }}>
-                    {Array.isArray(question.operands)
-                      ? question.operands.join(` ${question.operation || ""} `)
-                      : typeof question.operands === "object" && question.operands !== null
-                        ? JSON.stringify(question.operands)
-                        : String(question.operands ?? "Question content unavailable")}
+                  <div style={{ fontSize: 17, fontWeight: 600, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+                    {formatQuestionExpression(question)}
                   </div>
                   <div style={{ color: "#166534", fontWeight: 700 }}>
                     Correct answer: {String(question.correctAnswer ?? "Missing")}

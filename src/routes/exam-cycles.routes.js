@@ -33,6 +33,7 @@ import {
   restoreExamCycle,
   getExamCycleDeleteImpact,
   getExamCycleAuditCheck,
+  getExamCycleQuestionPreview,
   deleteExamCycle,
   getExamResults,
   getExamResultsReview,
@@ -188,6 +189,13 @@ examCyclesRouter.get(
   requireSuperadmin(),
   auditAction("EXAM_CYCLE_AUDIT_CHECK", "EXAM_CYCLE", (req) => req.params.id),
   getExamCycleAuditCheck
+);
+
+examCyclesRouter.get(
+  "/:id/audit-check/questions",
+  requireSuperadmin(),
+  auditAction("EXAM_CYCLE_QUESTION_PREVIEW", "EXAM_CYCLE", (req) => req.params.id),
+  getExamCycleQuestionPreview
 );
 
 examCyclesRouter.delete(

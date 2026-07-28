@@ -72,6 +72,16 @@ async function getExamCycleAuditCheck(examCycleId) {
   return response.data;
 }
 
+async function getExamCycleQuestionPreview(examCycleId, { levelId, studentId } = {}) {
+  const response = await apiClient.get(`/exam-cycles/${examCycleId}/audit-check/questions`, {
+    params: {
+      ...(levelId ? { levelId } : {}),
+      ...(studentId ? { studentId } : {})
+    }
+  });
+  return response.data;
+}
+
 async function deleteExamCycle(examCycleId, { password, confirmCode } = {}) {
   const response = await apiClient.delete(`/exam-cycles/${examCycleId}`, {
     data: {
@@ -318,6 +328,7 @@ export {
   restoreExamCycle,
   getExamCycleDeleteImpact,
   getExamCycleAuditCheck,
+  getExamCycleQuestionPreview,
   deleteExamCycle,
   getTeacherExamEnrollmentList,
   enrollTeacherStudents,

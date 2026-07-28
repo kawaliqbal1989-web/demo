@@ -20,6 +20,7 @@ import {
   restoreExamCycle,
   getExamCycleDeleteImpact,
   getExamCycleAuditCheck,
+  getExamCycleQuestionPreview,
   deleteExamCycle
 } from "../../services/examCyclesService";
 import { archiveCourse, deleteCourse, updateCourse } from "../../services/coursesService";
@@ -246,6 +247,8 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
   const [auditCycleId, setAuditCycleId] = useState("");
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditData, setAuditData] = useState(null);
+  const [questionPreviewLoading, setQuestionPreviewLoading] = useState(false);
+  const [questionPreview, setQuestionPreview] = useState(null);
 
   const load = useCallback(async ({ limit: nextLimit = 20, offset: nextOffset = 0, filter: nextFilter = filter } = {}) => {
     setLoading(true);
@@ -482,6 +485,21 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
       setAuditLoading(false);
     }
   }, []);
+
+  const handleQuestionPreview = useCallback(async (levelId) => {
+    if (!auditCycleId || !levelId) return;
+    setQuestionPreviewLoading(true);
+    setQuestionPreview(null);
+    try {
+      const response = await getExamCycleQuestionPreview(auditCycleId, { levelId });
+      setQuestionPreview(response?.data || null);
+    } catch (err) {
+      toast.error(getFriendlyErrorMessage(err) || "Failed to load question preview.");
+    } finally {
+      setQuestionPreviewLoading(false);
+    }
+  }, [auditCycleId]);
+
 
   if (loading && !rows.length) {
     return <LoadingState label="Loading exam cycles..." />;
@@ -878,6 +896,7 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
               onClick={() => {
                 setAuditData(null);
                 setAuditCycleId("");
+                setQuestionPreview(null);
               }}
             >
               Close
@@ -891,6 +910,103 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
                 {key}: {value ? "Issue" : "OK"}
               </div>
             ))}
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 700 }}>Academic Configuration Audit</div>
+                <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 2 }}>
+                  Level-wise source, question count, duration, assignment coverage, and answer-key readiness.
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12 }}>
+                <span>Levels: <strong>{auditData?.academicAudit?.summary?.levelCount ?? 0}</strong></span>
+                <span>Ready: <strong>{auditData?.academicAudit?.summary?.readyLevelCount ?? 0}</strong></span>
+                <span>Assigned: <strong>{auditData?.academicAudit?.summary?.assignedStudentCount ?? 0}</strong></span>
+                <span>Missing: <strong>{auditData?.academicAudit?.summary?.missingAssignmentCount ?? 0}</strong></span>
+              </div>
+            </div>
+
+            {(auditData?.academicAudit?.levels || []).length ? (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+                  <thead>
+                    <tr>
+                      {["Level", "Source", "Questions", "Duration", "Students", "Assigned Worksheets", "Answer Key", "Status", "Action"].map((header) => (
+                        <th key={header} style={{ textAlign: "left", padding: "8px 10px", borderBottom: "1px solid var(--color-border)", fontSize: 12 }}>
+                          {header}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(auditData.academicAudit.levels || []).map((level) => {
+                      const statusColor = level.readiness === "READY" ? "#166534" : level.readiness === "NOT_READY" ? "#dc2626" : "#92400e";
+                      const actualCounts = Array.isArray(level.actualQuestionCounts) && level.actualQuestionCounts.length
+                        ? level.actualQuestionCounts.join(", ")
+                        : "—";
+                      return (
+                        <tr key={level.levelId}>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            <strong>{level.levelName || `Level ${level.levelRank || ""}`}</strong>
+                            <div style={{ color: "var(--color-text-muted)", fontSize: 11 }}>Rank {level.levelRank ?? "—"}</div>
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            <div>{formatStatusLabel(level.assessmentType || "NOT_CONFIGURED")}</div>
+                            <div style={{ color: "var(--color-text-muted)", fontSize: 11 }}>{level.sourceName || "—"}</div>
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            <div>Configured: <strong>{level.configuredQuestionCount || 0}</strong></div>
+                            <div style={{ color: "var(--color-text-muted)", fontSize: 11 }}>Assigned: {actualCounts}</div>
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            {level.configuredDurationMinutes || 0} min
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            <div>{level.assignedStudentCount}/{level.enrolledStudentCount}</div>
+                            {level.missingAssignmentCount > 0 ? (
+                              <div style={{ color: "#dc2626", fontSize: 11 }}>{level.missingAssignmentCount} missing</div>
+                            ) : null}
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            {level.assignedWorksheetCount || 0}
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            {level.missingAnswerKeyCount > 0 ? (
+                              <span style={{ color: "#dc2626" }}>{level.missingAnswerKeyCount} missing</span>
+                            ) : (
+                              <span style={{ color: "#166534" }}>Valid</span>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            <strong style={{ color: statusColor }}>{formatStatusLabel(level.readiness)}</strong>
+                            {(level.issues || []).length ? (
+                              <div style={{ color: "var(--color-text-muted)", fontSize: 11, maxWidth: 280 }}>
+                                {(level.issues || []).join(" ")}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td style={{ padding: "10px", borderBottom: "1px solid var(--color-border)" }}>
+                            <button
+                              type="button"
+                              className="button secondary"
+                              style={{ width: "auto" }}
+                              disabled={questionPreviewLoading}
+                              onClick={() => void handleQuestionPreview(level.levelId)}
+                            >
+                              {questionPreviewLoading ? "Loading..." : "Preview Questions"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div style={{ color: "var(--color-text-muted)" }}>No participating levels or academic configuration found.</div>
+            )}
           </div>
 
           <div style={{ display: "grid", gap: 6 }}>
@@ -907,6 +1023,70 @@ function SuperadminExamCyclesWorkspacePanel({ routeHierarchyFilter = "ALL" } = {
             ) : (
               <div style={{ color: "var(--muted)" }}>No timeline events found.</div>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {questionPreview ? (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.45)",
+            display: "grid",
+            placeItems: "center",
+            padding: 16,
+            zIndex: 70
+          }}
+        >
+          <div className="card" style={{ width: "min(960px, 100%)", maxHeight: "90vh", overflow: "auto", display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Question Preview · {questionPreview?.level?.name || "Level"}</h3>
+                <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginTop: 4 }}>
+                  {formatStatusLabel(questionPreview?.previewType || "")}
+                  {questionPreview?.student ? ` · ${questionPreview.student.admissionNo || ""} ${questionPreview.student.firstName || ""} ${questionPreview.student.lastName || ""}` : ""}
+                </div>
+              </div>
+              <button type="button" className="button secondary" style={{ width: "auto" }} onClick={() => setQuestionPreview(null)}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 13 }}>
+              <span>Questions: <strong>{questionPreview?.worksheet?.questionCount ?? 0}</strong></span>
+              <span>Duration: <strong>{questionPreview?.worksheet?.timeLimitMinutes ?? "—"} min</strong></span>
+              <span>Worksheet: <strong>{questionPreview?.worksheet?.title || "Question Bank"}</strong></span>
+              {questionPreview?.assignedAt ? <span>Assigned: <strong>{formatDateTime(questionPreview.assignedAt)}</strong></span> : null}
+            </div>
+
+            <div style={{ display: "grid", gap: 8 }}>
+              {(questionPreview?.worksheet?.questions || []).map((question) => (
+                <div key={question.id || question.questionNumber} style={{ border: "1px solid var(--color-border)", borderRadius: 8, padding: 12, display: "grid", gap: 6 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <strong>Q{question.questionNumber}</strong>
+                    <span style={{ color: "var(--color-text-muted)", fontSize: 12 }}>
+                      {question.operation || "Question"}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 15 }}>
+                    {Array.isArray(question.operands)
+                      ? question.operands.join(` ${question.operation || ""} `)
+                      : typeof question.operands === "object" && question.operands !== null
+                        ? JSON.stringify(question.operands)
+                        : String(question.operands ?? "Question content unavailable")}
+                  </div>
+                  <div style={{ color: "#166534", fontWeight: 700 }}>
+                    Correct answer: {String(question.correctAnswer ?? "Missing")}
+                  </div>
+                  {question.questionBankId ? (
+                    <div style={{ color: "var(--color-text-muted)", fontSize: 11 }}>Source question: {question.questionBankId}</div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       ) : null}

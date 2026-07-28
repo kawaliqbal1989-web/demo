@@ -15,7 +15,8 @@ import {
   getLevelQuestionBanks,
   getLevelWorksheets,
   saveConfig,
-  validateConfig
+  validateConfig,
+  extractTemplateIdFromQuestionBankKey
 } from "../services/assessmentConfig.service.js";
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { generateUsername } from "../utils/username-generator.js";
@@ -5031,14 +5032,16 @@ const getExamCycleDeleteImpact = asyncHandler(async (req, res) => {
 
 const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
   const examCycleId = String(req.params.id);
+  const tenantId = req.auth.tenantId;
 
   const examCycle = await prisma.examCycle.findFirst({
-    where: { id: examCycleId, tenantId: req.auth.tenantId },
+    where: { id: examCycleId, tenantId },
     select: {
       id: true,
       code: true,
       name: true,
       resultStatus: true,
+      examDurationMinutes: true,
       enrollmentStartAt: true,
       enrollmentEndAt: true,
       practiceStartAt: true,
@@ -5055,9 +5058,9 @@ const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
     return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
   }
 
-  const [lists, approvedListCount, rawAudit] = await Promise.all([
+  const [lists, approvedListCount, rawAudit, enrollmentEntries, configs, assignedWorksheets] = await Promise.all([
     prisma.examEnrollmentList.findMany({
-      where: { tenantId: req.auth.tenantId, examCycleId },
+      where: { tenantId, examCycleId },
       select: {
         id: true,
         status: true,
@@ -5069,11 +5072,11 @@ const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
       }
     }),
     prisma.examEnrollmentList.count({
-      where: { tenantId: req.auth.tenantId, examCycleId, status: "APPROVED" }
+      where: { tenantId, examCycleId, status: "APPROVED" }
     }),
     prisma.auditLog.findMany({
       where: {
-        tenantId: req.auth.tenantId,
+        tenantId,
         action: { startsWith: "EXAM_" }
       },
       orderBy: { createdAt: "desc" },
@@ -5088,6 +5091,67 @@ const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
         createdAt: true,
         user: { select: { id: true, username: true, email: true } }
       }
+    }),
+    prisma.examEnrollmentEntry.findMany({
+      where: { tenantId, examCycleId },
+      select: {
+        studentId: true,
+        enrolledLevelId: true,
+        enrolledLevel: { select: { id: true, name: true, rank: true } }
+      }
+    }),
+    prisma.examLevelAssessmentConfig.findMany({
+      where: { tenantId, examCycleId },
+      select: {
+        id: true,
+        levelId: true,
+        assessmentType: true,
+        worksheetId: true,
+        questionBankId: true,
+        questionCount: true,
+        timeLimitMinutes: true,
+        createdAt: true,
+        updatedAt: true,
+        worksheet: {
+          select: {
+            id: true,
+            title: true,
+            isPublished: true,
+            timeLimitSeconds: true,
+            _count: { select: { questions: true } }
+          }
+        }
+      }
+    }),
+    prisma.worksheetAssignment.findMany({
+      where: {
+        tenantId,
+        isActive: true,
+        worksheet: {
+          is: {
+            tenantId,
+            examCycleId,
+            generationMode: "EXAM"
+          }
+        }
+      },
+      select: {
+        studentId: true,
+        worksheet: {
+          select: {
+            id: true,
+            levelId: true,
+            timeLimitSeconds: true,
+            generatedAt: true,
+            questions: {
+              select: {
+                id: true,
+                correctAnswer: true
+              }
+            }
+          }
+        }
+      }
     })
   ]);
 
@@ -5101,8 +5165,7 @@ const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
       if (event.entityType === "EXAM_CYCLE" && event.entityId === examCycleId) {
         return true;
       }
-      const metadataExamCycleId = String(event?.metadata?.examCycleId || "");
-      return metadataExamCycleId === examCycleId;
+      return String(event?.metadata?.examCycleId || "") === examCycleId;
     })
     .slice(0, 40);
 
@@ -5116,10 +5179,139 @@ const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
     publishedMissingPublishedAt: examCycle.resultStatus === "PUBLISHED" && !examCycle.resultPublishedAt
   };
 
+  const levelById = new Map();
+  const enrolledStudentIdsByLevel = new Map();
+  for (const entry of enrollmentEntries) {
+    if (!entry.enrolledLevelId || !entry.studentId) continue;
+    if (!levelById.has(entry.enrolledLevelId)) {
+      levelById.set(entry.enrolledLevelId, entry.enrolledLevel || {
+        id: entry.enrolledLevelId,
+        name: "Unknown level",
+        rank: null
+      });
+    }
+    if (!enrolledStudentIdsByLevel.has(entry.enrolledLevelId)) {
+      enrolledStudentIdsByLevel.set(entry.enrolledLevelId, new Set());
+    }
+    enrolledStudentIdsByLevel.get(entry.enrolledLevelId).add(entry.studentId);
+  }
+
+  const configByLevelId = new Map(configs.map((config) => [config.levelId, config]));
+  const assignedByLevelId = new Map();
+  for (const assignmentRow of assignedWorksheets) {
+    const worksheet = assignmentRow?.worksheet;
+    if (!worksheet?.levelId) continue;
+    if (!assignedByLevelId.has(worksheet.levelId)) {
+      assignedByLevelId.set(worksheet.levelId, {
+        worksheetIds: new Set(),
+        studentIds: new Set(),
+        questionCounts: new Set(),
+        durationMinutes: new Set(),
+        missingAnswerKeyCount: 0,
+        latestGeneratedAt: null
+      });
+    }
+    const bucket = assignedByLevelId.get(worksheet.levelId);
+    bucket.worksheetIds.add(worksheet.id);
+    bucket.questionCounts.add(Array.isArray(worksheet.questions) ? worksheet.questions.length : 0);
+    const durationMinutes = Number(worksheet.timeLimitSeconds) > 0
+      ? Math.ceil(Number(worksheet.timeLimitSeconds) / 60)
+      : 0;
+    bucket.durationMinutes.add(durationMinutes);
+    bucket.missingAnswerKeyCount += (worksheet.questions || []).filter((question) =>
+      question.correctAnswer === null || question.correctAnswer === undefined || String(question.correctAnswer).trim() === ""
+    ).length;
+    if (assignmentRow.studentId) {
+      bucket.studentIds.add(assignmentRow.studentId);
+    }
+    if (worksheet.generatedAt && (!bucket.latestGeneratedAt || new Date(worksheet.generatedAt) > new Date(bucket.latestGeneratedAt))) {
+      bucket.latestGeneratedAt = worksheet.generatedAt;
+    }
+  }
+
+  const allLevelIds = Array.from(new Set([
+    ...levelById.keys(),
+    ...configByLevelId.keys(),
+    ...assignedByLevelId.keys()
+  ]));
+
+  const academicLevels = allLevelIds.map((levelId) => {
+    const level = levelById.get(levelId) || { id: levelId, name: "Unknown level", rank: null };
+    const config = configByLevelId.get(levelId) || null;
+    const assigned = assignedByLevelId.get(levelId) || null;
+    const enrolledCount = enrolledStudentIdsByLevel.get(levelId)?.size || 0;
+    const assignedCount = assigned?.studentIds?.size || 0;
+    const configuredQuestionCount = Number(config?.questionCount || 0);
+    const actualQuestionCounts = assigned ? Array.from(assigned.questionCounts).sort((a, b) => a - b) : [];
+    const actualDurationMinutes = assigned ? Array.from(assigned.durationMinutes).sort((a, b) => a - b) : [];
+    const missingAssignmentCount = Math.max(0, enrolledCount - assignedCount);
+    const issues = [];
+
+    if (!config) issues.push("Assessment configuration is missing.");
+    if (config && configuredQuestionCount <= 0) issues.push("Configured question count is invalid.");
+    if (config && Number(config.timeLimitMinutes || 0) <= 0) issues.push("Configured duration is invalid.");
+    if (config?.assessmentType === "WORKSHEET" && !config.worksheetId) issues.push("Worksheet source is missing.");
+    if (config?.assessmentType === "QUESTION_BANK" && !config.questionBankId) issues.push("Question bank source is missing.");
+    if (approvedListCount > 0 && enrolledCount > 0 && missingAssignmentCount > 0) {
+      issues.push(`${missingAssignmentCount} enrolled student(s) do not have an active exam worksheet.`);
+    }
+    if (actualQuestionCounts.length > 1) issues.push("Assigned worksheets contain mixed question counts.");
+    if (actualQuestionCounts.length === 1 && configuredQuestionCount > 0 && actualQuestionCounts[0] !== configuredQuestionCount) {
+      issues.push(`Assigned worksheet count ${actualQuestionCounts[0]} does not match configured count ${configuredQuestionCount}.`);
+    }
+    if (actualDurationMinutes.length > 1) issues.push("Assigned worksheets contain mixed durations.");
+    if (assigned?.missingAnswerKeyCount > 0) issues.push(`${assigned.missingAnswerKeyCount} assigned question(s) have no correct answer.`);
+
+    return {
+      levelId,
+      levelName: level.name,
+      levelRank: level.rank,
+      assessmentType: config?.assessmentType || null,
+      sourceId: config?.assessmentType === "WORKSHEET" ? config?.worksheetId : config?.questionBankId,
+      sourceName: config?.assessmentType === "WORKSHEET"
+        ? (config?.worksheet?.title || "Worksheet")
+        : config?.assessmentType === "QUESTION_BANK"
+          ? "Question Bank"
+          : "Not configured",
+      sourcePublished: config?.assessmentType === "WORKSHEET" ? Boolean(config?.worksheet?.isPublished) : null,
+      sourceAvailableQuestionCount: config?.assessmentType === "WORKSHEET"
+        ? Number(config?.worksheet?._count?.questions || 0)
+        : null,
+      configuredQuestionCount,
+      configuredDurationMinutes: Number(config?.timeLimitMinutes || examCycle.examDurationMinutes || 0),
+      enrolledStudentCount: enrolledCount,
+      assignedStudentCount: assignedCount,
+      missingAssignmentCount,
+      assignedWorksheetCount: assigned?.worksheetIds?.size || 0,
+      actualQuestionCounts,
+      actualDurationMinutes,
+      missingAnswerKeyCount: assigned?.missingAnswerKeyCount || 0,
+      latestGeneratedAt: assigned?.latestGeneratedAt || null,
+      readiness: issues.length ? (config ? "WARNING" : "NOT_READY") : "READY",
+      issues
+    };
+  }).sort((a, b) => {
+    const left = Number.isFinite(Number(a.levelRank)) ? Number(a.levelRank) : Number.MAX_SAFE_INTEGER;
+    const right = Number.isFinite(Number(b.levelRank)) ? Number(b.levelRank) : Number.MAX_SAFE_INTEGER;
+    return left - right || String(a.levelName).localeCompare(String(b.levelName));
+  });
+
+  const academicSummary = {
+    levelCount: academicLevels.length,
+    readyLevelCount: academicLevels.filter((level) => level.readiness === "READY").length,
+    configuredLevelCount: academicLevels.filter((level) => Boolean(level.assessmentType)).length,
+    enrolledStudentCount: academicLevels.reduce((sum, level) => sum + level.enrolledStudentCount, 0),
+    assignedStudentCount: academicLevels.reduce((sum, level) => sum + level.assignedStudentCount, 0),
+    missingAssignmentCount: academicLevels.reduce((sum, level) => sum + level.missingAssignmentCount, 0),
+    issueCount: academicLevels.reduce((sum, level) => sum + level.issues.length, 0)
+  };
+
   res.locals.auditMetadata = {
     examCycleCode: examCycle.code,
     timelineCount: timeline.length,
-    approvedListCount
+    approvedListCount,
+    academicLevelCount: academicSummary.levelCount,
+    academicIssueCount: academicSummary.issueCount
   };
 
   return res.apiSuccess("Exam audit check", {
@@ -5130,8 +5322,259 @@ const getExamCycleAuditCheck = asyncHandler(async (req, res) => {
       byStatus: statusCounts
     },
     healthChecks,
+    academicAudit: {
+      summary: academicSummary,
+      levels: academicLevels
+    },
     timeline
   });
+});
+
+const getExamCycleQuestionPreview = asyncHandler(async (req, res) => {
+  const tenantId = req.auth.tenantId;
+  const examCycleId = String(req.params.id);
+  const levelId = String(req.query?.levelId || "").trim();
+  const studentId = String(req.query?.studentId || "").trim();
+
+  if (!levelId) {
+    return res.apiError(400, "levelId is required", "VALIDATION_ERROR");
+  }
+
+  const examCycle = await prisma.examCycle.findFirst({
+    where: { id: examCycleId, tenantId },
+    select: { id: true, code: true, name: true }
+  });
+  if (!examCycle) {
+    return res.apiError(404, "Exam cycle not found", "EXAM_CYCLE_NOT_FOUND");
+  }
+
+  const level = await prisma.level.findFirst({
+    where: { id: levelId, tenantId },
+    select: { id: true, name: true, rank: true }
+  });
+  if (!level) {
+    return res.apiError(404, "Level not found", "LEVEL_NOT_FOUND");
+  }
+
+  let assignment = null;
+  if (studentId) {
+    const enrollment = await prisma.examEnrollmentEntry.findFirst({
+      where: { tenantId, examCycleId, studentId, enrolledLevelId: levelId },
+      select: {
+        studentId: true,
+        student: { select: { admissionNo: true, firstName: true, lastName: true } }
+      }
+    });
+    if (!enrollment) {
+      return res.apiError(404, "Student assignment not found", "EXAM_STUDENT_ASSIGNMENT_NOT_FOUND");
+    }
+
+    assignment = await prisma.worksheetAssignment.findFirst({
+      where: {
+        tenantId,
+        studentId,
+        isActive: true,
+        worksheet: {
+          is: {
+            tenantId,
+            examCycleId,
+            levelId,
+            generationMode: "EXAM"
+          }
+        }
+      },
+      orderBy: { assignedAt: "desc" },
+      select: {
+        assignedAt: true,
+        studentId: true,
+        worksheet: {
+          select: {
+            id: true,
+            title: true,
+            generationMode: true,
+            generationSeed: true,
+            generatedAt: true,
+            timeLimitSeconds: true,
+            questions: {
+              orderBy: { questionNumber: "asc" },
+              select: {
+                id: true,
+                questionNumber: true,
+                questionBankId: true,
+                operands: true,
+                operation: true,
+                correctAnswer: true
+              }
+            }
+          }
+        }
+      }
+    });
+    if (assignment) {
+      assignment.student = enrollment.student;
+    }
+  } else {
+    assignment = await prisma.worksheetAssignment.findFirst({
+      where: {
+        tenantId,
+        isActive: true,
+        worksheet: {
+          is: {
+            tenantId,
+            examCycleId,
+            levelId,
+            generationMode: "EXAM"
+          }
+        }
+      },
+      orderBy: { assignedAt: "asc" },
+      select: {
+        assignedAt: true,
+        studentId: true,
+        student: { select: { admissionNo: true, firstName: true, lastName: true } },
+        worksheet: {
+          select: {
+            id: true,
+            title: true,
+            generationMode: true,
+            generationSeed: true,
+            generatedAt: true,
+            timeLimitSeconds: true,
+            questions: {
+              orderBy: { questionNumber: "asc" },
+              select: {
+                id: true,
+                questionNumber: true,
+                questionBankId: true,
+                operands: true,
+                operation: true,
+                correctAnswer: true
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  if (assignment?.worksheet) {
+    return res.apiSuccess("Assigned exam questions preview", {
+      examCycle,
+      level,
+      previewType: "ASSIGNED_STUDENT_WORKSHEET",
+      studentId: assignment.studentId,
+      student: assignment.student || null,
+      assignedAt: assignment.assignedAt,
+      worksheet: {
+        ...assignment.worksheet,
+        questionCount: assignment.worksheet.questions.length,
+        timeLimitMinutes: Number(assignment.worksheet.timeLimitSeconds) > 0
+          ? Math.ceil(Number(assignment.worksheet.timeLimitSeconds) / 60)
+          : null
+      }
+    });
+  }
+
+  const config = await prisma.examLevelAssessmentConfig.findFirst({
+    where: { tenantId, examCycleId, levelId },
+    select: {
+      assessmentType: true,
+      worksheetId: true,
+      questionBankId: true,
+      questionCount: true,
+      timeLimitMinutes: true,
+      worksheet: {
+        select: {
+          id: true,
+          title: true,
+          timeLimitSeconds: true,
+          questions: {
+            orderBy: { questionNumber: "asc" },
+            select: {
+              id: true,
+              questionNumber: true,
+              questionBankId: true,
+              operands: true,
+              operation: true,
+              correctAnswer: true
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (!config) {
+    return res.apiError(404, "Assessment configuration not found", "EXAM_ASSESSMENT_CONFIG_INCOMPLETE");
+  }
+
+  if (config.assessmentType === "WORKSHEET" && config.worksheet) {
+    const questions = (config.worksheet.questions || []).slice(0, Number(config.questionCount || 0));
+    return res.apiSuccess("Configured worksheet questions preview", {
+      examCycle,
+      level,
+      previewType: "MASTER_WORKSHEET",
+      studentId: null,
+      student: null,
+      assignedAt: null,
+      worksheet: {
+        ...config.worksheet,
+        questions,
+        questionCount: questions.length,
+        timeLimitMinutes: Number(config.timeLimitMinutes || 0) || (
+          Number(config.worksheet.timeLimitSeconds) > 0
+            ? Math.ceil(Number(config.worksheet.timeLimitSeconds) / 60)
+            : null
+        )
+      }
+    });
+  }
+
+  if (config.assessmentType === "QUESTION_BANK") {
+    const templateId = extractTemplateIdFromQuestionBankKey(config.questionBankId);
+    const questions = await prisma.questionBank.findMany({
+      where: {
+        tenantId,
+        levelId,
+        isActive: true,
+        ...(templateId ? { templateId } : { templateId: null })
+      },
+      orderBy: { createdAt: "asc" },
+      take: Number(config.questionCount || 0),
+      select: {
+        id: true,
+        operands: true,
+        operation: true,
+        correctAnswer: true
+      }
+    });
+
+    return res.apiSuccess("Configured question bank preview", {
+      examCycle,
+      level,
+      previewType: "MASTER_QUESTION_BANK_SAMPLE",
+      studentId: null,
+      student: null,
+      assignedAt: null,
+      worksheet: {
+        id: null,
+        title: "Question Bank",
+        generationMode: null,
+        generationSeed: null,
+        generatedAt: null,
+        timeLimitSeconds: Number(config.timeLimitMinutes || 0) * 60,
+        timeLimitMinutes: Number(config.timeLimitMinutes || 0),
+        questionCount: questions.length,
+        questions: questions.map((question, index) => ({
+          ...question,
+          questionNumber: index + 1,
+          questionBankId: question.id
+        }))
+      }
+    });
+  }
+
+  return res.apiError(409, "Configured assessment source is invalid", "EXAM_ASSESSMENT_SOURCE_INVALID");
 });
 
 const deleteExamCycle = asyncHandler(async (req, res) => {
@@ -5633,6 +6076,7 @@ export {
   restoreExamCycle,
   getExamCycleDeleteImpact,
   getExamCycleAuditCheck,
+  getExamCycleQuestionPreview,
   deleteExamCycle,
   getExamResults,
   getExamResultsReview,

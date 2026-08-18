@@ -720,6 +720,34 @@ enum ExamLevelAssessmentType {
   QUESTION_BANK
 }
 
+enum CompetitionEnrollmentListType {
+  TEACHER
+  CENTER_COMBINED
+}
+
+enum CompetitionEnrollmentListStatus {
+  DRAFT
+  SUBMITTED_TO_CENTER
+  SUBMITTED_TO_FRANCHISE
+  SUBMITTED_TO_BUSINESS_PARTNER
+  SUBMITTED_TO_SUPERADMIN
+  WAITING_FOR_QUOTA
+  APPROVED
+  REJECTED
+}
+
+enum CompetitionApprovalMode {
+  AUTO_QUOTA
+  SUPERADMIN_OVERRIDE
+}
+
+enum CompetitionQuotaAllocationStatus {
+  WAITING_FOR_QUOTA
+  APPROVED
+  RELEASED
+  VALIDATION_FAILED
+}
+
 model Tenant {
   id                               String                           @id @default(cuid())
   name                             String
@@ -742,7 +770,7 @@ model Tenant {
   competitions                     Competition[]
   competitionBusinessPartners      CompetitionBusinessPartner[]
   competitionStageTransitions      CompetitionStageTransition[]
-  competitionLinks                 CompetitionWorksheet[]
+  competitionLinks                 LegacyCompetitionWorksheetLink[]
   enrollments                      CompetitionEnrollment[]
   refreshTokens                    RefreshToken[]
   auditLogs                        AuditLog[]
@@ -839,6 +867,18 @@ model Tenant {
   assessmentMigrationLogs                AssessmentMigrationLog[]
 
   @@map("tenant")
+  competitionSeasons                     CompetitionSeason[]
+  competitionCourses                     CompetitionCourse[]
+  competitionCourseLevels                CompetitionCourseLevel[]
+  competitionQuestionBanks               CompetitionQuestionBank[]
+  competitionQuestionBankQuestions       CompetitionQuestionBankQuestion[]
+  competitionWorksheets                  CompetitionWorksheet[]
+  competitionWorksheetAssignments        CompetitionWorksheetAssignment[]
+  competitionEnrollmentLists             CompetitionEnrollmentList[]
+  competitionEnrollmentListItems         CompetitionEnrollmentListItem[]
+  competitionBusinessPartnerQuotas       CompetitionBusinessPartnerQuota[]
+  competitionQuotaAllocations            CompetitionQuotaAllocation[]
+  competitionQuotaChanges                CompetitionQuotaChange[]
 }
 
 model IdempotencyKey {
@@ -984,6 +1024,21 @@ model AuthUser {
   @@index([tenantId, createdAt, id])
   @@index([tenantId, role, createdAt])
    @@map("authuser")
+  competitionSeasonsCreated                     CompetitionSeason[]                     @relation("CompetitionSeasonCreatedBy")
+  competitionCoursesCreated                     CompetitionCourse[]                     @relation("CompetitionCourseCreatedBy")
+  competitionQuestionBanksCreated               CompetitionQuestionBank[]               @relation("CompetitionQuestionBankCreatedBy")
+  competitionWorksheetsCreated                  CompetitionWorksheet[]                  @relation("CompetitionWorksheetCreatedBy")
+  competitionWorksheetAssignmentsCreated        CompetitionWorksheetAssignment[]        @relation("CompetitionWorksheetAssignmentCreatedBy")
+  competitionEnrollmentListsCreated             CompetitionEnrollmentList[]             @relation("CompetitionEnrollmentListCreatedBy")
+  competitionEnrollmentListsRejected            CompetitionEnrollmentList[]             @relation("CompetitionEnrollmentListRejectedBy")
+  competitionEnrollmentListsAsTeacher           CompetitionEnrollmentList[]             @relation("CompetitionEnrollmentListTeacher")
+  competitionEnrollmentsCreated                 CompetitionEnrollment[]                 @relation("CompetitionEnrollmentCreatedBy")
+  competitionEnrollmentsAsSourceTeacher         CompetitionEnrollment[]                 @relation("CompetitionEnrollmentSourceTeacher")
+  competitionExtraAttemptsGranted               CompetitionEnrollment[]                 @relation("CompetitionEnrollmentExtraAttemptGrantedBy")
+  competitionQuotasCreated                      CompetitionBusinessPartnerQuota[]        @relation("CompetitionQuotaCreatedBy")
+  competitionQuotasUpdated                      CompetitionBusinessPartnerQuota[]        @relation("CompetitionQuotaUpdatedBy")
+  competitionQuotaAllocationsSubmitted          CompetitionQuotaAllocation[]             @relation("CompetitionQuotaAllocationSubmittedBy")
+  competitionQuotaChangesMade                   CompetitionQuotaChange[]                  @relation("CompetitionQuotaChangeActor")
 }
 
 model UserSequence {
@@ -1210,6 +1265,8 @@ model HierarchyNode {
   @@index([parentId])
   @@index([tenantId, createdAt, id])
   @@map("hierarchynode")
+  competitionEnrollments     CompetitionEnrollment[]     @relation("CompetitionEnrollmentNode")
+  competitionEnrollmentLists CompetitionEnrollmentList[] @relation("CompetitionEnrollmentListNode")
 }
 
 model TeacherProfile {
@@ -1491,6 +1548,8 @@ model Level {
   @@unique([tenantId, rank])
   @@index([tenantId])
     @@map("level")
+  competitionCourseLevels                CompetitionCourseLevel[]
+  competitionEnrollments                 CompetitionEnrollment[]                 @relation("CompetitionEnrollmentLevel")
 }
 
 model LevelRule {
@@ -1606,6 +1665,7 @@ model Student {
   @@index([tenantId, currentTeacherUserId])
   @@index([tenantId, createdAt, id])
   @@map("student")
+  isTemporaryCompetition     Boolean                          @default(false)
 }
 
 model StudentAssignedCourse {
@@ -1980,7 +2040,7 @@ model Worksheet {
   examCycle                              ExamCycle?                              @relation(fields: [examCycleId], references: [id], onDelete: SetNull)
   submissions                            WorksheetSubmission[]
   assignments                            WorksheetAssignment[]
-  competitionWorksheets                  CompetitionWorksheet[]
+  competitionWorksheets                  LegacyCompetitionWorksheetLink[]
   mockTests                              MockTest[]
   questions                              WorksheetQuestion[]
   examEnrollmentLevelWorksheetSelections ExamEnrollmentLevelWorksheetSelection[]
@@ -1999,9 +2059,10 @@ model Worksheet {
   @@index([courseLevelId])
   @@index([templateId])
   @@index([examCycleId])
-  @@index([tenantId, courseId, courseLevelId, levelId, examCycleId])
+  @@index([tenantId(length: 150), courseId(length: 150), courseLevelId(length: 150), levelId(length: 150), examCycleId(length: 150)], map: "ws_tenant_course_level_cycle_pref_idx")
   @@index([tenantId, createdAt, id])
   @@map("worksheet")
+  competitionWorksheetEntities           CompetitionWorksheet[]                  @relation("CompetitionWorksheetExecutableWorksheet")
 }
 
 model ExamCycle {
@@ -2474,46 +2535,64 @@ model QuestionBank {
   @@index([tenantId, courseId, courseLevelId, levelId, isActive])
   @@index([templateId])
    @@map("questionbank")
+  competitionQuestionBankQuestions CompetitionQuestionBankQuestion[]
 }
 
 model Competition {
-  id                      String                       @id @default(cuid())
-  tenantId                String
-  title                   String
-  description             String?
-  status                  CompetitionStatus            @default(DRAFT)
-  resultStatus            CompetitionResultStatus      @default(DRAFT)
-  resultPublishedAt       DateTime?
-  workflowStage           CompetitionWorkflowStage     @default(CENTER_REVIEW)
-  rejectedAt              DateTime?
-  rejectedByUserId        String?
-  startsAt                DateTime
-  endsAt                  DateTime
-  hierarchyNodeId         String
-  levelId                 String
-  createdByUserId         String
-  createdAt               DateTime                     @default(now())
-  updatedAt               DateTime                     @updatedAt
-  tenant                  Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  hierarchyNode           HierarchyNode                @relation("CompetitionNode", fields: [hierarchyNodeId], references: [id], onDelete: Restrict)
-  level                   Level                        @relation(fields: [levelId], references: [id], onDelete: Restrict)
-  createdBy               AuthUser                     @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
-  rejectedBy              AuthUser?                    @relation("CompetitionRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: SetNull)
-  enrollments             CompetitionEnrollment[]
-  worksheets              CompetitionWorksheet[]
-  stageTransitions        CompetitionStageTransition[]
+  id                 String                           @id @default(cuid())
+  tenantId           String
+  seasonId           String
+  code               String?
+  title              String
+  description        String?
+  status             CompetitionStatus                @default(DRAFT)
+  attemptLimit       Int                              @default(1)
+  resultStatus       CompetitionResultStatus          @default(DRAFT)
+  resultPublishedAt  DateTime?
+  workflowStage      CompetitionWorkflowStage         @default(CENTER_REVIEW)
+  rejectedAt         DateTime?
+  rejectedByUserId   String?
+  enrollmentStartAt  DateTime?
+  enrollmentEndAt    DateTime?
+  startsAt           DateTime
+  endsAt             DateTime
+  timezone           String                           @default("Asia/Kolkata")
+  hierarchyNodeId    String
+  levelId            String
+  createdByUserId    String
+  createdAt          DateTime                         @default(now())
+  updatedAt          DateTime                         @updatedAt
+  season             CompetitionSeason                @relation(fields: [seasonId], references: [id], onDelete: NoAction, map: "Competition_seasonId_fkey")
+  competitionCourses CompetitionCourse[]
+  createdBy          AuthUser                         @relation(fields: [createdByUserId], references: [id], onDelete: NoAction, map: "Competition_createdByUserId_fkey")
+  hierarchyNode      HierarchyNode                    @relation("CompetitionNode", fields: [hierarchyNodeId], references: [id], onDelete: NoAction, map: "Competition_hierarchyNodeId_fkey")
+  level              Level                            @relation(fields: [levelId], references: [id], onDelete: NoAction, map: "Competition_levelId_fkey")
+  rejectedBy         AuthUser?                        @relation("CompetitionRejectedBy", fields: [rejectedByUserId], references: [id], map: "Competition_rejectedByUserId_fkey")
+  tenant             Tenant                           @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "Competition_tenantId_fkey")
+  enrollments        CompetitionEnrollment[]
+  enrollmentLists    CompetitionEnrollmentList[]
+  partnerQuotas      CompetitionBusinessPartnerQuota[]
+  quotaAllocations   CompetitionQuotaAllocation[]
+  quotaChanges       CompetitionQuotaChange[]
   businessPartnerMappings CompetitionBusinessPartner[]
+  stageTransitions   CompetitionStageTransition[]
+  worksheets         LegacyCompetitionWorksheetLink[]
 
-  @@index([tenantId, hierarchyNodeId])
-  @@index([tenantId, levelId])
-  @@index([status])
-  @@index([tenantId, resultStatus])
-  @@index([workflowStage])
-  @@index([tenantId, rejectedAt])
-  @@index([rejectedByUserId])
-  @@index([tenantId, createdAt, id])
-  @@index([tenantId, workflowStage, createdAt])
-    @@map("competition")
+  @@index([createdByUserId], map: "Competition_createdByUserId_fkey")
+  @@index([hierarchyNodeId], map: "Competition_hierarchyNodeId_fkey")
+  @@index([levelId], map: "Competition_levelId_fkey")
+  @@index([rejectedByUserId], map: "Competition_rejectedByUserId_idx")
+  @@index([seasonId, status], map: "Competition_seasonId_status_idx")
+  @@index([status], map: "Competition_status_idx")
+  @@index([tenantId, resultStatus], map: "Competition_tenantId_resultStatus_idx")
+  @@index([tenantId, createdAt, id], map: "Competition_tenantId_createdAt_id_idx")
+  @@index([tenantId, hierarchyNodeId], map: "Competition_tenantId_hierarchyNodeId_idx")
+  @@index([tenantId, levelId], map: "Competition_tenantId_levelId_idx")
+  @@index([tenantId, rejectedAt], map: "Competition_tenantId_rejectedAt_idx")
+  @@index([tenantId, seasonId], map: "Competition_tenantId_seasonId_idx")
+  @@index([tenantId, workflowStage, createdAt], map: "Competition_tenantId_workflowStage_createdAt_idx")
+  @@index([workflowStage], map: "Competition_workflowStage_idx")
+  @@map("competition")
 }
 
 model CompetitionBusinessPartner {
@@ -2544,48 +2623,383 @@ model CompetitionStageTransition {
   reason        String?
   actedByUserId String
   createdAt     DateTime                    @default(now())
+  actedByUser   AuthUser                    @relation(fields: [actedByUserId], references: [id], onDelete: NoAction, map: "CompetitionStageTransition_actedByUserId_fkey")
+  competition   Competition                 @relation(fields: [competitionId], references: [id], onDelete: Cascade, map: "CompetitionStageTransition_competitionId_fkey")
+  tenant        Tenant                      @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionStageTransition_tenantId_fkey")
 
-  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  competition Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
-  actedByUser AuthUser    @relation(fields: [actedByUserId], references: [id], onDelete: Restrict)
-
-  @@index([tenantId, competitionId, createdAt])
-  @@index([competitionId, createdAt])
-  @@index([actedByUserId])
+  @@index([actedByUserId], map: "CompetitionStageTransition_actedByUserId_idx")
+  @@index([competitionId, createdAt], map: "CompetitionStageTransition_competitionId_createdAt_idx")
+  @@index([tenantId, competitionId, createdAt], map: "CompetitionStageTransition_tenantId_competitionId_createdAt_idx")
   @@map("competitionstagetransition")
-
 }
 
 model CompetitionWorksheet {
+  id                        String                           @id @default(cuid())
+  tenantId                  String
+  competitionQuestionBankId String
+  worksheetId               String?
+  name                      String
+  code                      String
+  description               String?
+  isActive                  Boolean                          @default(true)
+  version                   Int
+  createdByUserId           String
+  createdAt                 DateTime                         @default(now())
+  updatedAt                 DateTime                         @updatedAt
+  tenant                    Tenant                           @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionWorksheetEntity_tenantId_fkey")
+  competitionQuestionBank   CompetitionQuestionBank          @relation(fields: [competitionQuestionBankId], references: [id], onDelete: Cascade, map: "CompetitionWorksheet_competitionQuestionBankId_fkey")
+  worksheet                 Worksheet?                       @relation("CompetitionWorksheetExecutableWorksheet", fields: [worksheetId], references: [id], onDelete: SetNull, map: "CompetitionWorksheetEntity_worksheetId_fkey")
+  createdBy                 AuthUser                         @relation("CompetitionWorksheetCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "CompetitionWorksheet_createdByUserId_fkey")
+  assignments               CompetitionWorksheetAssignment[]
+
+  @@unique([competitionQuestionBankId, code], map: "CompetitionWorksheet_competitionQuestionBankId_code_key")
+  @@index([createdByUserId], map: "CompetitionWorksheet_createdByUserId_idx")
+  @@index([worksheetId], map: "CompetitionWorksheet_worksheetId_idx")
+  @@index([tenantId, competitionQuestionBankId, isActive], map: "CompetitionWorksheet_tenant_bank_active_idx")
+  @@map("competitionworksheetentity")
+}
+
+model CompetitionEnrollment {
+  competitionId            String
+  studentId                String
+  tenantId                 String
+  id                       String                          @id @default(cuid())
+  competitionCourseLevelId String
+  enrolledLevelId          String
+  hierarchyNodeId          String
+  sourceTeacherUserId      String?
+  createdByUserId          String
+  isTemporary              Boolean                         @default(false)
+  approvedAt               DateTime?
+  isActive                 Boolean                         @default(true)
+  enrolledAt               DateTime                        @default(now())
+  rank                     Int?
+  totalScore               Decimal?                        @db.Decimal(6, 2)
+  resultCompletionTimeSeconds Int?
+  resultSubmissionId       String?
+  resultCalculatedAt       DateTime?
+  attemptLimitOverride     Int?
+  extraAttemptGrantedAt    DateTime?
+  extraAttemptGrantedByUserId String?
+  extraAttemptReason       String?                         @db.VarChar(512)
+  competition              Competition                     @relation(fields: [competitionId], references: [id], onDelete: Cascade, map: "CompetitionEnrollment_competitionId_fkey")
+  student                  Student                         @relation(fields: [studentId], references: [id], onDelete: Cascade, map: "CompetitionEnrollment_studentId_fkey")
+  tenant                   Tenant                          @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionEnrollment_tenantId_fkey")
+  competitionCourseLevel   CompetitionCourseLevel          @relation(fields: [competitionCourseLevelId], references: [id], onDelete: NoAction, map: "competitionenrollment_course_level_fkey")
+  enrolledLevel            Level                           @relation("CompetitionEnrollmentLevel", fields: [enrolledLevelId], references: [id], onDelete: NoAction, map: "competitionenrollment_enrolled_level_fkey")
+  hierarchyNode            HierarchyNode                   @relation("CompetitionEnrollmentNode", fields: [hierarchyNodeId], references: [id], onDelete: NoAction, map: "competitionenrollment_hierarchy_node_fkey")
+  sourceTeacherUser        AuthUser?                       @relation("CompetitionEnrollmentSourceTeacher", fields: [sourceTeacherUserId], references: [id], onDelete: NoAction, map: "competitionenrollment_source_teacher_fkey")
+  createdBy                AuthUser                        @relation("CompetitionEnrollmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "competitionenrollment_created_by_fkey")
+  extraAttemptGrantedBy    AuthUser?                       @relation("CompetitionEnrollmentExtraAttemptGrantedBy", fields: [extraAttemptGrantedByUserId], references: [id], onDelete: NoAction, map: "competitionenrollment_extra_attempt_granted_by_fkey")
+  listItems                CompetitionEnrollmentListItem[]
+
+  @@unique([tenantId, competitionId, studentId, competitionCourseLevelId], map: "competitionenrollment_tenant_comp_student_level_uq")
+  @@index([competitionId], map: "competitionenrollment_competitionId_idx")
+  @@index([studentId], map: "CompetitionEnrollment_studentId_fkey")
+  @@index([tenantId, studentId], map: "CompetitionEnrollment_tenantId_studentId_idx")
+  @@index([tenantId, studentId, isActive], map: "CompetitionEnrollment_tenantId_studentId_isActive_idx")
+  @@index([tenantId, competitionId, isActive], map: "competitionenrollment_tenant_comp_active_idx")
+  @@index([tenantId, hierarchyNodeId, isActive], map: "competitionenrollment_tenant_node_active_idx")
+  @@index([tenantId, enrolledLevelId, isActive], map: "competitionenrollment_tenant_level_active_idx")
+  @@index([tenantId, sourceTeacherUserId], map: "competitionenrollment_tenant_teacher_idx")
+  @@index([tenantId, competitionId, competitionCourseLevelId, rank], map: "competitionenrollment_result_rank_idx")
+  @@index([resultSubmissionId], map: "competitionenrollment_result_submission_idx")
+  @@index([extraAttemptGrantedByUserId], map: "competitionenrollment_extra_attempt_granted_by_idx")
+  @@map("competitionenrollment")
+}
+
+
+
+model LegacyCompetitionWorksheetLink {
   competitionId String
   worksheetId   String
   tenantId      String
   assignedAt    DateTime    @default(now())
-  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
-  worksheet     Worksheet   @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
-  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade, map: "CompetitionWorksheet_competitionId_fkey")
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionWorksheet_tenantId_fkey")
+  worksheet     Worksheet   @relation(fields: [worksheetId], references: [id], onDelete: Cascade, map: "CompetitionWorksheet_worksheetId_fkey")
 
   @@id([competitionId, worksheetId])
-  @@index([tenantId])
+  @@index([tenantId], map: "CompetitionWorksheet_tenantId_idx")
+  @@index([worksheetId], map: "CompetitionWorksheet_worksheetId_fkey")
   @@map("competitionworksheet")
 }
 
-model CompetitionEnrollment {
-  competitionId String
-  studentId     String
-  tenantId      String
-  isActive      Boolean     @default(true)
-  enrolledAt    DateTime    @default(now())
-  rank          Int?
-  totalScore    Decimal?    @db.Decimal(6, 2)
-  competition   Competition @relation(fields: [competitionId], references: [id], onDelete: Cascade)
-  student       Student     @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+model CompetitionSeason {
+  id              String        @id @default(cuid())
+  tenantId        String
+  name            String
+  code            String
+  description     String?
+  startDate       DateTime
+  endDate         DateTime
+  isActive        Boolean       @default(true)
+  createdByUserId String
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionSeason_tenantId_fkey")
+  createdBy       AuthUser      @relation("CompetitionSeasonCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "CompetitionSeason_createdByUserId_fkey")
+  competitions    Competition[]
 
-  @@id([competitionId, studentId])
-  @@index([tenantId, studentId])
-  @@index([tenantId, studentId, isActive])
-   @@map("competitionenrollment")
+  @@unique([tenantId, code], map: "CompetitionSeason_tenantId_code_key")
+  @@unique([tenantId, name], map: "CompetitionSeason_tenantId_name_key")
+  @@index([createdByUserId], map: "CompetitionSeason_createdByUserId_idx")
+  @@index([tenantId, isActive], map: "CompetitionSeason_tenantId_isActive_idx")
+  @@index([tenantId, startDate, endDate], map: "CompetitionSeason_tenantId_startDate_endDate_idx")
+  @@map("competitionseason")
+}
+
+model CompetitionCourse {
+  id              String                   @id @default(cuid())
+  tenantId        String
+  competitionId   String
+  name            String
+  code            String
+  description     String?
+  isActive        Boolean                  @default(true)
+  createdByUserId String
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  tenant          Tenant                   @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionCourse_tenantId_fkey")
+  competition     Competition              @relation(fields: [competitionId], references: [id], onDelete: Cascade, map: "CompetitionCourse_competitionId_fkey")
+  createdBy       AuthUser                 @relation("CompetitionCourseCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "CompetitionCourse_createdByUserId_fkey")
+  levels          CompetitionCourseLevel[]
+
+  @@unique([competitionId, code], map: "CompetitionCourse_competitionId_code_key")
+  @@unique([competitionId, name], map: "CompetitionCourse_competitionId_name_key")
+  @@index([createdByUserId], map: "CompetitionCourse_createdByUserId_idx")
+  @@index([tenantId, competitionId, isActive], map: "CompetitionCourse_tenantId_competitionId_isActive_idx")
+  @@map("competitioncourse")
+}
+
+model CompetitionCourseLevel {
+  id                  String                    @id @default(cuid())
+  tenantId            String
+  competitionCourseId String
+  levelId             String
+  levelNumber         Int
+  sortOrder           Int
+  isActive            Boolean                   @default(true)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  tenant              Tenant                    @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionCourseLevel_tenantId_fkey")
+  competitionCourse   CompetitionCourse         @relation(fields: [competitionCourseId], references: [id], onDelete: Cascade, map: "CompetitionCourseLevel_competitionCourseId_fkey")
+  level               Level                     @relation(fields: [levelId], references: [id], onDelete: NoAction, map: "CompetitionCourseLevel_levelId_fkey")
+  questionBanks       CompetitionQuestionBank[]
+  enrollments         CompetitionEnrollment[]
+
+  @@unique([competitionCourseId, levelId], map: "CompetitionCourseLevel_competitionCourseId_levelId_key")
+  @@unique([competitionCourseId, levelNumber], map: "CompetitionCourseLevel_competitionCourseId_levelNumber_key")
+  @@index([levelId], map: "CompetitionCourseLevel_levelId_idx")
+  @@index([competitionCourseId, sortOrder], map: "CompetitionCourseLevel_competitionCourseId_sortOrder_idx")
+  @@index([tenantId, competitionCourseId, isActive], map: "CompetitionCourseLevel_tenantId_competitionCourseId_isActive_idx")
+  @@map("competitioncourselevel")
+}
+
+model CompetitionQuestionBank {
+  id                       String                            @id @default(cuid())
+  tenantId                 String
+  competitionCourseLevelId String
+  name                     String
+  code                     String
+  description              String?
+  isActive                 Boolean                           @default(true)
+  createdByUserId          String
+  createdAt                DateTime                          @default(now())
+  updatedAt                DateTime                          @updatedAt
+  tenant                   Tenant                            @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionQuestionBank_tenantId_fkey")
+  competitionCourseLevel   CompetitionCourseLevel            @relation(fields: [competitionCourseLevelId], references: [id], onDelete: Cascade, map: "CompetitionQuestionBank_competitionCourseLevelId_fkey")
+  createdBy                AuthUser                          @relation("CompetitionQuestionBankCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "CompetitionQuestionBank_createdByUserId_fkey")
+  worksheets               CompetitionWorksheet[]
+  questions                CompetitionQuestionBankQuestion[]
+
+  @@unique([competitionCourseLevelId, code], map: "CompetitionQuestionBank_competitionCourseLevelId_code_key")
+  @@index([createdByUserId], map: "CompetitionQuestionBank_createdByUserId_idx")
+  @@index([tenantId, competitionCourseLevelId, isActive], map: "CompetitionQuestionBank_tenant_level_active_idx")
+  @@map("competitionquestionbank")
+}
+
+model CompetitionQuestionBankQuestion {
+  tenantId                  String
+  competitionQuestionBankId String
+  questionBankId            String
+  sortOrder                 Int      @default(0)
+  createdAt                 DateTime @default(now())
+
+  tenant                  Tenant                  @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionQuestionBankQuestion_tenantId_fkey")
+  competitionQuestionBank CompetitionQuestionBank @relation(fields: [competitionQuestionBankId], references: [id], onDelete: Cascade, map: "CompetitionQuestionBankQuestion_bankId_fkey")
+  questionBank            QuestionBank            @relation(fields: [questionBankId], references: [id], onDelete: Cascade, map: "CompetitionQuestionBankQuestion_questionId_fkey")
+
+  @@id([competitionQuestionBankId, questionBankId])
+  @@index([tenantId, competitionQuestionBankId, sortOrder], map: "CompetitionQuestionBankQuestion_tenant_bank_sort_idx")
+  @@index([questionBankId], map: "CompetitionQuestionBankQuestion_questionId_idx")
+  @@map("competitionquestionbankquestion")
+}
+
+model CompetitionWorksheetAssignment {
+  id                     String               @id @default(cuid())
+  tenantId               String
+  competitionWorksheetId String
+  businessPartnerId      String
+  createdByUserId        String
+  assignedAt             DateTime             @default(now())
+  isActive               Boolean              @default(true)
+  deactivatedAt          DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  tenant                 Tenant               @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "CompetitionWorksheetAssignment_tenantId_fkey")
+  competitionWorksheet   CompetitionWorksheet @relation(fields: [competitionWorksheetId], references: [id], onDelete: Cascade, map: "CompetitionWorksheetAssignment_competitionWorksheetId_fkey")
+  businessPartner        BusinessPartner      @relation(fields: [businessPartnerId], references: [id], onDelete: NoAction, map: "CompetitionWorksheetAssignment_businessPartnerId_fkey")
+  createdBy              AuthUser             @relation("CompetitionWorksheetAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "CompetitionWorksheetAssignment_createdByUserId_fkey")
+
+  @@unique([competitionWorksheetId, businessPartnerId], map: "CompetitionWorksheetAssignment_worksheetId_businessPartnerId_key")
+  @@index([createdByUserId], map: "CompetitionWorksheetAssignment_createdByUserId_idx")
+  @@index([businessPartnerId, createdAt], map: "CompetitionWorksheetAssignment_businessPartnerId_createdAt_idx")
+  @@index([tenantId, businessPartnerId, isActive], map: "CompetitionWorksheetAssignment_tenant_bp_active_idx")
+  @@index([tenantId, competitionWorksheetId, isActive], map: "CompetitionWorksheetAssignment_tenantId_worksheetId_isActive_idx")
+  @@map("competitionworksheetassignment")
+}
+
+model CompetitionEnrollmentList {
+  id               String                          @id @default(cuid())
+  tenantId         String
+  competitionId    String
+  type             CompetitionEnrollmentListType
+  scopeKey         String
+  hierarchyNodeId  String
+  teacherUserId    String?
+  status           CompetitionEnrollmentListStatus @default(DRAFT)
+  locked           Boolean                         @default(false)
+  submittedAt      DateTime?
+  forwardedAt      DateTime?
+  approvedAt       DateTime?
+  rejectedAt       DateTime?
+  rejectedByUserId String?
+  rejectedRemark   String?
+  approvalMode     CompetitionApprovalMode?
+  quotaEvaluatedAt DateTime?
+  waitingReason    String?                         @db.VarChar(512)
+  createdByUserId  String
+  createdAt        DateTime                        @default(now())
+  updatedAt        DateTime                        @updatedAt
+  tenant           Tenant                          @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "competitionenrollmentlist_tenant_fkey")
+  competition      Competition                     @relation(fields: [competitionId], references: [id], onDelete: Cascade, map: "competitionenrollmentlist_competition_fkey")
+  centerNode       HierarchyNode                   @relation("CompetitionEnrollmentListNode", fields: [hierarchyNodeId], references: [id], onDelete: NoAction, map: "competitionenrollmentlist_node_fkey")
+  teacherUser      AuthUser?                       @relation("CompetitionEnrollmentListTeacher", fields: [teacherUserId], references: [id], map: "competitionenrollmentlist_teacher_fkey")
+  createdBy        AuthUser                        @relation("CompetitionEnrollmentListCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "competitionenrollmentlist_created_by_fkey")
+  rejectedBy       AuthUser?                       @relation("CompetitionEnrollmentListRejectedBy", fields: [rejectedByUserId], references: [id], map: "competitionenrollmentlist_rejected_by_fkey")
+  items            CompetitionEnrollmentListItem[]
+  quotaAllocation  CompetitionQuotaAllocation?
+
+  @@unique([tenantId, competitionId, scopeKey], map: "competitionenrollmentlist_tenant_comp_scope_uq")
+  @@index([tenantId, competitionId, status], map: "competitionenrollmentlist_tenant_comp_status_idx")
+  @@index([tenantId, hierarchyNodeId, status], map: "competitionenrollmentlist_tenant_node_status_idx")
+  @@index([teacherUserId], map: "competitionenrollmentlist_teacher_idx")
+  @@map("competitionenrollmentlist")
+}
+
+model CompetitionEnrollmentListItem {
+  tenantId        String
+  listId          String
+  enrollmentId    String
+  included        Boolean                   @default(true)
+  exclusionReason String?
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  tenant          Tenant                    @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "competitionenrollmentlistitem_tenant_fkey")
+  list            CompetitionEnrollmentList @relation(fields: [listId], references: [id], onDelete: Cascade, map: "competitionenrollmentlistitem_list_fkey")
+  enrollment      CompetitionEnrollment     @relation(fields: [enrollmentId], references: [id], onDelete: Cascade, map: "competitionenrollmentlistitem_enrollment_fkey")
+
+  @@id([listId, enrollmentId])
+  @@index([tenantId, createdAt], map: "competitionenrollmentlistitem_tenant_created_idx")
+  @@index([enrollmentId], map: "competitionenrollmentlistitem_enrollment_idx")
+  @@map("competitionenrollmentlistitem")
+}
+
+model CompetitionBusinessPartnerQuota {
+  id                String                       @id @default(cuid())
+  tenantId          String
+  competitionId     String
+  businessPartnerId String
+  quotaLimit        Int                          @default(0)
+  lastChangeReason  String?                      @db.VarChar(512)
+  createdByUserId   String
+  updatedByUserId   String?
+  createdAt         DateTime                     @default(now())
+  updatedAt         DateTime                     @updatedAt
+  tenant            Tenant                       @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "compquota_tenant_fkey")
+  competition       Competition                  @relation(fields: [competitionId], references: [id], onDelete: Cascade, map: "compquota_competition_fkey")
+  businessPartner   BusinessPartner              @relation(fields: [businessPartnerId], references: [id], onDelete: NoAction, map: "compquota_bp_fkey")
+  createdBy         AuthUser                     @relation("CompetitionQuotaCreatedBy", fields: [createdByUserId], references: [id], onDelete: NoAction, map: "compquota_created_by_fkey")
+  updatedBy         AuthUser?                    @relation("CompetitionQuotaUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: NoAction, map: "compquota_updated_by_fkey")
+  allocations       CompetitionQuotaAllocation[]
+  changes           CompetitionQuotaChange[]
+
+  @@unique([tenantId, competitionId, businessPartnerId], map: "compquota_t_comp_bp_uq")
+  @@index([tenantId, competitionId], map: "compquota_t_comp_i")
+  @@index([tenantId, businessPartnerId], map: "compquota_t_bp_i")
+  @@index([createdByUserId], map: "compquota_created_by_i")
+  @@index([updatedByUserId], map: "compquota_updated_by_i")
+  @@map("competitionbusinesspartnerquota")
+}
+
+model CompetitionQuotaAllocation {
+  id                   String                           @id @default(cuid())
+  tenantId             String
+  quotaId              String
+  competitionId        String
+  businessPartnerId    String
+  enrollmentListId     String                           @unique(map: "compqalloc_list_uq")
+  submittedByUserId    String
+  requestedIds         Int
+  approvedIds          Int                              @default(0)
+  quotaLimitSnapshot   Int                              @default(0)
+  usedIdsBefore        Int                              @default(0)
+  usedIdsAfter         Int                              @default(0)
+  status               CompetitionQuotaAllocationStatus @default(WAITING_FOR_QUOTA)
+  approvalMode         CompetitionApprovalMode?
+  requestHash          String?
+  waitingReason        String?                          @db.VarChar(512)
+  submittedAt          DateTime                         @default(now())
+  evaluatedAt          DateTime?
+  approvedAt           DateTime?
+  releasedAt           DateTime?
+  createdAt            DateTime                         @default(now())
+  updatedAt            DateTime                         @updatedAt
+  tenant               Tenant                           @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "compqalloc_tenant_fkey")
+  quota                CompetitionBusinessPartnerQuota  @relation(fields: [quotaId], references: [id], onDelete: NoAction, map: "compqalloc_quota_fkey")
+  competition          Competition                      @relation(fields: [competitionId], references: [id], onDelete: NoAction, map: "compqalloc_competition_fkey")
+  businessPartner      BusinessPartner                  @relation(fields: [businessPartnerId], references: [id], onDelete: NoAction, map: "compqalloc_bp_fkey")
+  enrollmentList       CompetitionEnrollmentList        @relation(fields: [enrollmentListId], references: [id], onDelete: Cascade, map: "compqalloc_list_fkey")
+  submittedBy          AuthUser                         @relation("CompetitionQuotaAllocationSubmittedBy", fields: [submittedByUserId], references: [id], onDelete: NoAction, map: "compqalloc_submitted_by_fkey")
+
+  @@index([quotaId, status, submittedAt], map: "compqalloc_quota_status_i")
+  @@index([tenantId, competitionId, businessPartnerId, status, submittedAt], map: "compqalloc_t_comp_bp_st_i")
+  @@index([submittedByUserId], map: "compqalloc_submitted_by_i")
+  @@map("competitionquotaallocation")
+}
+
+model CompetitionQuotaChange {
+  id                String                          @id @default(cuid())
+  tenantId          String
+  quotaId           String
+  competitionId     String
+  businessPartnerId String
+  previousLimit     Int
+  newLimit          Int
+  reason            String                          @db.VarChar(512)
+  changedByUserId   String
+  createdAt         DateTime                        @default(now())
+  tenant            Tenant                          @relation(fields: [tenantId], references: [id], onDelete: NoAction, map: "compqchange_tenant_fkey")
+  quota             CompetitionBusinessPartnerQuota @relation(fields: [quotaId], references: [id], onDelete: Cascade, map: "compqchange_quota_fkey")
+  competition       Competition                     @relation(fields: [competitionId], references: [id], onDelete: NoAction, map: "compqchange_competition_fkey")
+  businessPartner   BusinessPartner                 @relation(fields: [businessPartnerId], references: [id], onDelete: NoAction, map: "compqchange_bp_fkey")
+  changedBy         AuthUser                        @relation("CompetitionQuotaChangeActor", fields: [changedByUserId], references: [id], onDelete: NoAction, map: "compqchange_actor_fkey")
+
+  @@index([quotaId, createdAt], map: "compqchange_quota_created_i")
+  @@index([tenantId, competitionId, businessPartnerId, createdAt], map: "compqchange_t_comp_bp_created_i")
+  @@index([changedByUserId], map: "compqchange_actor_i")
+  @@map("competitionquotachange")
 }
 
 model RefreshToken {
@@ -2869,6 +3283,10 @@ model BusinessPartner {
   @@index([tenantId, subscriptionStatus, subscriptionExpiresAt])
   @@index([tenantId, status, isActive])
   @@map("businesspartner")
+  worksheetAssignments  CompetitionWorksheetAssignment[]
+  competitionQuotas     CompetitionBusinessPartnerQuota[]
+  competitionQuotaAllocations CompetitionQuotaAllocation[]
+  competitionQuotaChanges CompetitionQuotaChange[]
 }
 
 model FranchiseProfile {
@@ -3327,7 +3745,7 @@ model PartnerCourseAccess {
   @@map("partnercourseaccess")
 }
 
-// Layer 1: Superadmin → BP entitlement for practice features
+// Layer 1: Superadmin â†’ BP entitlement for practice features
 model BusinessPartnerPracticeEntitlement {
   id                String             @id @default(cuid())
   tenantId          String
@@ -3349,7 +3767,7 @@ model BusinessPartnerPracticeEntitlement {
    @@map("businesspartnerpracticeentitlement")
 }
 
-// Layer 2: BP/Franchise → Center seat allocation
+// Layer 2: BP/Franchise â†’ Center seat allocation
 model CenterPracticeAllocation {
   id                String   @id @default(cuid())
   tenantId          String
@@ -3373,7 +3791,7 @@ model CenterPracticeAllocation {
   @@map("centerpracticeallocation")
 }
 
-// Layer 3: Center → Student feature assignment
+// Layer 3: Center â†’ Student feature assignment
 model StudentPracticeAssignment {
   id                 String             @id @default(cuid())
   tenantId           String
@@ -4335,6 +4753,10 @@ model Certificate {
   @@index([tenantId, levelId, issuedAt])
   @@index([tenantId, courseId, issuedAt])
    @@map("certificate")
+  competitionId     String?
+  competitionEnrollmentId String? @unique(map: "Certificate_competitionEnrollmentId_key")
+  competitionSnapshot Json?
+  resultSnapshot    Json?
 }
 
 model AiPlaygroundLog {
@@ -4361,7 +4783,7 @@ model AiCustomTool {
   tenantId     String
   studentId    String
   toolName     String   @db.VarChar(50)
-  icon         String   @default("🔧") @db.VarChar(10)
+  icon         String   @default("ðŸ”§") @db.VarChar(10)
   title        String   @db.VarChar(100)
   description  String   @db.VarChar(300)
   systemPrompt String   @db.Text
@@ -4401,7 +4823,7 @@ model CertificateTemplate {
   @@map("certificatetemplate")
 }
 
-// ─── Phase 4: Intelligence Platform ───────────────────────────
+// â”€â”€â”€ Phase 4: Intelligence Platform â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 enum InsightCategory {
   RISK
@@ -4450,7 +4872,7 @@ model Insight {
    @@map("insight")
 }
 
-// ─── Phase 5: Student Premium Experience ──────────────────────────
+// â”€â”€â”€ Phase 5: Student Premium Experience â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 model StudentMilestone {
   id          String   @id @default(cuid())

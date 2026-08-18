@@ -2,20 +2,7 @@ import { prisma } from "../lib/prisma.js";
 
 const LIMITED_ROLES = new Set(["TEACHER", "CENTER", "FRANCHISE"]);
 
-function normalizeLicensedRank(value) {
-  const rank = Number(value);
-  if (!Number.isFinite(rank)) return 1;
-  return Math.min(8, Math.max(1, Math.floor(rank)));
-}
 
-function isLicenseCurrentlyActive({ startDate, expiryDate, now = new Date() }) {
-  const start = startDate ? new Date(startDate) : null;
-  const expiry = expiryDate ? new Date(expiryDate) : null;
-
-  if (start && start > now) return false;
-  if (expiry && expiry < now) return false;
-  return true;
-}
 
 async function resolveScopedHierarchyNodeIds({ tenantId, auth }) {
   const role = String(auth?.role || "").toUpperCase();
@@ -94,10 +81,14 @@ async function resolveActorLevelCap({ tenantId, auth }) {
     return null;
   }
 
-  if (!LIMITED_ROLES.has(role) || !userId) {
+  if (!LIMITED_ROLES.has(role) || !tenantId || !userId) {
     return null;
   }
 
+  // The current Prisma/database contract does not contain the legacy
+  // maxLicensedLevelRank/licenseStartDate/licenseExpiryDate fields.
+  // Keep hierarchy/profile validation fail-closed, but do not invent a
+  // replacement curriculum cap that is not persisted anywhere.
   if (role === "CENTER") {
     const center = await prisma.centerProfile.findFirst({
       where: {
@@ -106,18 +97,10 @@ async function resolveActorLevelCap({ tenantId, auth }) {
         isActive: true,
         status: "ACTIVE"
       },
-      select: {
-        maxLicensedLevelRank: true,
-        licenseStartDate: true,
-        licenseExpiryDate: true
-      }
+      select: { id: true }
     });
 
-    if (!center) return 0;
-    if (!isLicenseCurrentlyActive({ startDate: center.licenseStartDate, expiryDate: center.licenseExpiryDate })) {
-      return 0;
-    }
-    return normalizeLicensedRank(center.maxLicensedLevelRank);
+    return center ? null : 0;
   }
 
   if (role === "TEACHER") {
@@ -125,13 +108,18 @@ async function resolveActorLevelCap({ tenantId, auth }) {
       where: {
         tenantId,
         authUserId: userId,
-        isActive: true
+        isActive: true,
+        status: "ACTIVE"
       },
       select: { hierarchyNodeId: true }
     });
 
-    const centerHierarchyNodeId = teacher?.hierarchyNodeId || auth?.hierarchyNodeId || null;
-    if (!centerHierarchyNodeId) return 0;
+    const centerHierarchyNodeId =
+      teacher?.hierarchyNodeId || auth?.hierarchyNodeId || null;
+
+    if (!centerHierarchyNodeId) {
+      return 0;
+    }
 
     const center = await prisma.centerProfile.findFirst({
       where: {
@@ -142,18 +130,10 @@ async function resolveActorLevelCap({ tenantId, auth }) {
           hierarchyNodeId: centerHierarchyNodeId
         }
       },
-      select: {
-        maxLicensedLevelRank: true,
-        licenseStartDate: true,
-        licenseExpiryDate: true
-      }
+      select: { id: true }
     });
 
-    if (!center) return 0;
-    if (!isLicenseCurrentlyActive({ startDate: center.licenseStartDate, expiryDate: center.licenseExpiryDate })) {
-      return 0;
-    }
-    return normalizeLicensedRank(center.maxLicensedLevelRank);
+    return center ? null : 0;
   }
 
   if (role === "FRANCHISE") {
@@ -164,49 +144,10 @@ async function resolveActorLevelCap({ tenantId, auth }) {
         isActive: true,
         status: "ACTIVE"
       },
-      select: {
-        id: true,
-        maxLicensedLevelRank: true,
-        licenseStartDate: true,
-        licenseExpiryDate: true
-      }
+      select: { id: true }
     });
 
-    if (!franchise) return 0;
-
-    const franchiseRank = isLicenseCurrentlyActive({
-      startDate: franchise.licenseStartDate,
-      expiryDate: franchise.licenseExpiryDate
-    })
-      ? normalizeLicensedRank(franchise.maxLicensedLevelRank)
-      : 0;
-
-    const centers = await prisma.centerProfile.findMany({
-      where: {
-        tenantId,
-        franchiseProfileId: franchise.id,
-        isActive: true,
-        status: "ACTIVE"
-      },
-      select: {
-        maxLicensedLevelRank: true,
-        licenseStartDate: true,
-        licenseExpiryDate: true
-      }
-    });
-
-    const centerRank = centers.reduce((maxRank, center) => {
-      if (!isLicenseCurrentlyActive({ startDate: center.licenseStartDate, expiryDate: center.licenseExpiryDate })) {
-        return maxRank;
-      }
-      return Math.max(maxRank, normalizeLicensedRank(center.maxLicensedLevelRank));
-    }, 0);
-
-    const effective = Math.max(franchiseRank, centerRank);
-    if (!effective) {
-      return 0;
-    }
-    return effective;
+    return franchise ? null : 0;
   }
 
   return 0;

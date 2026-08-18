@@ -231,7 +231,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
           correctCount,
           totalQuestions,
           completionTimeSeconds: effectiveCompletionTimeSeconds,
-          submittedAnswers,
+          submittedAnswers: JSON.stringify(submittedAnswers),
           passed,
           evaluationHash,
           remarks: remarksOverride || "Auto-evaluated"
@@ -251,7 +251,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
           correctCount,
           totalQuestions,
           completionTimeSeconds: effectiveCompletionTimeSeconds,
-          submittedAnswers,
+          submittedAnswers: JSON.stringify(submittedAnswers),
           passed,
           evaluationHash,
           remarks: remarksOverride || "Auto-evaluated"

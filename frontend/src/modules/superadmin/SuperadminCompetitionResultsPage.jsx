@@ -20,6 +20,9 @@ function SuperadminCompetitionResultsPage() {
   const [error, setError] = useState("");
   const [meta, setMeta] = useState(null);
   const [rows, setRows] = useState([]);
+  const [levels, setLevels] = useState([]);
+  const [totalParticipants, setTotalParticipants] = useState(0);
+  const [completedParticipants, setCompletedParticipants] = useState(0);
   const [resultStatus, setResultStatus] = useState("");
   const [acting, setActing] = useState(false);
   const [confirmAction, setConfirmAction] = useState(null);
@@ -37,9 +40,13 @@ function SuperadminCompetitionResultsPage() {
       setResultStatus(String(lb?.data?.status || ""));
       const entries = Array.isArray(lb?.data?.leaderboard) ? lb.data.leaderboard : [];
       setRows(entries);
+      setLevels(Array.isArray(lb?.data?.levels) ? lb.data.levels : []);
+      setTotalParticipants(Number(lb?.data?.totalParticipants || entries.length));
+      setCompletedParticipants(Number(lb?.data?.completedParticipants || 0));
     } catch (err) {
       setError(getFriendlyErrorMessage(err) || "Failed to load competition results.");
       setRows([]);
+      setLevels([]);
     } finally {
       setLoading(false);
     }
@@ -133,34 +140,50 @@ function SuperadminCompetitionResultsPage() {
           Unpublish
         </button>
         <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>
-          Participants: {rows.length}
+          Participants: {totalParticipants} · Completed: {completedParticipants}
         </div>
       </div>
 
-      <div className="card" style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "grid", gap: 12 }}>
         {!rows.length ? (
-          <p style={{ margin: 0, color: "var(--color-text-muted)" }}>No leaderboard entries yet.</p>
+          <div className="card"><p style={{ margin: 0, color: "var(--color-text-muted)" }}>No approved Competition participations yet.</p></div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          (levels.length ? levels : [{ competitionCourseLevelId: "all", leaderboard: rows }]).map((group) => (
+          <div className="card" key={group.competitionCourseLevelId} style={{ overflowX: "auto" }}>
+            <h3 style={{ marginTop: 0 }}>
+              {[group.courseName || group.courseCode, group.levelName || (group.levelRank ? `Level ${group.levelRank}` : null)].filter(Boolean).join(" · ") || "Competition Results"}
+            </h3>
+            <div style={{ color: "var(--color-text-muted)", fontSize: 12, marginBottom: 8 }}>
+              Participants: {group.totalParticipants ?? group.leaderboard.length} · Completed: {group.completedParticipants ?? group.leaderboard.filter((entry) => entry.submissionId).length}
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Rank</th>
                 <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Student</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Admission No.</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Type</th>
                 <th style={{ textAlign: "right", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Accuracy</th>
                 <th style={{ textAlign: "right", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Completion Time (sec)</th>
+                <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid var(--color-border)" }}>Status</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((entry, i) => (
-                <tr key={entry.studentId || i}>
-                  <td style={{ padding: "6px 8px" }}>{entry.rank ?? i + 1}</td>
+              {group.leaderboard.map((entry, i) => (
+                <tr key={entry.participationId || `${entry.studentId}-${i}`}>
+                  <td style={{ padding: "6px 8px" }}>{entry.rank ?? "—"}</td>
                   <td style={{ padding: "6px 8px" }}>{entry.studentName || "-"}</td>
+                  <td style={{ padding: "6px 8px" }}>{entry.admissionNo || "—"}</td>
+                  <td style={{ padding: "6px 8px" }}>{entry.isTemporary ? "Temporary" : "Regular"}</td>
                   <td style={{ padding: "6px 8px", textAlign: "right" }}>{entry.accuracy ?? "-"}</td>
                   <td style={{ padding: "6px 8px", textAlign: "right" }}>{entry.completionTime ?? "-"}</td>
+                  <td style={{ padding: "6px 8px" }}>{entry.status === "COMPLETED" ? "Completed" : "Not submitted"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
+          ))
         )}
       </div>
 

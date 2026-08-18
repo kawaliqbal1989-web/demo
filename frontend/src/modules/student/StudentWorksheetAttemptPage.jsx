@@ -184,6 +184,31 @@ function formatCourseLevelLabel({ courseLevelLabel, courseCode, levelTitle, cour
   return courseName || levelTitle || courseCode || null;
 }
 
+function getWorksheetAssessmentContext(worksheet) {
+  const context = worksheet?.assessmentContext;
+  return context && typeof context === "object" ? context : null;
+}
+
+function isCompetitionAssessmentContext(context) {
+  return String(context?.sourceSystem || "").trim().toUpperCase() === "COMPETITION";
+}
+
+function getAssessmentParticipationId(worksheet) {
+  const context = getWorksheetAssessmentContext(worksheet);
+  return String(context?.participationId || context?.sourceEntityId || "").trim();
+}
+
+function getStudentAssessmentReturnPath(worksheet, competitionModeRequested = false) {
+  const context = getWorksheetAssessmentContext(worksheet);
+  if (competitionModeRequested || isCompetitionAssessmentContext(context)) {
+    return "/student/competition";
+  }
+  if (String(worksheet?.generationMode || "").trim().toUpperCase() === "EXAM") {
+    return "/student/exams";
+  }
+  return "/student/worksheets";
+}
+
 function StudentWorksheetAttemptPage() {
   const { worksheetId } = useParams();
   const location = useLocation();
@@ -226,11 +251,22 @@ function StudentWorksheetAttemptPage() {
   const startSecondAttempt = searchParams.get("startSecondAttempt") === "1";
   const viewSubmissionMode = searchParams.get("viewSubmission") === "1";
   const examModeRequested = searchParams.get("examMode") === "1";
-  const isOfficialExamWorksheet = useMemo(
-    () => String(worksheet?.generationMode || worksheetPreview?.generationMode || "").toUpperCase() === "EXAM",
-    [worksheet?.generationMode, worksheetPreview?.generationMode]
+  const competitionModeRequested = searchParams.get("competitionMode") === "1";
+  const requestedParticipationId = String(searchParams.get("participationId") || "").trim();
+  const assessmentWorksheet = worksheet || worksheetPreview;
+  const assessmentContext = getWorksheetAssessmentContext(assessmentWorksheet);
+  const isCompetitionAssessment = isCompetitionAssessmentContext(assessmentContext);
+  const isExamGeneration =
+    String(assessmentWorksheet?.generationMode || "").trim().toUpperCase() === "EXAM";
+  const isOfficialExamWorksheet = isExamGeneration && !isCompetitionAssessment;
+  const isStrictAssessmentWorksheet =
+    isOfficialExamWorksheet || isCompetitionAssessment;
+  const assessmentReturnPath = getStudentAssessmentReturnPath(
+    assessmentWorksheet,
+    competitionModeRequested
   );
-  const isDedicatedExamMode = examModeRequested && isOfficialExamWorksheet && !viewSubmissionMode;
+  const isDedicatedExamMode =
+    examModeRequested && isStrictAssessmentWorksheet && !viewSubmissionMode;
   const attemptId = attempt?.attemptId || null;
   const serverOffsetMsRef = useRef(0);
   const versionRef = useRef(0);
@@ -283,11 +319,34 @@ function StudentWorksheetAttemptPage() {
 
         if (worksheetRes.status === "fulfilled") {
           const worksheetData = worksheetRes.value?.data?.data || null;
-          const isOfficialExam = String(worksheetData?.generationMode || "").toUpperCase() === "EXAM";
+          const worksheetAssessmentContext =
+            getWorksheetAssessmentContext(worksheetData);
+          const isCompetitionWorksheet =
+            isCompetitionAssessmentContext(worksheetAssessmentContext);
+          const isStrictAssessment =
+            isCompetitionWorksheet ||
+            String(worksheetData?.generationMode || "").toUpperCase() === "EXAM";
+          const previewReturnPath = getStudentAssessmentReturnPath(
+            worksheetData,
+            competitionModeRequested
+          );
+
+          if (competitionModeRequested) {
+            const participationId = getAssessmentParticipationId(worksheetData);
+            if (
+              !isCompetitionWorksheet ||
+              (requestedParticipationId &&
+                participationId !== requestedParticipationId)
+            ) {
+              navigate("/student/competition", { replace: true });
+              return;
+            }
+          }
+
           setWorksheetPreview(worksheetData);
 
-          if (isOfficialExam && viewSubmissionMode) {
-            navigate("/student/exams", { replace: true });
+          if (isStrictAssessment && viewSubmissionMode) {
+            navigate(previewReturnPath, { replace: true });
             return;
           }
 
@@ -323,11 +382,32 @@ function StudentWorksheetAttemptPage() {
         const currentAttemptStatus = String(currentAttempt?.status || "").toUpperCase();
         const currentAttemptNo = Number(currentAttempt?.attemptNo || 1);
         const isCurrentAttemptTerminal = ["SUBMITTED", "TIMED_OUT"].includes(currentAttemptStatus);
-        const canRequestSecondAttemptStart = startSecondAttempt && currentAttemptNo <= 1;
-        const isOfficialExam = String(worksheetRes.value?.data?.data?.generationMode || "").toUpperCase() === "EXAM";
+        const previewWorksheet = worksheetRes.value?.data?.data || null;
+        const previewAssessmentContext =
+          getWorksheetAssessmentContext(previewWorksheet);
+        const canRequestSecondAttemptStart = Boolean(
+          startSecondAttempt &&
+            (isCompetitionAssessmentContext(previewAssessmentContext) ||
+              currentAttemptNo <= 1)
+        );
+        const isStrictAssessment =
+          isCompetitionAssessmentContext(
+            previewAssessmentContext
+          ) ||
+          String(previewWorksheet?.generationMode || "").toUpperCase() === "EXAM";
 
-        if (isOfficialExam && isCurrentAttemptTerminal && !canRequestSecondAttemptStart) {
-          navigate("/student/exams", { replace: true });
+        if (
+          isStrictAssessment &&
+          isCurrentAttemptTerminal &&
+          !canRequestSecondAttemptStart
+        ) {
+          navigate(
+            getStudentAssessmentReturnPath(
+              previewWorksheet,
+              competitionModeRequested
+            ),
+            { replace: true }
+          );
           return;
         }
 
@@ -376,7 +456,14 @@ function StudentWorksheetAttemptPage() {
         autoSubmitRetryTimerRef.current = null;
       }
     };
-  }, [worksheetId, startSecondAttempt, viewSubmissionMode]);
+  }, [
+    competitionModeRequested,
+    navigate,
+    requestedParticipationId,
+    startSecondAttempt,
+    viewSubmissionMode,
+    worksheetId
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -433,20 +520,42 @@ function StudentWorksheetAttemptPage() {
         const payloadAttemptNo = Number(payload?.attemptNo);
         const payloadStatus = String(payload?.status || "").toUpperCase();
         const payloadIsTerminal = ["SUBMITTED", "TIMED_OUT"].includes(payloadStatus);
-        const isOfficialExamFromPayload =
-          String(payload?.worksheet?.generationMode || worksheetPreview?.generationMode || "").toUpperCase() === "EXAM";
+        const payloadWorksheet = payload?.worksheet || worksheetPreview || null;
+        const payloadIsCompetitionAssessment =
+          isCompetitionAssessmentContext(
+            getWorksheetAssessmentContext(payloadWorksheet)
+          );
+        const isStrictAssessmentFromPayload =
+          payloadIsCompetitionAssessment ||
+          String(payloadWorksheet?.generationMode || "").toUpperCase() === "EXAM";
+        const payloadReturnPath = getStudentAssessmentReturnPath(
+          payloadWorksheet,
+          competitionModeRequested
+        );
 
-        // URL startSecondAttempt is only a request hint; actual attempt validity must come from start/resume payload.
-        if (isOfficialExamFromPayload && startSecondAttempt) {
-          const isValidSecondAttemptPayload = payloadAttemptNo === 2 && payloadStatus === "IN_PROGRESS";
-          if (!isValidSecondAttemptPayload) {
-            navigate("/student/exams", { replace: true });
+        if (competitionModeRequested) {
+          const participationId = getAssessmentParticipationId(payloadWorksheet);
+          if (
+            !payloadIsCompetitionAssessment ||
+            (requestedParticipationId &&
+              participationId !== requestedParticipationId)
+          ) {
+            navigate("/student/competition", { replace: true });
             return;
           }
         }
 
-        if (isOfficialExamFromPayload && payloadIsTerminal) {
-          navigate("/student/exams", { replace: true });
+        // URL startSecondAttempt is only a request hint; actual attempt validity must come from start/resume payload.
+        if (isStrictAssessmentFromPayload && startSecondAttempt) {
+          const isValidSecondAttemptPayload = payloadAttemptNo === 2 && payloadStatus === "IN_PROGRESS";
+          if (!isValidSecondAttemptPayload) {
+            navigate(payloadReturnPath, { replace: true });
+            return;
+          }
+        }
+
+        if (isStrictAssessmentFromPayload && payloadIsTerminal) {
+          navigate(payloadReturnPath, { replace: true });
           return;
         }
 
@@ -492,8 +601,8 @@ function StudentWorksheetAttemptPage() {
         }
         const code = getApiErrorCode(e);
         if (code === "SUBMISSION_ALREADY_FINALIZED") {
-          if (isOfficialExamWorksheet) {
-            navigate("/student/exams", { replace: true });
+          if (isStrictAssessmentWorksheet) {
+            navigate(assessmentReturnPath, { replace: true });
             return;
           }
           setAlreadySubmitted(true);
@@ -501,8 +610,8 @@ function StudentWorksheetAttemptPage() {
           return;
         }
         if (code === "ATTEMPT_ENDED") {
-          if (isOfficialExamWorksheet) {
-            navigate("/student/exams", { replace: true });
+          if (isStrictAssessmentWorksheet) {
+            navigate(assessmentReturnPath, { replace: true });
             return;
           }
           setAlreadySubmitted(true);
@@ -522,7 +631,19 @@ function StudentWorksheetAttemptPage() {
     return () => {
       cancelled = true;
     };
-  }, [alreadySubmitted, isOfficialExamWorksheet, navigate, startConfirmed, worksheetId, worksheetPreview, startSecondAttempt, viewSubmissionMode]);
+  }, [
+    alreadySubmitted,
+    assessmentReturnPath,
+    competitionModeRequested,
+    isStrictAssessmentWorksheet,
+    navigate,
+    requestedParticipationId,
+    startConfirmed,
+    startSecondAttempt,
+    viewSubmissionMode,
+    worksheetId,
+    worksheetPreview
+  ]);
 
   useEffect(() => {
     if (!attemptId) return;
@@ -605,7 +726,8 @@ function StudentWorksheetAttemptPage() {
       return Array.isArray(terms) && terms.length > 0;
     });
   }, [questionRows]);
-  const useUnifiedExamGrid = isDedicatedExamMode && isOfficialExamWorksheet;
+  const useUnifiedExamGrid =
+    isDedicatedExamMode && isStrictAssessmentWorksheet;
 
   useEffect(() => {
     if (!useUnifiedExamGrid) {
@@ -1109,8 +1231,8 @@ function StudentWorksheetAttemptPage() {
         // ignore
       }
 
-      if (isOfficialExamWorksheet) {
-        navigate("/student/exams", { replace: true });
+      if (isStrictAssessmentWorksheet) {
+        navigate(assessmentReturnPath, { replace: true });
         return;
       }
 
@@ -1118,8 +1240,8 @@ function StudentWorksheetAttemptPage() {
       setSaveMessage(dueToTimeout ? "Auto-submitted" : "Submitted");
     } catch (e) {
       const code = e?.response?.data?.errorCode || e?.response?.data?.error_code;
-      if (isOfficialExamWorksheet && (code === "ATTEMPT_ENDED" || code === "SUBMISSION_ALREADY_FINALIZED")) {
-        navigate("/student/exams", { replace: true });
+      if (isStrictAssessmentWorksheet && (code === "ATTEMPT_ENDED" || code === "SUBMISSION_ALREADY_FINALIZED")) {
+        navigate(assessmentReturnPath, { replace: true });
         return;
       }
       if (code === "ATTEMPT_ENDED") {
@@ -1186,12 +1308,12 @@ function StudentWorksheetAttemptPage() {
   };
 
   const handleInstructionPrimaryAction = async () => {
-    if (isOfficialExamWorksheet && !examModeRequested) {
+    if (isStrictAssessmentWorksheet && !examModeRequested) {
       const examUrl = new URL(window.location.href);
       examUrl.searchParams.delete("viewSubmission");
       examUrl.searchParams.set("examMode", "1");
       const examWindow = window.open(examUrl.toString(), "_blank", "noopener,noreferrer");
-      if (examWindow) navigate("/student/exams");
+      if (examWindow) navigate(assessmentReturnPath);
       else setError("The Exam page was blocked by your browser. Allow pop-ups and try again.");
       return;
     }
@@ -1203,11 +1325,11 @@ function StudentWorksheetAttemptPage() {
     if (isDedicatedExamMode) {
       window.close();
       window.setTimeout(() => {
-        if (!window.closed) navigate("/student/exams");
+        if (!window.closed) navigate(assessmentReturnPath);
       }, 0);
       return;
     }
-    navigate("/student/worksheets");
+    navigate(assessmentReturnPath);
   };
 
   if (loading) {
@@ -1269,7 +1391,15 @@ function StudentWorksheetAttemptPage() {
           </button>
           {!isExamWorksheetAlreadySubmitted ? (
             <button className="button" style={{ width: "auto" }} onClick={() => void handleInstructionPrimaryAction()} disabled={alreadySubmitted}>
-              {isDedicatedExamMode ? "Start Exam" : isOfficialExamWorksheet ? "Open Exam Page" : "I Understand, Start Worksheet"}
+              {isDedicatedExamMode
+                ? isCompetitionAssessment
+                  ? "Start Competition"
+                  : "Start Exam"
+                : isStrictAssessmentWorksheet
+                  ? isCompetitionAssessment
+                    ? "Open Competition Page"
+                    : "Open Exam Page"
+                  : "I Understand, Start Worksheet"}
             </button>
           ) : null}
         </div>
@@ -1285,7 +1415,7 @@ function StudentWorksheetAttemptPage() {
           {error || "Worksheet not available."}
         </p>
         <div style={{ marginTop: 12 }}>
-          <button className="button secondary" onClick={() => navigate("/student/worksheets")}
+          <button className="button secondary" onClick={() => navigate(assessmentReturnPath)}
             >Back</button>
         </div>
       </div>
@@ -1346,7 +1476,7 @@ function StudentWorksheetAttemptPage() {
       setQuestionFontPx((prev) => Math.min(QUESTION_FONT_MAX_PX, prev + 1));
     };
 
-  const isExamWorksheet = isOfficialExamWorksheet;
+  const isExamWorksheet = isStrictAssessmentWorksheet;
   const useExamPageStyling = isColumnSumGrid || useUnifiedExamGrid;
   const worksheetTitle = String(worksheet?.title || "Worksheet");
   const currentEnrollment = studentCourseSummary?.currentEnrollment || null;
@@ -1461,8 +1591,14 @@ function StudentWorksheetAttemptPage() {
             {!isDedicatedExamMode ? <button
               className={useExamPageStyling ? "button secondary" : "button secondary"}
               style={useExamPageStyling ? { width: "36px", height: "36px", padding: 6, display: "inline-flex", alignItems: "center", justifyContent: "center" } : { width: "auto" }}
-              onClick={() => navigate("/student/worksheets") }
-              aria-label="Back to worksheets"
+              onClick={() => navigate(assessmentReturnPath) }
+              aria-label={
+                isCompetitionAssessment
+                  ? "Back to Competition"
+                  : isOfficialExamWorksheet
+                    ? "Back to Exams"
+                    : "Back to worksheets"
+              }
             >
               {useExamPageStyling ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1820,12 +1956,14 @@ function StudentWorksheetAttemptPage() {
             <h3 style={{ marginTop: 0 }}>{isDedicatedExamMode ? "Force exit and submit?" : isExamWorksheet ? "End test?" : "Submit worksheet?"}</h3>
             <p style={{ marginTop: 0, color: "var(--color-text-muted)" }}>
               {isDedicatedExamMode
-                ? "This will permanently submit your current answers and end the Exam. You will not be able to resume this attempt."
+                ? `This will permanently submit your current answers and end the ${isCompetitionAssessment ? "Competition" : "Exam"}. You will not be able to resume this attempt.`
                 : `You won’t be able to edit answers after ${isExamWorksheet ? "ending" : "submitting"}.`}
             </p>
             <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", flexWrap: "wrap" }}>
               <button className="button secondary" style={{ width: "auto" }} onClick={() => setConfirmOpen(false)}>
-                {isDedicatedExamMode ? "Continue Exam" : "Cancel"}
+                {isDedicatedExamMode
+                  ? `Continue ${isCompetitionAssessment ? "Competition" : "Exam"}`
+                  : "Cancel"}
               </button>
               <button className="button" style={{ width: "auto" }} onClick={() => void doSubmitConfirmed()}>
                 {isDedicatedExamMode ? "Force Exit & Submit" : isExamWorksheet ? "End test" : "Confirm submit"}

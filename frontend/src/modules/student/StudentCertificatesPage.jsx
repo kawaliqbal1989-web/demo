@@ -89,6 +89,19 @@ function CertificateCard({ cert, studentName, template, onPrint, onDownloadPdf }
           {cert.levelName}
         </div>
 
+        {cert.competitionSnapshot ? (
+          <div style={{ marginTop: 10, fontSize: 13, color: "var(--color-text-muted)" }}>
+            <div style={{ fontWeight: 700, color: "var(--color-text)" }}>
+              {cert.competitionSnapshot.title || "Competition"}
+            </div>
+            <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginTop: 4 }}>
+              <span>Rank: {cert.resultSnapshot?.rank ?? "—"}</span>
+              <span>Score: {cert.resultSnapshot?.totalScore ?? "—"}</span>
+              <span>Time: {cert.resultSnapshot?.completionTimeSeconds ?? "—"} sec</span>
+            </div>
+          </div>
+        ) : null}
+
         <div
           style={{
             marginTop: 12,

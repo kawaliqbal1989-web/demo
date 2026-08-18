@@ -120,7 +120,7 @@ async function loadCompetitionSnapshot({ tenantId, competitionId }) {
     return null;
   }
 
-  const worksheetLinks = await prisma.competitionWorksheet.findMany({
+  const worksheetLinks = await prisma.legacyCompetitionWorksheetLink.findMany({
     where: {
       tenantId,
       competitionId

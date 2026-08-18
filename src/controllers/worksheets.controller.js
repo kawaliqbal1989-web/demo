@@ -953,7 +953,7 @@ const deleteWorksheet = asyncHandler(async (req, res) => {
         ]
       }
     }),
-    prisma.competitionWorksheet.count({
+    prisma.legacyCompetitionWorksheetLink.count({
       where: { tenantId, worksheetId }
     }),
     prisma.mockTest.count({

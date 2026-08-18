@@ -5,6 +5,7 @@ import { UnauthorizedPage } from "../modules/common/UnauthorizedPage";
 import { SubscriptionBlockedPage } from "../modules/common/SubscriptionBlockedPage";
 import { VirtualAbacusPage } from "../modules/common/VirtualAbacusPage";
 import { PrintableReportPage } from "../modules/common/PrintableReportPage";
+import { CompetitionRoleResultsPage } from "../modules/common/CompetitionRoleResultsPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { RoleRoute } from "./RoleRoute";
 import { MainLayout } from "../layout/MainLayout";
@@ -93,6 +94,7 @@ import { TeacherFeesPage } from "../modules/teacher/TeacherFeesPage";
 import { TeacherProfilePage } from "../modules/teacher/TeacherProfilePage";
 import { TeacherWorksheetsPage } from "../modules/teacher/TeacherWorksheetsPage";
 import { TeacherExamCyclesPage } from "../modules/teacher/TeacherExamCyclesPage";
+import { TeacherCompetitionEnrollmentPage } from "../modules/teacher/TeacherCompetitionEnrollmentPage";
 import { TeacherExamEnrollmentPage } from "../modules/teacher/TeacherExamEnrollmentPage";
 import { TeacherExamResultsPage } from "../modules/teacher/TeacherExamResultsPage";
 import { TeacherAnalyticsPage } from "../modules/teacher/TeacherAnalyticsPage";
@@ -150,6 +152,7 @@ import { StudentResultsPage } from "../modules/student/StudentResultsPage";
 import { StudentMockTestsPage } from "../modules/student/StudentMockTestsPage";
 import { StudentMockTestAttemptPage } from "../modules/student/StudentMockTestAttemptPage";
 import { StudentExamsPage } from "../modules/student/StudentExamsPage";
+import { StudentCompetitionPage } from "../modules/student/StudentCompetitionPage";
 import { StudentExamResultPage } from "../modules/student/StudentExamResultPage";
 import { StudentProfilePage } from "../modules/student/StudentProfilePage";
 import { StudentAiPlaygroundPage } from "../modules/student/StudentAiPlaygroundPage";
@@ -234,6 +237,15 @@ function AppRouter() {
             <Route path="/center/attendance" element={<CenterAttendanceSessionsPage />} />
             <Route path="/center/attendance-history" element={<CenterAttendanceHistoryPage />} />
             <Route path="/center/competition-enrollment" element={<CenterCompetitionEnrollmentPage />} />
+            <Route
+              path="/center/competition/:competitionId/results"
+              element={(
+                <CompetitionRoleResultsPage
+                  roleLabel="Center"
+                  backPath="/center/competition-enrollment"
+                />
+              )}
+            />
             <Route path="/center/worksheets" element={<CenterWorksheetsPage />} />
             <Route path="/center/worksheets/:id" element={<WorksheetPage />} />
             <Route path="/center/exam-cycles" element={<CenterExamCyclesPage />} />
@@ -270,6 +282,16 @@ function AppRouter() {
             <Route path="/teacher/worksheets" element={<TeacherWorksheetsPage />} />
             <Route path="/teacher/virtual-abacus" element={<VirtualAbacusPage />} />
             <Route path="/teacher/exam-cycles" element={<TeacherExamCyclesPage />} />
+            <Route path="/teacher/competition-enrollment" element={<TeacherCompetitionEnrollmentPage />} />
+            <Route
+              path="/teacher/competition/:competitionId/results"
+              element={(
+                <CompetitionRoleResultsPage
+                  roleLabel="Teacher"
+                  backPath="/teacher/competition-enrollment"
+                />
+              )}
+            />
             <Route path="/teacher/exam-cycles/:examCycleId" element={<TeacherExamEnrollmentPage />} />
             <Route path="/teacher/exam-cycles/:examCycleId/results" element={<TeacherExamResultsPage />} />
             <Route path="/teacher/analytics" element={<TeacherAnalyticsPage />} />
@@ -297,6 +319,15 @@ function AppRouter() {
             <Route path="/bp/certificates" element={<BusinessPartnerCertificatesPage />} />
             <Route path="/bp/certificate-template" element={<BusinessPartnerCertificateTemplatePage />} />
             <Route path="/bp/competition-requests" element={<BusinessPartnerCompetitionRequestsPage />} />
+            <Route
+              path="/bp/competition/:competitionId/results"
+              element={(
+                <CompetitionRoleResultsPage
+                  roleLabel="Business Partner"
+                  backPath="/bp/competition-requests"
+                />
+              )}
+            />
             <Route path="/bp/exam-cycles" element={<BusinessPartnerExamCyclesPage />} />
             <Route path="/bp/exam-cycles/:examCycleId/pending" element={<BusinessPartnerExamPendingListsPage />} />
             <Route path="/bp/exam-cycles/:examCycleId/results" element={<BusinessPartnerExamResultsPage />} />
@@ -323,6 +354,15 @@ function AppRouter() {
             <Route path="/franchise/courses" element={<FranchiseCoursesPage />} />
             <Route path="/franchise/students" element={<FranchiseStudentsPage />} />
             <Route path="/franchise/competition-requests" element={<FranchiseCompetitionRequestsPage />} />
+            <Route
+              path="/franchise/competition/:competitionId/results"
+              element={(
+                <CompetitionRoleResultsPage
+                  roleLabel="Franchise"
+                  backPath="/franchise/competition-requests"
+                />
+              )}
+            />
             <Route path="/franchise/worksheets" element={<FranchiseWorksheetsPage />} />
             <Route path="/franchise/reports" element={<FranchiseReportsPage />} />
             <Route path="/franchise/margins" element={<FranchiseMarginsPage />} />
@@ -338,6 +378,7 @@ function AppRouter() {
             <Route path="/student/profile" element={<StudentProfilePage />} />
             <Route path="/student/my-course" element={<StudentMyCoursePage />} />
             <Route path="/student/exams" element={<StudentExamsPage />} />
+            <Route path="/student/competition" element={<StudentCompetitionPage />} />
             <Route path="/student/mock-tests" element={<StudentMockTestsPage />} />
             <Route path="/student/mock-tests/:mockTestId/attempt" element={<StudentMockTestAttemptPage />} />
             <Route path="/student/exams/:examCycleId/result" element={<StudentExamResultPage />} />

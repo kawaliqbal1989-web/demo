@@ -260,9 +260,7 @@ const getSuperadminBpCertificateTemplate = asyncHandler(async (req, res) => {
   const { bpId } = req.params;
 
   const template = await prisma.certificateTemplate.findFirst({
-    where: {
-      businessPartner: { id: bpId, tenantId: req.auth.tenantId }
-    }
+    where: { businessPartnerId: bpId, tenantId: req.auth.tenantId }
   });
 
   return res.apiSuccess("Certificate template fetched", template);

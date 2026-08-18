@@ -35,6 +35,21 @@ async function isHierarchyPathActive({ tenantId, hierarchyNodeId }) {
   return !currentId;
 }
 
+function buildAuthenticatedContext({ payload, user }) {
+  if (!payload?.userId || !user?.id || payload.userId !== user.id) {
+    return null;
+  }
+
+  return {
+    userId: user.id,
+    role: user.role,
+    tenantId: user.tenantId,
+    hierarchyNodeId: user.hierarchyNodeId || null,
+    studentId: user.studentId || null,
+    username: user.username || null
+  };
+}
+
 async function authenticate(req, res, next) {
   const authHeader = req.headers.authorization;
 
@@ -56,7 +71,10 @@ async function authenticate(req, res, next) {
       select: {
         id: true,
         tenantId: true,
-        hierarchyNodeId: true
+        role: true,
+        hierarchyNodeId: true,
+        studentId: true,
+        username: true
       }
     });
 
@@ -73,18 +91,14 @@ async function authenticate(req, res, next) {
       return sendError(res, 401, "Account is inactive", "ACCOUNT_INACTIVE");
     }
 
-    req.auth = {
-      userId: payload.userId,
-      role: payload.role,
-      tenantId: payload.tenantId,
-      hierarchyNodeId: payload.hierarchyNodeId || null,
-      studentId: payload.studentId || null,
-      username: payload.username || null
-    };
+    req.auth = buildAuthenticatedContext({ payload, user });
+    if (!req.auth) {
+      return sendError(res, 401, "Unauthorized", "INVALID_ACCESS_TOKEN");
+    }
     return next();
   } catch (_error) {
     return sendError(res, 401, "Unauthorized", "INVALID_ACCESS_TOKEN");
   }
 }
 
-export { authenticate };
+export { authenticate, buildAuthenticatedContext };

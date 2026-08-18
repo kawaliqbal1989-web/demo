@@ -481,14 +481,16 @@ function CenterStudentsPage() {
   };
 
   const getPrimaryLogin = (row) => {
-    const users = row?.authUsers || [];
-    return users.find((u) => u?.role === "STUDENT") || users[0] || null;
-  };
+  const users = Array.isArray(row?.authUsers) ? row.authUsers : [];
+  return users.find((u) => u?.role === "STUDENT") || users[0] || null;
+};
 
-  const getActiveEnrollment = (row) => {
-    const enrollments = row?.batchEnrollments || [];
-    return enrollments[0] || null;
-  };
+const getActiveEnrollment = (row) => {
+  const enrollments = Array.isArray(row?.batchEnrollments)
+    ? row.batchEnrollments
+    : [];
+  return enrollments[0] || null;
+};
 
   const onCreate = async (e) => {
     e.preventDefault();

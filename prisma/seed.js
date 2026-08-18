@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
 import { PrismaClient } from "@prisma/client";
 import "dotenv/config";
+import { createHash } from "node:crypto";
 
 const prisma = new PrismaClient({
   adapter: new PrismaMariaDb(process.env.DATABASE_URL)
@@ -25,12 +26,18 @@ function createQuestionBankRows({ tenantId, levelId, rank, templateId }) {
       const subtrahend = isAddition ? right : Math.min(left, right);
       const correctAnswer = isAddition ? minuend + subtrahend : minuend - subtrahend;
 
+      const prompt = `L${rank}-${difficulty.type}-Q${index}`;
+      const promptScopeKey = createHash("sha256")
+        .update(`LEGACY|LEGACY|${prompt}`)
+        .digest("hex");
+
       rows.push({
         tenantId,
         levelId,
         templateId,
         difficulty: difficulty.type,
-        prompt: `L${rank}-${difficulty.type}-Q${index}`,
+        prompt,
+        promptScopeKey,
         operands: [minuend, subtrahend],
         operation,
         correctAnswer,
@@ -674,6 +681,46 @@ async function main() {
     });
   }
 
+  const competitionSeason = await prisma.competitionSeason.upsert({
+    where: {
+      tenantId_code: {
+        tenantId: tenant.id,
+        code: "WINTER-2026"
+      }
+    },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      name: "Winter 2026",
+      code: "WINTER-2026",
+      description: "Seed competition season",
+      startDate: new Date("2026-12-01T00:00:00.000Z"),
+      endDate: new Date("2026-12-31T23:59:59.000Z"),
+      isActive: true,
+      createdByUserId: superadminAuth.id
+    }
+  });
+
+  const tenant2CompetitionSeason = await prisma.competitionSeason.upsert({
+    where: {
+      tenantId_code: {
+        tenantId: tenant2.id,
+        code: "WINTER-2026"
+      }
+    },
+    update: {},
+    create: {
+      tenantId: tenant2.id,
+      name: "Winter 2026",
+      code: "WINTER-2026",
+      description: "Seed competition season for tenant isolation tests",
+      startDate: new Date("2026-12-01T00:00:00.000Z"),
+      endDate: new Date("2026-12-31T23:59:59.000Z"),
+      isActive: true,
+      createdByUserId: tenant2Bp.id
+    }
+  });
+
   let competition = await prisma.competition.findFirst({
     where: {
       tenantId: tenant.id,
@@ -686,6 +733,7 @@ async function main() {
     competition = await prisma.competition.create({
       data: {
         tenantId: tenant.id,
+        seasonId: competitionSeason.id,
         title: "Winter Abacus Challenge",
         description: "Annual district level competition",
         status: "SCHEDULED",
@@ -710,6 +758,7 @@ async function main() {
     tenant2Competition = await prisma.competition.create({
       data: {
         tenantId: tenant2.id,
+        seasonId: tenant2CompetitionSeason.id,
         title: "Other Tenant Locked Competition",
         description: "Used for cross-tenant access denial tests",
         status: "SCHEDULED",
@@ -729,7 +778,7 @@ async function main() {
   ];
 
   for (const link of worksheetLinks) {
-    const existingLink = await prisma.competitionWorksheet.findUnique({
+    const existingLink = await prisma.legacyCompetitionWorksheetLink.findUnique({
       where: {
         competitionId_worksheetId: {
           competitionId: link.competitionId,
@@ -739,23 +788,96 @@ async function main() {
     });
 
     if (!existingLink) {
-      await prisma.competitionWorksheet.create({
+      await prisma.legacyCompetitionWorksheetLink.create({
         data: link
       });
     }
   }
 
+  const competitionCourse = await prisma.competitionCourse.upsert({
+    where: {
+      competitionId_code: {
+        competitionId: competition.id,
+        code: "ABACUS"
+      }
+    },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      competitionId: competition.id,
+      name: "Abacus",
+      code: "ABACUS",
+      description: "Seed competition course",
+      isActive: true,
+      createdByUserId: superadminAuth.id
+    }
+  });
+
+  const competitionCourseLevel1 = await prisma.competitionCourseLevel.upsert({
+    where: {
+      competitionCourseId_levelId: {
+        competitionCourseId: competitionCourse.id,
+        levelId: level1.id
+      }
+    },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      competitionCourseId: competitionCourse.id,
+      levelId: level1.id,
+      levelNumber: level1.rank,
+      sortOrder: level1.rank,
+      isActive: true
+    }
+  });
+
+  const competitionCourseLevel2 = await prisma.competitionCourseLevel.upsert({
+    where: {
+      competitionCourseId_levelId: {
+        competitionCourseId: competitionCourse.id,
+        levelId: level2.id
+      }
+    },
+    update: {},
+    create: {
+      tenantId: tenant.id,
+      competitionCourseId: competitionCourse.id,
+      levelId: level2.id,
+      levelNumber: level2.rank,
+      sortOrder: level2.rank,
+      isActive: true
+    }
+  });
+
   const enrollments = [
-    { competitionId: competition.id, studentId: student1.id, tenantId: tenant.id },
-    { competitionId: competition.id, studentId: student2.id, tenantId: tenant.id }
+    {
+      tenantId: tenant.id,
+      competitionId: competition.id,
+      studentId: student1.id,
+      competitionCourseLevelId: competitionCourseLevel1.id,
+      enrolledLevelId: level1.id,
+      hierarchyNodeId: school.id,
+      createdByUserId: superadminAuth.id
+    },
+    {
+      tenantId: tenant.id,
+      competitionId: competition.id,
+      studentId: student2.id,
+      competitionCourseLevelId: competitionCourseLevel2.id,
+      enrolledLevelId: level2.id,
+      hierarchyNodeId: school.id,
+      createdByUserId: superadminAuth.id
+    }
   ];
 
   for (const enrollment of enrollments) {
     const existingEnrollment = await prisma.competitionEnrollment.findUnique({
       where: {
-        competitionId_studentId: {
+        tenantId_competitionId_studentId_competitionCourseLevelId: {
+          tenantId: enrollment.tenantId,
           competitionId: enrollment.competitionId,
-          studentId: enrollment.studentId
+          studentId: enrollment.studentId,
+          competitionCourseLevelId: enrollment.competitionCourseLevelId
         }
       }
     });

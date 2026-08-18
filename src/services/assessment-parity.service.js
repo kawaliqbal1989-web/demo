@@ -77,7 +77,7 @@ async function computeCompetitionParity({ tenantId, competitionId }) {
     }
   });
 
-  const legacyWorksheetCount = await prisma.competitionWorksheet.count({
+  const legacyWorksheetCount = await prisma.legacyCompetitionWorksheetLink.count({
     where: {
       tenantId,
       competitionId

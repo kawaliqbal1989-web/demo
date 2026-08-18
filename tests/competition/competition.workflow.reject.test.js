@@ -1,194 +1,79 @@
-import { authHeader, http, loginAs, prisma, randomId } from "../helpers/test-helpers.js";
+import { competitionsRouter } from "../../src/routes/competitions.routes.js";
 
-describe("COMPETITION WORKFLOW HARDENING", () => {
-  let tenant;
-  let school;
-  let level1;
+function routeLayer(method, path) {
+  return competitionsRouter.stack.find(
+    (layer) =>
+      layer.route?.path === path &&
+      Boolean(layer.route?.methods?.[method.toLowerCase()])
+  );
+}
 
-  let centerToken;
-  let franchiseToken;
-  let bpToken;
-  let superadminToken;
+function executeFirstGuard(layer, role) {
+  const req = { auth: { role } };
+  const output = { statusCode: null, body: null, nextCalled: false };
+  const res = {
+    status(statusCode) {
+      output.statusCode = statusCode;
+      return this;
+    },
+    json(body) {
+      output.body = body;
+      return this;
+    }
+  };
+  const next = () => {
+    output.nextCalled = true;
+  };
 
-  beforeAll(async () => {
-    const [centerLogin, franchiseLogin, bpLogin, superadminLogin] = await Promise.all([
-      loginAs({ email: "center.manager@abacusweb.local" }),
-      loginAs({ email: "franchise.manager@abacusweb.local" }),
-      loginAs({ email: "bp.manager@abacusweb.local" }),
-      loginAs({ email: "superadmin@abacusweb.local" })
-    ]);
+  layer.route.stack[0].handle(req, res, next);
+  return output;
+}
 
-    centerToken = centerLogin.body.data.access_token;
-    franchiseToken = franchiseLogin.body.data.access_token;
-    bpToken = bpLogin.body.data.access_token;
-    superadminToken = superadminLogin.body.data.access_token;
-
-    tenant = await prisma.tenant.findUniqueOrThrow({ where: { code: "DEFAULT" } });
-    school = await prisma.hierarchyNode.findUniqueOrThrow({
-      where: {
-        tenantId_code: {
-          tenantId: tenant.id,
-          code: "SCH-001"
-        }
-      }
-    });
-    level1 = await prisma.level.findFirstOrThrow({ where: { tenantId: tenant.id, rank: 1 } });
+describe("Current Competition workflow route contract", () => {
+  test("obsolete Competition-request transition routes are not exposed", () => {
+    expect(routeLayer("post", "/:id/forward-request")).toBeUndefined();
+    expect(routeLayer("post", "/:id/reject")).toBeUndefined();
   });
 
-  async function createCompetitionAsCenter() {
-    const title = `Comp ${randomId("wf")}`;
+  test("Teacher can forward only an enrollment list, never a direct Superadmin request", () => {
+    const layer = routeLayer("post", "/:id/enrollment-lists/:listId/forward");
+    expect(layer).toBeDefined();
+    expect(executeFirstGuard(layer, "TEACHER")).toMatchObject({
+      nextCalled: true,
+      statusCode: null
+    });
+  });
 
-    const createResponse = await http
-      .post("/api/competitions")
-      .set(authHeader(centerToken))
-      .send({
-        title,
-        description: "workflow hardening test",
-        startsAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-        endsAt: new Date(Date.now() + 7200 * 1000).toISOString(),
-        hierarchyNodeId: school.id,
-        levelId: level1.id
+  test("result publication and unpublication remain Superadmin-only", () => {
+    for (const path of ["/:id/results/publish", "/:id/results/unpublish"]) {
+      const layer = routeLayer("post", path);
+      expect(layer).toBeDefined();
+
+      expect(executeFirstGuard(layer, "SUPERADMIN").nextCalled).toBe(true);
+      expect(executeFirstGuard(layer, "BP")).toMatchObject({
+        nextCalled: false,
+        statusCode: 403,
+        body: expect.objectContaining({ error_code: "ROLE_FORBIDDEN" })
       });
-
-    expect(createResponse.status).toBe(201);
-    return createResponse.body.data.id;
-  }
-
-  test("reject requires reason (no partial writes)", async () => {
-    const competitionId = await createCompetitionAsCenter();
-
-    const rejectResponse = await http
-      .post(`/api/competitions/${competitionId}/reject`)
-      .set(authHeader(centerToken))
-      .send({});
-
-    expect(rejectResponse.status).toBe(400);
-    expect(rejectResponse.body.error_code).toBe("REJECT_REASON_REQUIRED");
-
-    const dbCompetition = await prisma.competition.findUniqueOrThrow({ where: { id: competitionId } });
-    expect(dbCompetition.workflowStage).toBe("CENTER_REVIEW");
-    expect(dbCompetition.rejectedAt).toBeNull();
-    expect(dbCompetition.rejectedByUserId).toBeNull();
-
-    const transitions = await prisma.competitionStageTransition.findMany({
-      where: {
-        tenantId: tenant.id,
-        competitionId
-      }
-    });
-
-    expect(transitions.length).toBe(0);
+      expect(executeFirstGuard(layer, "CENTER")).toMatchObject({
+        nextCalled: false,
+        statusCode: 403,
+        body: expect.objectContaining({ error_code: "ROLE_FORBIDDEN" })
+      });
+    }
   });
 
-  test("reject prevents further transitions", async () => {
-    const competitionId = await createCompetitionAsCenter();
+  test("operational result reads exclude Student accounts", () => {
+    for (const path of ["/:id/results", "/:id/results.csv", "/:id/leaderboard"]) {
+      const layer = routeLayer("get", path);
+      expect(layer).toBeDefined();
 
-    const rejectResponse = await http
-      .post(`/api/competitions/${competitionId}/reject`)
-      .set(authHeader(centerToken))
-      .send({ reason: "Insufficient details" });
-
-    expect(rejectResponse.status).toBe(200);
-    expect(rejectResponse.body.data.workflowStage).toBe("REJECTED");
-    expect(rejectResponse.body.data.rejectedAt).toBeTruthy();
-
-    const forwardAfterReject = await http
-      .post(`/api/competitions/${competitionId}/forward-request`)
-      .set(authHeader(centerToken));
-
-    expect(forwardAfterReject.status).toBe(409);
-    expect(forwardAfterReject.body.error_code).toBe("WORKFLOW_REJECTED");
-
-    const superadminForwardAfterReject = await http
-      .post(`/api/competitions/${competitionId}/forward-request`)
-      .set(authHeader(superadminToken));
-
-    expect(superadminForwardAfterReject.status).toBe(409);
-    expect(superadminForwardAfterReject.body.error_code).toBe("WORKFLOW_REJECTED");
-
-    const transitions = await prisma.competitionStageTransition.findMany({
-      where: {
-        tenantId: tenant.id,
-        competitionId
-      }
-    });
-
-    expect(transitions.length).toBe(1);
-    expect(transitions[0].action).toBe("REJECT");
-    expect(transitions[0].toStage).toBe("REJECTED");
-  });
-
-  test("backward/skip role transitions are denied", async () => {
-    const competitionId = await createCompetitionAsCenter();
-
-    const bpForward = await http
-      .post(`/api/competitions/${competitionId}/forward-request`)
-      .set(authHeader(bpToken));
-
-    expect(bpForward.status).toBe(409);
-    expect(bpForward.body.error_code).toBe("WORKFLOW_STAGE_CONFLICT");
-
-    const bpReject = await http
-      .post(`/api/competitions/${competitionId}/reject`)
-      .set(authHeader(bpToken))
-      .send({ reason: "Not my stage" });
-
-    expect(bpReject.status).toBe(409);
-    expect(bpReject.body.error_code).toBe("WORKFLOW_STAGE_CONFLICT");
-
-    const transitions = await prisma.competitionStageTransition.findMany({
-      where: {
-        tenantId: tenant.id,
-        competitionId
-      }
-    });
-
-    expect(transitions.length).toBe(0);
-  });
-
-  test("immutable transition log records forward + reject in order", async () => {
-    const competitionId = await createCompetitionAsCenter();
-
-    const forwardResponse = await http
-      .post(`/api/competitions/${competitionId}/forward-request`)
-      .set(authHeader(centerToken));
-
-    expect(forwardResponse.status).toBe(200);
-    expect(forwardResponse.body.data.workflowStage).toBe("FRANCHISE_REVIEW");
-
-    const rejectResponse = await http
-      .post(`/api/competitions/${competitionId}/reject`)
-      .set(authHeader(franchiseToken))
-      .send({ reason: "Missing paperwork" });
-
-    expect(rejectResponse.status).toBe(200);
-    expect(rejectResponse.body.data.workflowStage).toBe("REJECTED");
-
-    const transitions = await prisma.competitionStageTransition.findMany({
-      where: {
-        tenantId: tenant.id,
-        competitionId
-      },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }]
-    });
-
-    expect(transitions.length).toBe(2);
-
-    expect(transitions[0]).toMatchObject({
-      tenantId: tenant.id,
-      competitionId,
-      fromStage: "CENTER_REVIEW",
-      toStage: "FRANCHISE_REVIEW",
-      action: "FORWARD"
-    });
-
-    expect(transitions[1]).toMatchObject({
-      tenantId: tenant.id,
-      competitionId,
-      fromStage: "FRANCHISE_REVIEW",
-      toStage: "REJECTED",
-      action: "REJECT",
-      reason: "Missing paperwork"
-    });
+      expect(executeFirstGuard(layer, "TEACHER").nextCalled).toBe(true);
+      expect(executeFirstGuard(layer, "STUDENT")).toMatchObject({
+        nextCalled: false,
+        statusCode: 403,
+        body: expect.objectContaining({ error_code: "ROLE_FORBIDDEN" })
+      });
+    }
   });
 });

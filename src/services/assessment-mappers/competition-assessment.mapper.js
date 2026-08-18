@@ -21,7 +21,14 @@ function mapCompetitionToAssessment({ tenantId, competition, actorUserId }) {
   };
 }
 
-function mapCompetitionToAssessmentVersion({ tenantId, assessmentId, competition, actorUserId, versionNumber = 1, parentVersionId = null }) {
+function mapCompetitionToAssessmentVersion({
+  tenantId,
+  assessmentId,
+  competition,
+  actorUserId,
+  versionNumber = 1,
+  parentVersionId = null
+}) {
   const revisionPayload = {
     competition: {
       id: competition.id,
@@ -80,19 +87,30 @@ function mapCompetitionWorksheetsToAssessmentPapers({
   }));
 }
 
-function mapCompetitionEnrollmentsToAssessmentParticipants({ tenantId, assessmentVersionId, competitionId, competition = null, enrollments = [] }) {
+function mapCompetitionEnrollmentsToAssessmentParticipants({
+  tenantId,
+  assessmentVersionId,
+  competitionId,
+  competition = null,
+  enrollments = []
+}) {
   return enrollments.map((enrollment) => ({
     tenantId,
     assessmentVersionId,
     studentId: enrollment.studentId,
     participantType: "STUDENT",
     sourceEntityType: "COMPETITION",
-    sourceEntityId: competitionId,
-    sourceContainerType: null,
-    sourceContainerId: null,
-    levelId: competition?.levelId || null,
-    hierarchyNodeId: competition?.hierarchyNodeId || null,
-    teacherUserId: null,
+    sourceEntityId: enrollment.id,
+    sourceContainerType: "COMPETITION",
+    sourceContainerId: competitionId,
+    levelId:
+      enrollment.enrolledLevelId ||
+      enrollment.competitionCourseLevel?.levelId ||
+      competition?.levelId ||
+      null,
+    hierarchyNodeId:
+      enrollment.hierarchyNodeId || competition?.hierarchyNodeId || null,
+    teacherUserId: enrollment.sourceTeacherUserId || null,
     includedInAssessment: Boolean(enrollment.isActive),
     participantStatus: enrollment.isActive ? "ACTIVE" : "EXCLUDED",
     legacyStatusMirror: enrollment.isActive ? "ACTIVE" : "INACTIVE",

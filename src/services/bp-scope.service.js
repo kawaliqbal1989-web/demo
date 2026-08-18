@@ -180,7 +180,8 @@ async function resolveBusinessPartnerForUser({ tenantId, userId, tx = prisma, fo
       where: {
         tenantId,
         code: username,
-        isActive: true
+        isActive: true,
+        status: "ACTIVE"
       },
       select,
       orderBy: { createdAt: "desc" }
@@ -192,7 +193,8 @@ async function resolveBusinessPartnerForUser({ tenantId, userId, tx = prisma, fo
       where: {
         tenantId,
         hierarchyNodeId: user.hierarchyNodeId,
-        isActive: true
+        isActive: true,
+        status: "ACTIVE"
       },
       select,
       orderBy: { createdAt: "desc" }
@@ -206,7 +208,8 @@ async function resolveBusinessPartnerForUser({ tenantId, userId, tx = prisma, fo
         where: {
           tenantId,
           contactEmail: email,
-          isActive: true
+          isActive: true,
+          status: "ACTIVE"
         },
         select,
         orderBy: { createdAt: "desc" }
@@ -214,7 +217,7 @@ async function resolveBusinessPartnerForUser({ tenantId, userId, tx = prisma, fo
     }
   }
 
-  const resolvedPartner = businessPartner?.isActive ? businessPartner : null;
+  const resolvedPartner = businessPartner?.isActive && businessPartner?.status === "ACTIVE" ? businessPartner : null;
 
   if (supportsCache(tx)) {
     setCacheValue(identityCache, cacheKey, resolvedPartner);
@@ -240,39 +243,35 @@ async function resolveBusinessPartnerById({ tenantId, businessPartnerId, tx = pr
     where: {
       tenantId,
       id: businessPartnerId,
-      isActive: true
+      isActive: true,
+      status: "ACTIVE"
     },
     select: selectBusinessPartnerFields()
   });
 }
 
 async function resolveAccessibleFranchiseScope({ tenantId, businessPartnerId, tx = prisma, now = new Date() }) {
+  const explicitScopeQuery = tx.businessPartnerFranchise?.findMany
+    ? tx.businessPartnerFranchise.findMany({
+        where: {
+          tenantId,
+          businessPartnerId
+        },
+        select: {
+          franchiseId: true,
+          status: true,
+          activeFrom: true,
+          activeTo: true
+        }
+      })
+    : Promise.resolve([]);
+
   const [explicitRows, franchiseProfiles] = await Promise.all([
-    tx.businessPartnerFranchise.findMany({
-      where: {
-        tenantId,
-        businessPartnerId
-      },
-      select: {
-        franchiseId: true,
-        status: true,
-        activeFrom: true,
-        activeTo: true
-      }
-    }),
+    explicitScopeQuery,
     tx.franchiseProfile.findMany({
       where: {
         tenantId,
-        OR: [
-          { businessPartnerId },
-          {
-            bpOwnerships: {
-              some: {
-                businessPartnerId
-              }
-            }
-          }
-        ]
+        businessPartnerId
       },
       select: {
         id: true,
@@ -349,18 +348,20 @@ async function resolveAccessibleCenterScope({
 } = {}) {
   const accessibleFranchiseIds = dedupeIds(franchiseIds);
 
-  const explicitRows = await tx.businessPartnerCenterScope.findMany({
-    where: {
-      tenantId,
-      businessPartnerId
-    },
-    select: {
-      centerId: true,
-      status: true,
-      activeFrom: true,
-      activeTo: true
-    }
-  });
+  const explicitRows = tx.businessPartnerCenterScope?.findMany
+    ? await tx.businessPartnerCenterScope.findMany({
+        where: {
+          tenantId,
+          businessPartnerId
+        },
+        select: {
+          centerId: true,
+          status: true,
+          activeFrom: true,
+          activeTo: true
+        }
+      })
+    : [];
   const explicitCenterIds = dedupeIds(explicitRows.map((row) => row.centerId));
 
   const centerWhere = {

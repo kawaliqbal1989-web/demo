@@ -3,7 +3,13 @@ import { asyncHandler } from "../utils/async-handler.js";
 import { versionAssetUrl } from "../utils/request-url.js";
 
 function readCertificateBrandingSnapshot(cert) {
-  return cert?.brandingSnapshot || cert?.metadata?.brandingSnapshot || null;
+  let metadata = null;
+  try {
+    metadata = typeof cert?.metadata === "string" ? JSON.parse(cert.metadata) : cert?.metadata;
+  } catch {
+    metadata = null;
+  }
+  return cert?.brandingSnapshot || metadata?.brandingSnapshot || null;
 }
 
 function formatStudentName(student) {
@@ -30,6 +36,8 @@ const verifyCertificate = asyncHandler(async (req, res) => {
       revokedAt: true,
       levelSnapshot: true,
       brandingSnapshot: true,
+      competitionSnapshot: true,
+      resultSnapshot: true,
       metadata: true,
       student: {
         select: { firstName: true, lastName: true }
@@ -58,7 +66,13 @@ const verifyCertificate = asyncHandler(async (req, res) => {
   }
 
   const brandingSnapshot = readCertificateBrandingSnapshot(cert);
-  const levelSnapshot = cert.levelSnapshot || cert.metadata?.academicSnapshot?.level || null;
+  let metadata = null;
+  try {
+    metadata = typeof cert.metadata === "string" ? JSON.parse(cert.metadata) : cert.metadata;
+  } catch {
+    metadata = null;
+  }
+  const levelSnapshot = cert.levelSnapshot || metadata?.academicSnapshot?.level || null;
 
   return res.apiSuccess("Certificate verified", {
     certificateNumber: cert.certificateNumber,
@@ -72,7 +86,9 @@ const verifyCertificate = asyncHandler(async (req, res) => {
       cert.tenant?.businessPartners?.[0]?.logoUrl,
       cert.tenant?.businessPartners?.[0]?.updatedAt
     ) || null,
-    brandingSnapshot
+    brandingSnapshot,
+    competition: cert.competitionSnapshot || metadata?.competitionSnapshot || null,
+    result: cert.resultSnapshot || metadata?.resultSnapshot || null
   });
 });
 

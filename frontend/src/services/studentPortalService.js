@@ -125,7 +125,19 @@ async function createStudentAbacusPracticeWorksheet({
   });
 }
 
-async function createStudentPracticeWorksheet({ totalQuestions, timeLimitSeconds, operations, topics } = {}) {
+async function createStudentPracticeWorksheet({
+  totalQuestions,
+  timeLimitSeconds,
+  operations,
+  topics,
+  masteryChallenge = false
+} = {}) {
+  if (masteryChallenge === true) {
+    return apiClient.post("/student/practice-worksheets", {
+      masteryChallenge: true
+    });
+  }
+
   return apiClient.post("/student/practice-worksheets", {
     totalQuestions,
     timeLimitSeconds,

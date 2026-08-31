@@ -1,3 +1,4 @@
+import { awardDailyPrimaryArenaXp } from "./arena-xp.service.js";
 import { prisma } from "../lib/prisma.js";
 import crypto from "crypto";
 import { detectAndFlagAbuse } from "./abuse-detection.service.js";
@@ -259,6 +260,39 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
       });
     }
 
+    const finalizedSubmission = await tx.worksheetSubmission.findFirst({
+      where: {
+        tenantId,
+        worksheetId,
+        studentId,
+        finalSubmittedAt: {
+          not: null
+        }
+      },
+      orderBy: {
+        attemptNo: "desc"
+      },
+      select: {
+        id: true
+      }
+    });
+
+    if (!finalizedSubmission) {
+      const error = new Error("Finalized worksheet submission not found");
+      error.statusCode = 500;
+      error.errorCode = "FINALIZED_SUBMISSION_NOT_FOUND";
+      throw error;
+    }
+
+    const arenaXpAward = await awardDailyPrimaryArenaXp({
+      tx,
+      tenantId,
+      studentId,
+      worksheet,
+      submissionId: finalizedSubmission.id,
+      earnedAt: now
+    });
+
     const abuseDetection = await detectAndFlagAbuse({
       tx,
       tenantId,
@@ -277,6 +311,7 @@ async function submitWorksheet({ worksheetId, studentId, tenantId, answers, allo
       completionTime: effectiveCompletionTimeSeconds,
       passed,
       passThreshold,
+      arenaXpAward,
       abuseFlags: abuseDetection.createdFlags || []
     };
   });

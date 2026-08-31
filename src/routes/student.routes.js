@@ -36,6 +36,10 @@ import {
   createStudentReassignmentRequest,
   listStudentReassignmentRequests,
   cancelStudentReassignmentRequest,
+  createStudentArenaMobileTask,
+  getStudentArenaMobileTaskStatus,
+  listStudentArenaSessions,
+  createStudentArenaSession,
 } from "../controllers/student.controller.js";
 import {
   aiPlayground,
@@ -149,6 +153,38 @@ studentRouter.get(
   "/exams",
   auditAction("STUDENT_LIST_EXAMS", "STUDENT", (req) => req.student.id),
   listStudentExamsOverview
+);
+
+studentRouter.get(
+  "/arena/sessions",
+  auditAction("STUDENT_LIST_ARENA_SESSIONS", "STUDENT", (req) => req.student.id),
+  listStudentArenaSessions
+);
+
+studentRouter.post(
+  "/arena/sessions",
+  auditAction("STUDENT_CREATE_ARENA_SESSION", "STUDENT", (req) => req.student.id),
+  createStudentArenaSession
+);
+
+studentRouter.post(
+  "/arena/mobile-tasks",
+  auditAction(
+    "STUDENT_CREATE_ARENA_MOBILE_TASK",
+    "ARENA_MOBILE_TASK",
+    (_req, res) => res.locals.entityId || null
+  ),
+  createStudentArenaMobileTask
+);
+
+studentRouter.get(
+  "/arena/mobile-tasks/:taskId/status",
+  auditAction(
+    "STUDENT_VIEW_ARENA_MOBILE_TASK_STATUS",
+    "ARENA_MOBILE_TASK",
+    (req) => req.params.taskId
+  ),
+  getStudentArenaMobileTaskStatus
 );
 
 studentRouter.get(

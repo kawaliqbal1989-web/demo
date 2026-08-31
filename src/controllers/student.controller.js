@@ -3,6 +3,8 @@ import crypto from "crypto";
 import { asyncHandler } from "../utils/async-handler.js";
 import { parsePagination } from "../utils/pagination.js";
 import { submitWorksheet } from "../services/worksheet-submission.service.js";
+import { getStudentArenaXpSummary } from "../services/arena-xp.service.js";
+import { generateWorksheetWithQuestions, assignWorksheet } from "../services/exam-worksheets.service.js";
 import { getLevelPerformance, getImprovementTrend } from "../services/student-performance.service.js";
 import {
   createReassignmentRequest as svcCreateReassignment,
@@ -16,6 +18,10 @@ import {
 import { logger } from "../lib/logger.js";
 import { isSchemaMismatchError } from "../utils/schema-mismatch.js";
 import { resolveEffectiveStudentLevel } from "../utils/student-level.js";
+import {
+  createArenaMobileTask as createArenaMobileTaskService,
+  getArenaMobileTaskStatus as getArenaMobileTaskStatusService
+} from "../services/arena-mobile-task.service.js";
 
 function fullName(student) {
   const first = String(student?.firstName || "").trim();
@@ -258,7 +264,13 @@ const getStudentMe = asyncHandler(async (req, res) => {
 
   const { effectiveLevel, effectiveLevelId } = resolveEffectiveStudentLevel(student);
 
-  const [activeEnrollmentsCountResult, assignedWorksheetsCountResult, userResult] = await Promise.allSettled([
+  const [
+    activeEnrollmentsCountResult,
+    assignedWorksheetsCountResult,
+    userResult,
+    levelCompletionsResult,
+    progressionHistoryResult
+  ] = await Promise.allSettled([
     prisma.enrollment.count({
       where: {
         tenantId: req.auth.tenantId,
@@ -284,6 +296,54 @@ const getStudentMe = asyncHandler(async (req, res) => {
         mustChangePassword: true,
         username: true
       }
+    }),
+    prisma.studentLevelCompletion.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id
+      },
+      orderBy: [{ completedAt: "asc" }, { createdAt: "asc" }],
+      select: {
+        levelId: true,
+        completedAt: true,
+        level: {
+          select: {
+            id: true,
+            name: true,
+            rank: true
+          }
+        }
+      }
+    }),
+    prisma.studentLevelProgressionHistory.findMany({
+      where: {
+        tenantId: req.auth.tenantId,
+        studentId: student.id
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: {
+        id: true,
+        fromLevelId: true,
+        toLevelId: true,
+        score: true,
+        passed: true,
+        reason: true,
+        createdAt: true,
+        fromLevel: {
+          select: {
+            id: true,
+            name: true,
+            rank: true
+          }
+        },
+        toLevel: {
+          select: {
+            id: true,
+            name: true,
+            rank: true
+          }
+        }
+      }
     })
   ]);
 
@@ -294,6 +354,31 @@ const getStudentMe = asyncHandler(async (req, res) => {
     ? Number(assignedWorksheetsCountResult.value) || 0
     : 0;
   const user = userResult.status === "fulfilled" ? userResult.value : null;
+
+  const completedLevels = levelCompletionsResult.status === "fulfilled"
+    ? levelCompletionsResult.value.map((row) => ({
+        levelId: row.levelId,
+        levelName: row.level?.name || null,
+        levelRank: row.level?.rank ?? null,
+        completedAt: row.completedAt
+      }))
+    : [];
+
+  const progressionHistory = progressionHistoryResult.status === "fulfilled"
+    ? progressionHistoryResult.value.map((row) => ({
+        id: row.id,
+        fromLevelId: row.fromLevelId,
+        fromLevelName: row.fromLevel?.name || null,
+        fromLevelRank: row.fromLevel?.rank ?? null,
+        toLevelId: row.toLevelId,
+        toLevelName: row.toLevel?.name || null,
+        toLevelRank: row.toLevel?.rank ?? null,
+        score: row.score == null ? null : Number(row.score),
+        passed: Boolean(row.passed),
+        reason: row.reason || null,
+        progressedAt: row.createdAt
+      }))
+    : [];
 
   // fetch any explicit assigned courses (multi-assign feature)
   let assignedCourseRows = [];
@@ -314,6 +399,11 @@ const getStudentMe = asyncHandler(async (req, res) => {
     courseName: r.course.name || null
   }));
 
+  const arenaXp = await getStudentArenaXpSummary({
+    tenantId: req.auth.tenantId,
+    studentId: student.id
+  });
+
   return res.apiSuccess("Student profile fetched", {
     studentId: student.id,
     studentCode: student.admissionNo,
@@ -325,6 +415,9 @@ const getStudentMe = asyncHandler(async (req, res) => {
     levelId: effectiveLevelId,
     levelTitle: effectiveLevel?.name || null,
     levelRank: effectiveLevel?.rank ?? null,
+    arenaXp,
+    completedLevels,
+    progressionHistory,
     activeEnrollmentsCount,
     assignedWorksheetsCount,
     courseId: student.course?.id || null,
@@ -2594,6 +2687,7 @@ const createStudentPracticeWorksheet = asyncHandler(async (req, res) => {
     featureKey: "PRACTICE"
   });
 
+  const masteryChallenge = req.body?.masteryChallenge === true;
   const levelId = req.student.levelId;
   const totalQuestions = normalizePositiveInt(req.body?.totalQuestions);
   const timeLimitSeconds = normalizePositiveInt(req.body?.timeLimitSeconds);
@@ -2608,6 +2702,56 @@ const createStudentPracticeWorksheet = asyncHandler(async (req, res) => {
 
   if (!level) {
     return res.apiError(404, "Student level not found", "LEVEL_NOT_FOUND");
+  }
+
+  if (masteryChallenge) {
+    // Mastery is formal academic evidence, but it is NOT a promotion action.
+    // All challenge configuration is derived server-side from the current level's
+    // existing LevelRule + WorksheetTemplate + QuestionBank via generateWorksheet().
+    const seed = [
+      "MASTERY",
+      req.auth.tenantId,
+      req.student.id,
+      levelId,
+      Date.now(),
+      crypto.randomBytes(12).toString("hex")
+    ].join(":");
+
+    const created = await prisma.$transaction(async (tx) => {
+      const worksheet = await generateWorksheetWithQuestions({
+        tx,
+        tenantId: req.auth.tenantId,
+        levelId,
+        seed,
+        title: `${level.name} Mastery Challenge`,
+        description: `Arena mastery challenge for ${level.name}`,
+        createdByUserId: req.auth.userId,
+        generationMode: "PRACTICE",
+        timeLimitSecondsOverride: null,
+        examCycleId: null
+      });
+
+      await assignWorksheet({
+        tx,
+        tenantId: req.auth.tenantId,
+        worksheetId: worksheet.id,
+        studentId: req.student.id,
+        createdByUserId: req.auth.userId
+      });
+
+      return worksheet;
+    });
+
+    return res.apiSuccess(
+      "Mastery challenge created",
+      {
+        worksheetId: created.id,
+        levelId: created.levelId,
+        timeLimitSeconds: created.timeLimitSeconds,
+        masteryChallenge: true
+      },
+      201
+    );
   }
 
   if (!totalQuestions) {
@@ -4276,11 +4420,524 @@ const cancelStudentReassignmentRequest = asyncHandler(async (req, res) => {
   return res.apiSuccess("Request cancelled", result.data);
 });
 
+
+const ARENA_ACTIVITY_KEYS = new Set([
+  "flash-cards",
+  "flash-anzan",
+  "audio-anzan",
+  "mental",
+  "speed",
+  "smart-coach",
+  "adaptive-practice",
+  "practice-mistakes"
+]);
+
+function normalizeArenaPositiveInt(value, field, { min = 0, max = 10000 } = {}) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < min || number > max) {
+    return { error: `${field} must be an integer between ${min} and ${max}` };
+  }
+  return { value: number };
+}
+
+function normalizeArenaMode(value) {
+  if (value === undefined || value === null || value === "") {
+    return { value: null };
+  }
+  const mode = String(value).trim();
+  if (!mode || mode.length > 64) {
+    return { error: "mode must be between 1 and 64 characters" };
+  }
+  return { value: mode };
+}
+
+function normalizeArenaMetrics(value) {
+  if (value === undefined || value === null) {
+    return { value: null };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    return { error: "metrics must be a JSON object" };
+  }
+
+  let serialized;
+  try {
+    serialized = JSON.stringify(value);
+  } catch {
+    return { error: "metrics must be valid JSON" };
+  }
+
+  if (serialized.length > 8192) {
+    return { error: "metrics payload is too large" };
+  }
+
+  return { value };
+}
+
+function normalizeArenaStartedAt(value) {
+  if (value === undefined || value === null || value === "") {
+    return { value: null };
+  }
+
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return { error: "startedAt must be a valid date/time" };
+  }
+
+  const now = Date.now();
+  if (date.getTime() > now + 60_000) {
+    return { error: "startedAt cannot be in the future" };
+  }
+  if (date.getTime() < now - 24 * 60 * 60 * 1000) {
+    return { error: "startedAt cannot be more than 24 hours old" };
+  }
+
+  return { value: date };
+}
+
+const ARENA_MOBILE_ACTIVITY_KEYS = new Set([
+  "mental",
+  "flash-cards"
+]);
+
+const MENTAL_MOBILE_STAGES = new Set([
+  "full",
+  "faded",
+  "brief",
+  "mental"
+]);
+
+const MENTAL_MOBILE_ROUND_COUNTS = new Set([
+  5,
+  10,
+  20
+]);
+
+const MENTAL_MOBILE_PREVIEW_DURATIONS = new Set([
+  3000,
+  2000,
+  1000,
+  700,
+  500
+]);
+
+function normalizeMentalMobileTaskConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "config must be a JSON object" };
+  }
+
+  const allowedKeys = new Set([
+    "stage",
+    "digits",
+    "roundCount",
+    "previewDuration"
+  ]);
+
+  const unknownKeys = Object.keys(value).filter((key) => !allowedKeys.has(key));
+  if (unknownKeys.length) {
+    return {
+      error: `config contains unsupported field(s): ${unknownKeys.join(", ")}`
+    };
+  }
+
+  const stage = String(value.stage || "").trim().toLowerCase();
+  if (!MENTAL_MOBILE_STAGES.has(stage)) {
+    return {
+      error: `config.stage must be one of: ${Array.from(MENTAL_MOBILE_STAGES).join(", ")}`
+    };
+  }
+
+  const digits = Number(value.digits);
+  if (!Number.isInteger(digits) || digits < 1 || digits > 5) {
+    return { error: "config.digits must be an integer between 1 and 5" };
+  }
+
+  const roundCount = Number(value.roundCount);
+  if (!Number.isInteger(roundCount) || !MENTAL_MOBILE_ROUND_COUNTS.has(roundCount)) {
+    return { error: "config.roundCount must be one of: 5, 10, 20" };
+  }
+
+  const previewDuration = Number(value.previewDuration);
+  if (
+    !Number.isInteger(previewDuration) ||
+    !MENTAL_MOBILE_PREVIEW_DURATIONS.has(previewDuration)
+  ) {
+    return {
+      error: "config.previewDuration must be one of: 3000, 2000, 1000, 700, 500"
+    };
+  }
+
+  return {
+    value: {
+      stage,
+      digits,
+      roundCount,
+      previewDuration
+    }
+  };
+}
+
+
+const FLASH_CARDS_MOBILE_MODES = new Set([
+  "number-flash",
+  "abacus-flash",
+  "abacus-auto",
+
+  // Legacy ids remain accepted so already-issued QR tasks do not break.
+  "build-number",
+  "operation-flash"
+]);
+
+const FLASH_CARDS_MOBILE_CARD_COUNTS = new Set([
+  5,
+  10,
+  20
+]);
+
+const FLASH_CARDS_MOBILE_DURATIONS = new Set([
+  3000,
+  2000,
+  1000,
+  500
+]);
+
+const FLASH_CARDS_MOBILE_OPERATIONS = new Set([
+  "addition",
+  "subtraction",
+  "mixed"
+]);
+
+function normalizeFlashCardsMobileTaskConfig(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { error: "config must be a JSON object" };
+  }
+
+  const allowedKeys = new Set([
+    "mode",
+    "digits",
+    "cardCount",
+    "flashDuration",
+    "operationMode"
+  ]);
+
+  const unknownKeys = Object.keys(value).filter((key) => !allowedKeys.has(key));
+  if (unknownKeys.length) {
+    return {
+      error: `config contains unsupported field(s): ${unknownKeys.join(", ")}`
+    };
+  }
+
+  const mode = String(value.mode || "").trim().toLowerCase();
+  if (!FLASH_CARDS_MOBILE_MODES.has(mode)) {
+    return {
+      error: `config.mode must be one of: ${Array.from(FLASH_CARDS_MOBILE_MODES).join(", ")}`
+    };
+  }
+
+  const digits = Number(value.digits);
+  if (!Number.isInteger(digits) || digits < 1 || digits > 10) {
+    return { error: "config.digits must be an integer between 1 and 10" };
+  }
+
+  const cardCount = Number(value.cardCount);
+  if (!Number.isInteger(cardCount) || !FLASH_CARDS_MOBILE_CARD_COUNTS.has(cardCount)) {
+    return { error: "config.cardCount must be one of: 5, 10, 20" };
+  }
+
+  const flashDuration = Number(value.flashDuration);
+  if (
+    !Number.isInteger(flashDuration) ||
+    !FLASH_CARDS_MOBILE_DURATIONS.has(flashDuration)
+  ) {
+    return {
+      error: "config.flashDuration must be one of: 3000, 2000, 1000, 500"
+    };
+  }
+
+  const operationMode = String(value.operationMode || "").trim().toLowerCase();
+  if (!FLASH_CARDS_MOBILE_OPERATIONS.has(operationMode)) {
+    return {
+      error: `config.operationMode must be one of: ${Array.from(FLASH_CARDS_MOBILE_OPERATIONS).join(", ")}`
+    };
+  }
+
+  return {
+    value: {
+      mode,
+      digits,
+      cardCount,
+      flashDuration,
+      operationMode
+    }
+  };
+}
+
+function normalizeArenaMobileTaskConfig(activityKey, value) {
+  if (activityKey === "mental") {
+    return normalizeMentalMobileTaskConfig(value);
+  }
+
+  if (activityKey === "flash-cards") {
+    return normalizeFlashCardsMobileTaskConfig(value);
+  }
+
+  return { error: "Unsupported Arena mobile activity" };
+}
+
+const createStudentArenaMobileTask = asyncHandler(async (req, res) => {
+  const tenantId = req.auth.tenantId;
+  const studentId = req.student.id;
+  const activityKey = String(req.body?.activityKey || "").trim().toLowerCase();
+
+  if (!ARENA_MOBILE_ACTIVITY_KEYS.has(activityKey)) {
+    return res.apiError(
+      400,
+      `activityKey must be one of: ${Array.from(ARENA_MOBILE_ACTIVITY_KEYS).join(", ")}`,
+      "VALIDATION_ERROR"
+    );
+  }
+
+  const config = normalizeArenaMobileTaskConfig(
+    activityKey,
+    req.body?.config
+  );
+  if (config.error) {
+    return res.apiError(400, config.error, "VALIDATION_ERROR");
+  }
+
+  const created = await createArenaMobileTaskService({
+    tenantId,
+    studentId,
+    activityKey,
+    mode:
+      activityKey === "mental"
+        ? config.value.stage
+        : config.value.mode,
+    config: config.value
+  });
+
+  res.locals.entityId = created.id;
+
+  return res.apiSuccess(
+    "Arena mobile task created",
+    created,
+    201
+  );
+});
+
+const getStudentArenaMobileTaskStatus = asyncHandler(async (req, res) => {
+  const tenantId = req.auth.tenantId;
+  const studentId = req.student.id;
+  const taskId = String(req.params.taskId || "").trim();
+
+  if (!taskId) {
+    return res.apiError(
+      400,
+      "taskId is required",
+      "VALIDATION_ERROR"
+    );
+  }
+
+  const task = await getArenaMobileTaskStatusService({
+    tenantId,
+    studentId,
+    taskId
+  });
+
+  if (!task) {
+    return res.apiError(
+      404,
+      "Arena mobile task not found",
+      "ARENA_MOBILE_TASK_NOT_FOUND"
+    );
+  }
+
+  return res.apiSuccess(
+    "Arena mobile task status",
+    task
+  );
+});
+
+const listStudentArenaSessions = asyncHandler(async (req, res) => {
+  const tenantId = req.auth.tenantId;
+  const studentId = req.student.id;
+
+  const activityKeys = Array.from(
+    new Set(
+      String(req.query?.activityKeys || "")
+        .split(",")
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+
+  if (!activityKeys.length) {
+    return res.apiError(
+      400,
+      "activityKeys is required",
+      "VALIDATION_ERROR"
+    );
+  }
+
+  const invalidActivityKeys = activityKeys.filter(
+    (activityKey) => !ARENA_ACTIVITY_KEYS.has(activityKey)
+  );
+
+  if (invalidActivityKeys.length) {
+    return res.apiError(
+      400,
+      `Unsupported activityKey(s): ${invalidActivityKeys.join(", ")}`,
+      "VALIDATION_ERROR"
+    );
+  }
+
+  if (activityKeys.length > 8) {
+    return res.apiError(
+      400,
+      "activityKeys may contain at most 8 values",
+      "VALIDATION_ERROR"
+    );
+  }
+
+  const rawLimit = req.query?.limit ?? 20;
+  const limit = Number(rawLimit);
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    return res.apiError(
+      400,
+      "limit must be an integer between 1 and 50",
+      "VALIDATION_ERROR"
+    );
+  }
+
+  const sessions = await prisma.arenaActivitySession.findMany({
+    where: {
+      tenantId,
+      studentId,
+      activityKey: {
+        in: activityKeys
+      }
+    },
+    orderBy: {
+      completedAt: "desc"
+    },
+    take: limit,
+    select: {
+      activityKey: true,
+      metrics: true,
+      completedAt: true
+    }
+  });
+
+  return res.apiSuccess(
+    "Arena sessions",
+    sessions
+  );
+});
+
+const createStudentArenaSession = asyncHandler(async (req, res) => {
+  const tenantId = req.auth.tenantId;
+  const studentId = req.student.id;
+  const activityKey = String(req.body?.activityKey || "").trim().toLowerCase();
+
+  if (!ARENA_ACTIVITY_KEYS.has(activityKey)) {
+    return res.apiError(
+      400,
+      `activityKey must be one of: ${Array.from(ARENA_ACTIVITY_KEYS).join(", ")}`,
+      "VALIDATION_ERROR"
+    );
+  }
+
+  const attempts = normalizeArenaPositiveInt(req.body?.attemptCount, "attemptCount", {
+    min: 1,
+    max: 10000
+  });
+  if (attempts.error) {
+    return res.apiError(400, attempts.error, "VALIDATION_ERROR");
+  }
+
+  const correct = normalizeArenaPositiveInt(req.body?.correctCount, "correctCount", {
+    min: 0,
+    max: attempts.value
+  });
+  if (correct.error) {
+    return res.apiError(400, correct.error, "VALIDATION_ERROR");
+  }
+
+  const duration =
+    req.body?.durationMs === undefined || req.body?.durationMs === null
+      ? { value: null }
+      : normalizeArenaPositiveInt(req.body.durationMs, "durationMs", {
+          min: 0,
+          max: 86_400_000
+        });
+  if (duration.error) {
+    return res.apiError(400, duration.error, "VALIDATION_ERROR");
+  }
+
+  const mode = normalizeArenaMode(req.body?.mode);
+  if (mode.error) {
+    return res.apiError(400, mode.error, "VALIDATION_ERROR");
+  }
+
+  const metrics = normalizeArenaMetrics(req.body?.metrics);
+  if (metrics.error) {
+    return res.apiError(400, metrics.error, "VALIDATION_ERROR");
+  }
+
+  const startedAt = normalizeArenaStartedAt(req.body?.startedAt);
+  if (startedAt.error) {
+    return res.apiError(400, startedAt.error, "VALIDATION_ERROR");
+  }
+
+  const accuracy = Math.round((correct.value / attempts.value) * 10000) / 100;
+
+  const created = await prisma.arenaActivitySession.create({
+    data: {
+      tenantId,
+      studentId,
+      activityKey,
+      mode: mode.value,
+      attemptCount: attempts.value,
+      correctCount: correct.value,
+      accuracy,
+      durationMs: duration.value,
+      metrics: metrics.value,
+      startedAt: startedAt.value
+    },
+    select: {
+      id: true,
+      activityKey: true,
+      mode: true,
+      attemptCount: true,
+      correctCount: true,
+      accuracy: true,
+      durationMs: true,
+      metrics: true,
+      startedAt: true,
+      completedAt: true,
+      createdAt: true
+    }
+  });
+
+  return res.apiSuccess(
+    "Arena session recorded",
+    {
+      ...created,
+      accuracy: created.accuracy === null ? null : Number(created.accuracy)
+    },
+    201
+  );
+});
+
 export {
   getStudentMe,
   listStudentEnrollments,
   listStudentExamEnrollments,
   listStudentExamsOverview,
+  createStudentArenaMobileTask,
+  getStudentArenaMobileTaskStatus,
+  listStudentArenaSessions,
+  createStudentArenaSession,
   listStudentMockTests,
   getStudentMockTest,
   startStudentMockTestAttempt,

@@ -857,6 +857,9 @@ model Tenant {
   studentMilestones                      StudentMilestone[]
   parentStudentLinks                     ParentStudentLink[]
   studentEngagementSnapshots             StudentEngagementSnapshot[]
+  arenaActivitySessions                  ArenaActivitySession[]
+  arenaXpEvents                          StudentArenaXpEvent[]
+  arenaMobileTasks                      ArenaMobileTask[]
   reportExportJobs                       ReportExportJob[]                  @relation("ReportExportJobsByTenant")
   reportExportArtifacts                  ReportExportArtifact[]             @relation("ReportExportArtifactsByTenant")
   reportExportSchedules                  ReportExportSchedule[]             @relation("ReportExportSchedulesByTenant")
@@ -1653,6 +1656,9 @@ model Student {
   milestones                    StudentMilestone[]
   parentLinks                   ParentStudentLink[]                @relation("ParentStudentLinkStudent")
   engagementSnapshots           StudentEngagementSnapshot[]
+  arenaActivitySessions         ArenaActivitySession[]
+  arenaXpEvents                 StudentArenaXpEvent[]
+  arenaMobileTasks             ArenaMobileTask[]
   assessmentParticipants        AssessmentParticipant[]
   assessmentPaperSourceLinks    AssessmentPaper[]                  @relation("AssessmentPaperSourceStudent")
 
@@ -4890,6 +4896,79 @@ model StudentMilestone {
   @@unique([tenantId, studentId, key])
   @@index([tenantId, studentId, earnedAt])
    @@map("studentmilestone")
+}
+
+model ArenaActivitySession {
+  id           String    @id @default(cuid())
+  tenantId     String
+  studentId    String
+  activityKey  String
+  mode         String?
+  attemptCount Int       @default(0)
+  correctCount Int       @default(0)
+  accuracy     Decimal?  @db.Decimal(5, 2)
+  durationMs   Int?
+  metrics      Json?
+  startedAt    DateTime?
+  completedAt  DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  mobileTask ArenaMobileTask?
+
+  @@index([tenantId, studentId, completedAt], map: "aas_t_s_ct_i")
+  @@index([tenantId, studentId, activityKey, completedAt], map: "aas_t_s_a_ct_i")
+  @@index([tenantId, activityKey, completedAt], map: "aas_t_a_ct_i")
+  @@map("arenaactivitysession")
+}
+
+model StudentArenaXpEvent {
+  id         String   @id @default(cuid())
+  tenantId   String
+  studentId  String
+  eventKey   String
+  sourceType String
+  sourceId   String
+  xp         Int
+  earnedAt   DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, studentId, eventKey], map: "saxe_t_s_ek_uq")
+  @@index([tenantId, studentId, earnedAt], map: "saxe_t_s_ea_i")
+  @@index([tenantId, sourceType, sourceId], map: "saxe_t_st_sid_i")
+  @@map("studentarenaxpevent")
+}
+
+model ArenaMobileTask {
+  id                     String    @id @default(cuid())
+  tenantId               String
+  studentId              String
+  activityKey            String
+  mode                   String?
+  config                 Json
+  handoffTokenHash       String    @unique(map: "amt_handoff_token_uq")
+  claimTokenHash         String?   @unique(map: "amt_claim_token_uq")
+  expiresAt              DateTime
+  claimedAt              DateTime?
+  startedAt              DateTime?
+  submittedAt            DateTime?
+  cancelledAt            DateTime?
+  arenaActivitySessionId String?   @unique(map: "amt_session_uq")
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  student              Student               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  arenaActivitySession ArenaActivitySession? @relation(fields: [arenaActivitySessionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, studentId, createdAt], map: "amt_t_s_cr_i")
+  @@index([tenantId, studentId, expiresAt], map: "amt_t_s_ex_i")
+  @@index([expiresAt], map: "amt_expiry_i")
+  @@map("arenamobiletask")
 }
 
 model ParentStudentLink {

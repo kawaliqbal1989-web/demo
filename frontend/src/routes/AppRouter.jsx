@@ -146,6 +146,14 @@ import { StudentWorksheetsPage } from "../modules/student/StudentWorksheetsPage"
 import { StudentWorksheetAttemptPage } from "../modules/student/StudentWorksheetAttemptPage";
 import { StudentPracticeWorksheetPage } from "../modules/student/StudentPracticeWorksheetPage";
 import { StudentAbacusPracticeWorksheetPage } from "../modules/student/StudentAbacusPracticeWorksheetPage";
+import { StudentVirtualAbacusHubPage } from "../modules/student/StudentVirtualAbacusHubPage";
+import { StudentAbacusArenaPage } from "../modules/student/StudentAbacusArenaPage";
+import { StudentAbacusFlashCardsPage } from "../modules/student/StudentAbacusFlashCardsPage";
+import { StudentAbacusFlashAnzanPage } from "../modules/student/StudentAbacusFlashAnzanPage";
+import { StudentAbacusSpeedChallengePage } from "../modules/student/StudentAbacusSpeedChallengePage";
+import { StudentAbacusSmartCoachPage } from "../modules/student/StudentAbacusSmartCoachPage";
+import { StudentAbacusDailyMissionsPage } from "../modules/student/StudentAbacusDailyMissionsPage";
+import { StudentAbacusMentalPage } from "../modules/student/StudentAbacusMentalPage";
 import { StudentMaterialsPage } from "../modules/student/StudentMaterialsPage";
 import { StudentMyCoursePage } from "../modules/student/StudentMyCoursePage";
 import { StudentResultsPage } from "../modules/student/StudentResultsPage";
@@ -160,6 +168,7 @@ import { StudentProgressPage } from "../modules/student/StudentProgressPage";
 import { StudentLeaderboardPage } from "../modules/student/StudentLeaderboardPage";
 import { StudentCertificatesPage } from "../modules/student/StudentCertificatesPage";
 import { StudentAttendancePage } from "../modules/student/StudentAttendancePage";
+import { StudentArenaMobileTaskPage } from "../modules/student/StudentArenaMobileTaskPage";
 import { StudentFeesPage } from "../modules/student/StudentFeesPage";
 import { StudentWeakTopicsPage } from "../modules/student/StudentWeakTopicsPage";
 import { ParentDashboardPage } from "../modules/parent/ParentDashboardPage";
@@ -174,6 +183,7 @@ function AppRouter() {
       <Route path="/unauthorized" element={<UnauthorizedPage />} />
       <Route path="/subscription-blocked" element={<SubscriptionBlockedPage />} />
       <Route path="/verify/:token" element={<CertificateVerifyPage />} />
+      <Route path="/m/arena" element={<StudentArenaMobileTaskPage />} />
 
       <Route element={<ProtectedRoute />}>
         <Route path="/reports/printable/:reportKey" element={<PrintableReportPage />} />
@@ -386,7 +396,59 @@ function AppRouter() {
             <Route path="/student/enrollments" element={<StudentEnrollmentsPage />} />
             <Route path="/student/practice" element={<StudentPracticeWorksheetPage />} />
             <Route path="/student/abacus-practice" element={<StudentAbacusPracticeWorksheetPage />} />
-            <Route path="/student/virtual-abacus" element={<VirtualAbacusPage />} />
+            <Route path="/student/virtual-abacus" element={<StudentVirtualAbacusHubPage />} />
+            <Route path="/student/virtual-abacus/classic" element={<VirtualAbacusPage />} />
+            <Route
+              path="/student/virtual-abacus/learn"
+              element={(
+                <VirtualAbacusPage
+                  learningEnabled
+                  initialMode="learning"
+                  showModeSwitch={false}
+                />
+              )}
+            />
+            <Route path="/student/virtual-abacus/arena" element={<StudentAbacusArenaPage />} />
+            <Route
+              path="/student/virtual-abacus/arena/flash-cards"
+              element={<StudentAbacusFlashCardsPage />}
+            />
+            <Route
+              path="/student/virtual-abacus/arena/flash-anzan"
+              element={<StudentAbacusFlashAnzanPage />}
+            />
+            <Route
+              path="/student/virtual-abacus/arena/audio-anzan"
+              element={
+                <StudentAbacusFlashAnzanPage
+                  deliveryMode="audio"
+                />
+              }
+            />
+            <Route
+              path="/student/virtual-abacus/arena/mental"
+              element={<StudentAbacusMentalPage />}
+            />
+            <Route
+              path="/student/virtual-abacus/arena/speed"
+              element={<StudentAbacusSpeedChallengePage />}
+            />
+            <Route
+              path="/student/virtual-abacus/arena/smart-coach"
+              element={<StudentAbacusSmartCoachPage />}
+            />
+            <Route
+              path="/student/virtual-abacus/arena/adaptive-practice"
+              element={
+                <StudentAbacusSmartCoachPage
+                  adaptiveMode
+                />
+              }
+            />
+            <Route
+              path="/student/virtual-abacus/arena/daily-missions"
+              element={<StudentAbacusDailyMissionsPage />}
+            />
             <Route path="/student/worksheets" element={<StudentWorksheetsPage />} />
             <Route path="/student/worksheets/:worksheetId" element={<StudentWorksheetAttemptPage />} />
             <Route path="/student/materials" element={<StudentMaterialsPage />} />

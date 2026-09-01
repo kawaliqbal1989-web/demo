@@ -290,7 +290,72 @@ function AppRouter() {
             <Route path="/teacher/fees" element={<TeacherFeesPage />} />
             <Route path="/teacher/notes" element={<TeacherNotesPage />} />
             <Route path="/teacher/worksheets" element={<TeacherWorksheetsPage />} />
-            <Route path="/teacher/virtual-abacus" element={<VirtualAbacusPage />} />
+            <Route
+              path="/teacher/virtual-abacus"
+              element={
+                <StudentVirtualAbacusHubPage
+                  basePath="/teacher/virtual-abacus"
+                />
+              }
+            />
+            <Route
+              path="/teacher/virtual-abacus/classic"
+              element={<VirtualAbacusPage />}
+            />
+            <Route
+              path="/teacher/virtual-abacus/learn"
+              element={
+                <VirtualAbacusPage
+                  learningEnabled
+                  initialMode="learning"
+                  showModeSwitch={false}
+                />
+              }
+            />
+            <Route
+              path="/teacher/virtual-abacus/arena"
+              element={
+                <StudentAbacusArenaPage
+                  basePath="/teacher/virtual-abacus"
+                  studentProgressEnabled={false}
+                />
+              }
+            />
+            <Route
+              path="/teacher/virtual-abacus/arena/flash-cards"
+              element={
+                <StudentAbacusFlashCardsPage
+                  arenaPath="/teacher/virtual-abacus/arena"
+                  mobileHandoffEnabled={false}
+                />
+              }
+            />
+            <Route
+              path="/teacher/virtual-abacus/arena/flash-anzan"
+              element={
+                <StudentAbacusFlashAnzanPage
+                  arenaPath="/teacher/virtual-abacus/arena"
+                />
+              }
+            />
+            <Route
+              path="/teacher/virtual-abacus/arena/audio-anzan"
+              element={
+                <StudentAbacusFlashAnzanPage
+                  deliveryMode="audio"
+                  arenaPath="/teacher/virtual-abacus/arena"
+                />
+              }
+            />
+            <Route
+              path="/teacher/virtual-abacus/arena/smart-coach"
+              element={
+                <StudentAbacusSmartCoachPage
+                  arenaPath="/teacher/virtual-abacus/arena"
+                  studentSessionEnabled={false}
+                />
+              }
+            />
             <Route path="/teacher/exam-cycles" element={<TeacherExamCyclesPage />} />
             <Route path="/teacher/competition-enrollment" element={<TeacherCompetitionEnrollmentPage />} />
             <Route

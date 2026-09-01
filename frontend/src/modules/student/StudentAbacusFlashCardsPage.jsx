@@ -113,7 +113,9 @@ function parseNumericAnswer(value) {
 function StudentAbacusFlashCardsPage({
   mobileTaskMode = false,
   mobileTaskConfig = null,
-  onMobileTaskComplete = null
+  onMobileTaskComplete = null,
+  arenaPath = "/student/virtual-abacus/arena",
+  mobileHandoffEnabled = true
 }) {
   const abacusRef = useRef(null);
   const startedAtRef = useRef(Date.now());
@@ -534,7 +536,7 @@ function StudentAbacusFlashCardsPage({
 
           <Link
             className="button secondary"
-            to="/student/virtual-abacus/arena"
+            to={arenaPath}
             style={{ width: "auto" }}
           >
             Back to Arena
@@ -663,18 +665,20 @@ function StudentAbacusFlashCardsPage({
             Start Flash Cards
           </button>
 
-          <ArenaMobileHandoff
-            title="Flash Cards"
-            activityKey="flash-cards"
-            config={{
-              mode,
-              digits,
-              cardCount,
-              flashDuration,
-              operationMode
-            }}
-            buttonLabel="📱 Start Flash Cards on Mobile"
-          />
+          {mobileHandoffEnabled ? (
+            <ArenaMobileHandoff
+              title="Flash Cards"
+              activityKey="flash-cards"
+              config={{
+                mode,
+                digits,
+                cardCount,
+                flashDuration,
+                operationMode
+              }}
+              buttonLabel="📱 Start Flash Cards on Mobile"
+            />
+          ) : null}
         </div>
       </div>
     );
@@ -700,7 +704,7 @@ function StudentAbacusFlashCardsPage({
           {!mobileTaskMode ? (
             <Link
               className="button secondary"
-              to="/student/virtual-abacus/arena"
+              to={arenaPath}
               style={{ width: "auto" }}
             >
               Back to Arena
@@ -1147,7 +1151,7 @@ function StudentAbacusFlashCardsPage({
 
             <Link
               className="button secondary"
-              to="/student/virtual-abacus/arena"
+              to={arenaPath}
               style={{ width: "auto" }}
             >
               Back to Arena

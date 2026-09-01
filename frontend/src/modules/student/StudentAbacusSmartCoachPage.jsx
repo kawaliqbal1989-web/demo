@@ -277,7 +277,9 @@ function emptyStats() {
 }
 
 function StudentAbacusSmartCoachPage({
-  adaptiveMode = false
+  adaptiveMode = false,
+  arenaPath = "/student/virtual-abacus/arena",
+  studentSessionEnabled = true
 } = {}) {
   const abacusRef = useRef(null);
   const correctAbacusRef = useRef(null);
@@ -461,6 +463,16 @@ function StudentAbacusSmartCoachPage({
   useEffect(() => {
     let cancelled = false;
 
+    if (!studentSessionEnabled) {
+      setHistoricalMistakeSessions([]);
+      setHistoricalMistakesError(null);
+      setHistoricalMistakesLoading(false);
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     async function loadHistoricalMistakes() {
       setHistoricalMistakesLoading(true);
       setHistoricalMistakesError(null);
@@ -506,7 +518,7 @@ function StudentAbacusSmartCoachPage({
     return () => {
       cancelled = true;
     };
-  }, [historicalMistakesReloadKey]);
+  }, [historicalMistakesReloadKey, studentSessionEnabled]);
 
   const prepareQuestion = (
     index,
@@ -1060,6 +1072,7 @@ function StudentAbacusSmartCoachPage({
 
   useEffect(() => {
     if (
+      !studentSessionEnabled ||
       phase !== "complete" ||
       sessionSaveStartedRef.current ||
       stats.solved <= 0
@@ -1111,6 +1124,7 @@ function StudentAbacusSmartCoachPage({
       console.warn("smart_coach_session_save_failed", error);
     });
   }, [
+    studentSessionEnabled,
     activeFocusExponent,
     adaptiveMode,
     effectiveTrainingMode,
@@ -1187,7 +1201,7 @@ function StudentAbacusSmartCoachPage({
 
           <Link
             className="button secondary"
-            to="/student/virtual-abacus/arena"
+            to={arenaPath}
             style={{ width: "auto" }}
           >
             Back to Arena
@@ -1929,7 +1943,7 @@ function StudentAbacusSmartCoachPage({
 
           <Link
             className="button secondary"
-            to="/student/virtual-abacus/arena"
+            to={arenaPath}
           >
             Back to Arena
           </Link>

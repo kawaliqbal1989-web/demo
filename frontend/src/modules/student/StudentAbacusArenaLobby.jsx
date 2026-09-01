@@ -86,7 +86,13 @@ function ProgressMeter({ value, target }) {
   );
 }
 
-function StudentAbacusArenaLobby() {
+function StudentAbacusArenaLobby({
+  basePath = "/student/virtual-abacus",
+  studentProgressEnabled = true
+} = {}) {
+  const arenaPath = `${basePath}/arena`;
+  const resolveArenaPath = (path) =>
+    String(path || "").replace("/student/virtual-abacus", basePath);
   const navigate = useNavigate();
   const [missions, setMissions] = useState([]);
   const [streaks, setStreaks] = useState({});
@@ -114,6 +120,21 @@ function StudentAbacusArenaLobby() {
 
   useEffect(() => {
     let cancelled = false;
+
+    if (!studentProgressEnabled) {
+      setPulseErrors({
+        missions: false,
+        streaks: false,
+        achievements: false,
+        practiceTrends: false,
+        studentProfile: false
+      });
+      setLoading(false);
+
+      return () => {
+        cancelled = true;
+      };
+    }
 
     async function loadArenaPulse() {
       setLoading(true);
@@ -193,7 +214,7 @@ function StudentAbacusArenaLobby() {
     return () => {
       cancelled = true;
     };
-  }, [pulseReloadKey]);
+  }, [pulseReloadKey, studentProgressEnabled]);
 
   const retryArenaPulse = () => {
     setPulseReloadKey((current) => current + 1);
@@ -216,7 +237,7 @@ function StudentAbacusArenaLobby() {
 
   const practice = streaks?.practice || {};
   const attendance = streaks?.attendance || {};
-  const hasPulseErrors = Object.values(pulseErrors).some(Boolean);
+  const hasPulseErrors = studentProgressEnabled && Object.values(pulseErrors).some(Boolean);
   const failedPulseLabels = [
     pulseErrors.missions ? "daily missions" : null,
     pulseErrors.streaks ? "streaks" : null,
@@ -263,15 +284,20 @@ function StudentAbacusArenaLobby() {
     Number(arenaXp?.xpToNextLevel) || arenaXpPerLevel
   );
 
-  const primaryAction = missionSummary.openMission?.actionUrl
+  const primaryAction = !studentProgressEnabled
     ? {
-        path: missionSummary.openMission.actionUrl,
-        label: missionSummary.openMission.actionLabel || "Continue Mission"
+        path: `${arenaPath}/flash-cards`,
+        label: "Start Flash Cards"
       }
-    : {
-        path: "/student/virtual-abacus/arena/daily-missions",
-        label: "Open Today's Mission"
-      };
+    : missionSummary.openMission?.actionUrl
+      ? {
+          path: missionSummary.openMission.actionUrl,
+          label: missionSummary.openMission.actionLabel || "Continue Mission"
+        }
+      : {
+          path: `${arenaPath}/daily-missions`,
+          label: "Open Today's Mission"
+        };
 
   async function startMasteryChallenge() {
     if (startingMastery) {
@@ -882,7 +908,7 @@ function StudentAbacusArenaLobby() {
           <div className="muted">Virtual Abacus</div>
           <strong>Choose a training activity and start practising.</strong>
         </div>
-        <Link className="button secondary arena-lobby__back" to="/student/virtual-abacus">
+        <Link className="button secondary arena-lobby__back" to={basePath}>
           Back to Virtual Abacus
         </Link>
       </div>
@@ -935,19 +961,19 @@ function StudentAbacusArenaLobby() {
             <div className="arena-lobby__hero-stat">
               <span>Practice streak</span>
               <strong>
-                {loading ? "…" : pulseErrors.streaks ? "—" : `${practice.current ?? 0}d 🔥`}
+                {!studentProgressEnabled ? "—" : loading ? "…" : pulseErrors.streaks ? "—" : `${practice.current ?? 0}d 🔥`}
               </strong>
             </div>
             <div className="arena-lobby__hero-stat">
               <span>Best run</span>
               <strong>
-                {loading ? "…" : pulseErrors.streaks ? "—" : `${practice.best ?? 0}d`}
+                {!studentProgressEnabled ? "—" : loading ? "…" : pulseErrors.streaks ? "—" : `${practice.best ?? 0}d`}
               </strong>
             </div>
             <div className="arena-lobby__hero-stat">
               <span>Achievements</span>
               <strong>
-                {loading ? "…" : pulseErrors.achievements ? "—" : `${achievementTotal} 🏆`}
+                {!studentProgressEnabled ? "—" : loading ? "…" : pulseErrors.achievements ? "—" : `${achievementTotal} 🏆`}
               </strong>
             </div>
           </div>
@@ -969,7 +995,7 @@ function StudentAbacusArenaLobby() {
               className={`arena-lobby__activity arena-lobby__activity--${item.tone}${
                 item.featured ? " is-featured" : ""
               }`}
-              to={item.path}
+              to={resolveArenaPath(item.path)}
             >
               <div className="arena-lobby__activity-top">
                 <div className="arena-lobby__activity-icon">{item.icon}</div>
@@ -1011,9 +1037,9 @@ function StudentAbacusArenaLobby() {
           </div>
           <Link
             className="arena-lobby__text-link"
-            to="/student/virtual-abacus/arena/daily-missions"
+            to={studentProgressEnabled ? `${arenaPath}/daily-missions` : `${arenaPath}/flash-cards`}
           >
-            View all →
+            {studentProgressEnabled ? "View all →" : "Start practice →"}
           </Link>
         </div>
 
@@ -1036,7 +1062,9 @@ function StudentAbacusArenaLobby() {
                 {pulseErrors.missions
                   ? "Today's mission could not be refreshed. Retry above without leaving the Arena."
                   : missionSummary.openMission?.description ||
-                    "Daily Missions will guide the next useful activity from your current work."}
+                    (studentProgressEnabled
+                      ? "Daily Missions will guide the next useful activity from your current work."
+                      : "Choose any Arena activity to demonstrate or practise with the same training engine.")}
               </p>
 
               <div className="arena-lobby__mission-progress">
@@ -1055,7 +1083,7 @@ function StudentAbacusArenaLobby() {
         </div>
       </section>
 
-      <section className="arena-lobby__section" id="progress">
+      <section className="arena-lobby__section" id="progress" style={{ display: studentProgressEnabled ? undefined : "none" }}>
         <div className="arena-lobby__section-head">
           <div>
             <h2>My Progress</h2>
@@ -1120,7 +1148,7 @@ function StudentAbacusArenaLobby() {
         </div>
       </section>
 
-      <section className="arena-lobby__section" id="challenge">
+      <section className="arena-lobby__section" id="challenge" style={{ display: studentProgressEnabled ? undefined : "none" }}>
         <div className="arena-lobby__section-head">
           <div>
             <h2>Level Challenge</h2>

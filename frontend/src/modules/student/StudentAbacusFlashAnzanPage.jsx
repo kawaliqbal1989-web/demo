@@ -127,7 +127,8 @@ function parseNumericAnswer(value) {
 }
 
 function StudentAbacusFlashAnzanPage({
-  deliveryMode = "visual"
+  deliveryMode = "visual",
+  arenaPath = "/student/virtual-abacus/arena"
 }) {
   const answerStartedAtRef = useRef(Date.now());
 
@@ -488,8 +489,8 @@ function StudentAbacusFlashAnzanPage({
   );
 
   const switchModePath = isAudioMode
-    ? "/student/virtual-abacus/arena/flash-anzan"
-    : "/student/virtual-abacus/arena/audio-anzan";
+    ? `${arenaPath}/flash-anzan`
+    : `${arenaPath}/audio-anzan`;
 
   const switchModeLabel = isAudioMode
     ? "Try Display Dictation"
@@ -517,7 +518,7 @@ function StudentAbacusFlashAnzanPage({
 
           <Link
             className="button secondary"
-            to="/student/virtual-abacus/arena"
+            to={arenaPath}
             style={{ width: "auto" }}
           >
             Back to Arena
@@ -700,8 +701,8 @@ function StudentAbacusFlashAnzanPage({
             title={title}
             path={
               isAudioMode
-                ? "/student/virtual-abacus/arena/audio-anzan"
-                : "/student/virtual-abacus/arena/flash-anzan"
+                ? `${arenaPath}/audio-anzan`
+                : `${arenaPath}/flash-anzan`
             }
             params={{
               digits,
@@ -991,7 +992,7 @@ function StudentAbacusFlashAnzanPage({
 
             <Link
               className="button secondary"
-              to="/student/virtual-abacus/arena"
+              to={arenaPath}
               style={{ width: "auto" }}
             >
               Back to Arena

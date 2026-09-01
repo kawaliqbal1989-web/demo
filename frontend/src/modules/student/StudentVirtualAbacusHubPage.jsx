@@ -24,7 +24,7 @@ const OPTIONS = [
   }
 ];
 
-function StudentVirtualAbacusHubPage() {
+function StudentVirtualAbacusHubPage({ basePath = "/student/virtual-abacus" } = {}) {
   return (
     <div className="container">
       <div className="page-head">
@@ -62,7 +62,7 @@ function StudentVirtualAbacusHubPage() {
 
             <Link
               className="button"
-              to={option.path}
+              to={option.path.replace("/student/virtual-abacus", basePath)}
               style={{
                 marginTop: "auto",
                 textAlign: "center"
